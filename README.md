@@ -5,7 +5,7 @@
 
 # GigaSpatial
 
-# ![GigaSpatial logo](https://github.com/unicef/giga-spatial/docs/assets/logo.png)
+# ![GigaSpatial logo](https://github.com/unicef/giga-spatial/blob/main/docs/assets/logo.png)
 Giga is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice. 
 Giga maps schools’ Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity. 
 
