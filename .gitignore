@@ -1,0 +1,32 @@
+/__pycache__
+__pycache__/
+**/__pycache__/
+.ipynb_checkpoints
+.ipynb_aml_checkpoints
+*/.ipynb_checkpoints/*
+*/.ipynb_aml_checkpoints/*
+*.amltmp
+*.amlignore
+*.amlignore.amltmp
+.DS_Store
+
+# Data files
+*.csv
+*.csv.gz
+*.zip
+*.tif
+*.pickle
+*.parquet
+*.xlsx
+*.mapbox_token
+*.pbf
+*.html
+*.amltmp
+*.gpkg
+*.geojson
+*.json
+.env
+profile.share
+
+# tests
+*.ipynb
