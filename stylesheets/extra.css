@@ -1,0 +1,15 @@
+:root {
+    --md-primary-fg-color: #277AFF;  /* Custom deep purple */
+    --md-accent-fg-color: #00BCD4;   /* Custom cyan */
+  }
+  
+  [data-md-color-scheme="slate"] {
+    --md-primary-fg-color: #277AFF;  /* Custom cyan for dark mode */
+    --md-accent-fg-color: #FFAC27;   /* Custom amber */
+  }
+
+  [data-md-color-scheme="default"] {
+    --md-primary-fg-color: #277AFF;  /* Custom cyan for dark mode */
+    --md-accent-fg-color: #FFAC27;   /* Custom amber */
+  }
+
