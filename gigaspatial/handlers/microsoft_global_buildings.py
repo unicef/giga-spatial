@@ -223,7 +223,7 @@ class MSBuildingsConfig:
         return pd.DataFrame(columns=self.df_tiles.columns)
 
     def get_tile_path(self, quadkey: str, location: str) -> Path:
-        return self.BASE_PATH / self.upload_date / location / f"{quadkey}.csv.gz"
+        return self.BASE_PATH / location / self.upload_date / f"{quadkey}.csv.gz"
 
 
 class MSBuildingsDownloader:

@@ -6,7 +6,7 @@ from tqdm import tqdm
 import geopandas as gpd
 import pandas as pd
 from owslib.wms import WebMapService
-
+from time import sleep
 from gigaspatial.grid.mercator_tiles import MercatorTiles
 from gigaspatial.utils.logging import get_logger
 from gigaspatial.core.io.data_store import DataStore
@@ -72,6 +72,12 @@ class MaxarConfig(BaseModel):
         default="EPSG:4326"
     )
 
+    max_retries: int = Field(
+        default=3, description="Number of retries for failed image downloads")
+    
+    retry_delay: int = Field(
+        default=5, description="Delay in seconds between retries")
+
     @field_validator("username", "password", "connection_string")
     @classmethod
     def validate_non_empty(cls, value: str, field) -> str:
@@ -118,29 +124,34 @@ class MaxarImageDownloader:
 
     def _download_single_image(self, bbox, output_path, size) -> bool:
         """Download a single image from bbox and pixel size"""
-        try:
-            img_data = self.wms.getmap(
-                bbox=bbox,
-                layers=self.config.layers,
-                srs=self.config.data_crs,
-                size=size,
-                featureProfile=self.config.feature_profile,
-                coverage_cql_filter=self.config.coverage_cql_filter,
-                exceptions=self.config.exceptions,
-                transparent=self.config.transparent,
-                format=self.config.image_format,
-            )
-            self.data_store.write_file(output_path, img_data.read())
-            return True
-        except Exception as e:
-            self.logger.warning(f"Error downloading {output_path.name}: {str(e)}")
-            return False
+        for attempt in range(self.config.max_retries):
+            try:
+                img_data = self.wms.getmap(
+                    bbox=bbox,
+                    layers=self.config.layers,
+                    srs=self.config.data_crs,
+                    size=size,
+                    featureProfile=self.config.feature_profile,
+                    coverage_cql_filter=self.config.coverage_cql_filter,
+                    exceptions=self.config.exceptions,
+                    transparent=self.config.transparent,
+                    format=self.config.image_format,
+                )
+                self.data_store.write_file(output_path, img_data.read())
+                return True
+            except Exception as e:
+                self.logger.warning(f"Attempt {attempt + 1} of downloading {output_path.name} failed: {str(e)}")
+                if attempt < self.max_retries - 1:
+                    sleep(self.config.retry_delay)
+                else:
+                    self.logger.warning(f"Failed to download {output_path.name} after {self.config.max_retries} attemps: {str(e)}")
+                    return False
 
     def download_images_by_tiles(
         self,
         mercator_tiles: "MercatorTiles",
         output_dir: Union[str, Path],
-        image_size: Tuple[int, int] = (500, 500),
+        image_size: Tuple[int, int] = (512, 512),
         image_prefix: str = "maxar_image_",
     ) -> None:
         """
@@ -150,9 +161,9 @@ class MaxarImageDownloader:
             mercator_tiles: MercatorTiles instance containing quadkeys
             output_dir: Directory to save images
             image_size: Tuple of (width, height) for output images
+            image_prefix: Prefix for output image names
         """
         output_dir = Path(output_dir)
-        # output_dir.mkdir(parents=True, exist_ok=True)
 
         image_size_str = f"{image_size[0]}x{image_size[1]}"
         total_tiles = len(mercator_tiles.quadkeys)
@@ -194,7 +205,7 @@ class MaxarImageDownloader:
         self,
         gdf: gpd.GeoDataFrame,
         output_dir: Union[str, Path],
-        image_size: Tuple[int, int],
+        image_size: Tuple[int, int] = (512, 512),
         image_prefix: str = "maxar_image_",
     ) -> None:
         """
@@ -204,9 +215,9 @@ class MaxarImageDownloader:
             gdf_points: GeoDataFrame containing bounding box polygons
             output_dir: Directory to save images
             image_size: Tuple of (width, height) for output images
+            image_prefix: Prefix for output image names
         """
         output_dir = Path(output_dir)
-        # output_dir.mkdir(parents=True, exist_ok=True)
 
         image_size_str = f"{image_size[0]}x{image_size[1]}"
         total_images = len(gdf)
@@ -245,7 +256,7 @@ class MaxarImageDownloader:
         data: Union[pd.DataFrame, List[Tuple[float, float]]],
         res_meters_pixel: float,
         output_dir: Union[str, Path],
-        bbox_size: int,
+        image_size: Tuple[int, int] = (512, 512),
         image_prefix: str = "maxar_image_",
     ) -> None:
         """
@@ -255,7 +266,8 @@ class MaxarImageDownloader:
             data: Either a DataFrame with either latitude/longitude columns or a geometry column or a list of (lat, lon) tuples
             res_meters_pixel: resolution in meters per pixel
             output_dir: Directory to save images
-            bbox_size: bbox side length in meters
+            image_size: Tuple of (width, height) for output images
+            image_prefix: Prefix for output image names
         """
 
         if isinstance(data, pd.DataFrame):
@@ -265,11 +277,7 @@ class MaxarImageDownloader:
 
         gdf = convert_to_geodataframe(coordinates_df)
 
-        pixels = calculate_pixels_at_location(gdf, res_meters_pixel, bbox_size)
-
-        image_size = (pixels, pixels)
-
-        buffered_gdf = buffer_geodataframe(gdf, bbox_size / 2, cap_style="square")
+        buffered_gdf = buffer_geodataframe(gdf, res_meters_pixel / 2, cap_style="square")
 
         buffered_gdf = buffered_gdf.to_crs(self.config.data_crs)
 

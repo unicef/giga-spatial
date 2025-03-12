@@ -41,7 +41,6 @@ To verify that GigaSpatial is installed correctly, you can run:
 
 ```python
 import gigaspatial
-print(gigaspatial.__version__)
 ```
 
 ## Troubleshooting

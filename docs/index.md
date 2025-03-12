@@ -28,4 +28,4 @@ If you need help using GigaSpatial, please check out our:
 
 ## License
 
-GigaSpatial is released under the MIT License. See the LICENSE file for more details. 
+GigaSpatial is released under the AGPL-3.0 License. See the LICENSE file for more details. 

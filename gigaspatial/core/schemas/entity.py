@@ -74,7 +74,8 @@ class EntityTable(BaseModel, Generic[E]):
         cls: Type["EntityTable"],
         file_path: Union[str, Path],
         entity_class: Type[E],
-        data_store: Optional[DataStore] = None**kwargs,
+        data_store: Optional[DataStore] = None,
+        **kwargs,
     ) -> "EntityTable":
         """
         Create an EntityTable instance from a file.

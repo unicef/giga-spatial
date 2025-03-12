@@ -1,114 +1,112 @@
 # import requests
 import geopandas as gpd
-from typing import List
-from dataclasses import dataclass
-from shapely.geometry import Polygon
-import country_converter as coco
+from typing import List, Optional, Union
+from pydantic.dataclasses import dataclass, Field
+from pydantic import ConfigDict
+from shapely.geometry import Polygon, MultiPolygon
+from shapely.strtree import STRtree
+from pathlib import Path
+import pycountry
 import duckdb
 
 from gigaspatial.utils.logging import get_logger
+from gigaspatial.handlers.boundaries import AdminBoundaries
+from gigaspatial.core.io.data_store import DataStore
 
 
-@dataclass
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class OvertureAmenityFetcher:
     """
     A class to fetch and process amenity locations from OpenStreetMap using the Overpass API.
     """
+    # constants
+    release: Optional[str] = "2024-12-18.0"
+    base_url: Optional[str] = "s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
 
-    country_iso3: str
-    amenity_types: List[str]
+    # user config
+    country: str = Field(...)
+    amenity_types: List[str] = Field(..., description="List of amenity types to fetch")
+    geom: Union[Polygon, MultiPolygon] = None
 
     def __post_init__(self):
         """Validate inputs and set up logging."""
-        self.country_iso2 = coco.convert(names=self.country_iso3, to="ISO2")
+        try:
+            self.country = pycountry.countries.lookup(self.country).alpha_2
+        except LookupError:
+            raise ValueError(f"Invalid country code provided: {self.country}")
+        
+        self.base_url = self.base_url.format(release=self.release)
         self.logger = get_logger(__name__)
+
+        self.connection = self._set_connection()
 
     def _set_connection(self):
         """Set the connection to the DB"""
         db = duckdb.connect()
-        db.execute("INSTALL spatial")
-        db.execute("INSTALL httpfs")
-        db.execute(
-            """
-        LOAD spatial;
-        LOAD httpfs;
-        SET s3_region='us-west-2';
-        """
-        )
+        db.install_extension("spatial")
+        db.load_extension("spatial")
         return db
+    
+    def _load_country_geometry(
+        self,
+        data_store: Optional[DataStore] = None,
+        country_geom_path: Optional[Union[str, Path]] = None,
+    ) -> Union[Polygon, MultiPolygon]:
+        """Load country boundary geometry from DataStore or GADM."""
 
-    def _build_query(self, release: str, geometry=None) -> str:
-        """
-        Constructs and returns the query
-        """
-        url = f"s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
-        if geometry == None:
-            query = f"""
-                    SELECT
-                        id as id,
-                        names.primary AS name,
-                        categories.primary as category,
-                        ROUND(confidence,2) as confidence,
-                        ST_AsText(ST_GeomFromWKB(geometry)) AS geometry
-                    FROM 
-                        read_parquet('{url}')
-                    WHERE
-                        json_extract_string(json_extract(addresses::json, '$[0]'), '$.country') = '{self.sountry_iso2}'
-                        and (
-                    """
+        gdf_admin0 = AdminBoundaries.create(
+            country_code=pycountry.countries.lookup(self.country).alpha_3, admin_level=0, data_store=data_store, path=country_geom_path
+        ).to_geodataframe()
+
+        return gdf_admin0.geometry.iloc[0]
+
+    def _build_query(self, match_pattern: bool = False, **kwargs) -> str:
+        """Constructs and returns the query"""
+
+        if match_pattern:
+            amenity_query = " OR ".join([f"category ilike '%{amenity}%'" for amenity in self.amenity_types])
         else:
-            minx, miny, maxx, maxy = geometry.bounds
-            query = f"""
-                    SELECT
-                        id as id,
-                        names.primary AS name,
-                        categories.primary as category,
-                        ROUND(confidence,2) as confidence,
-                        ST_AsText(ST_GeomFromWKB(geometry)) AS geometry
-                    FROM 
-                        read_parquet('{url}')
-                    WHERE
-                        bbox.xmin > {minx}
-                        and bbox.ymin > {miny}
-                        and bbox.xmax < {maxx}
-                        and bbox.ymax < {maxy}
-                        and (
-                    """
+            amenity_query = " OR ".join([f"category == '{amenity}'" for amenity in self.amenity_types])
 
-        for amenity in self.amenity_types:
-            query = query + f"category=='{amenity}' or "
-
-        query = query[:-4] + ")"
-
-        return query
-
-    def get_locations(self, release: str, geometry: Polygon = None) -> gpd.GeoDataFrame:
+        query = """
+        SELECT id,
+            names.primary AS name,
+            ROUND(confidence,2) as confidence,
+            categories.primary AS category,
+            ST_AsText(geometry) as geometry,
+        FROM read_parquet('s3://overturemaps-us-west-2/release/2024-12-18.0/theme=places/type=place/*',
+            hive_partitioning=1)
+        WHERE bbox.xmin > {}
+            AND bbox.ymin > {} 
+            AND bbox.xmax <  {}
+            AND bbox.ymax < {}
+            AND ({})
         """
-        Fetch and process amenity locations.
 
-        Args:
-            release (str): The overture release name.
-            geometry (Polygon, optional): the polygon of the country of interest
+        if not self.geom:
+            self.geom = self._load_country_geometry()
 
-        Returns:
-            gpd.GeoDataFrame: Processed amenity locations
-        """
-        self.logger.info("Fetching amenity locations from Overture...")
-        db = self._set_connection()
-        query = self._build_query(release, geometry)
+        return query.format(*self.geom.bounds, amenity_query)
+        
 
-        df = db.execute(query).fetchdf()
+    def fetch_locations(self, match_pattern: bool = False, **kwargs) -> gpd.GeoDataFrame:
+        """Fetch and process amenity locations."""
+        self.logger.info("Fetching amenity locations from Overture DB...")
+
+        query = self._build_query(match_pattern=match_pattern, **kwargs)
+
+        df = self.connection.execute(
+            query
+        ).df()
 
         self.logger.info("Processing geometries")
-        gdf = gpd.GeoDataFrame(df)
-        gdf["geometry"] = gpd.GeoSeries.from_wkt(gdf["geometry"])
-        gdf = gdf.set_geometry("geometry")
+        gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df["geometry"]), crs="EPSG:4326")
 
-        if geometry != None:
-            self.logger.info("Filtering within country border")
-            locations = gdf[gdf["geometry"].within(geometry)]
-        else:
-            locations = gdf
+        # filter by geometry boundary
+        s = STRtree(gdf.geometry)
+        result = s.query(self.geom, predicate="intersects")
+        
+        locations = gdf.iloc[result].reset_index()
 
         self.logger.info(f"Successfully processed {len(locations)} amenity locations")
         return locations

@@ -54,14 +54,14 @@ nav:
     - Configuration: getting-started/configuration.md
   - User Guide:
     - Overview: user-guide/index.md
-    - Basic Usage: user-guide/basic-usage.md
-    - Advanced Features: user-guide/advanced-features.md
-    - Best Practices: user-guide/best-practices.md
+    #- Basic Usage: user-guide/basic-usage.md
+    #- Advanced Features: user-guide/advanced-features.md
+    #- Best Practices: user-guide/best-practices.md
   - API Reference:
     - Overview: api/index.md
-    - Core Functions: api/core.md
-    - Utilities: api/utils.md
-    - Data Types: api/data-types.md
+    #- Core Functions: api/core.md
+    #- Utilities: api/utils.md
+    #- Data Types: api/data-types.md
   - Examples:
     - Overview: examples/index.md
     - Basic Examples: examples/basic.md
@@ -69,12 +69,12 @@ nav:
     - Use Cases: examples/use-cases.md
   - Contributing:
     - How to Contribute: contributing.md
-    - Development Setup: contributing/development-setup.md
-    - Code Style Guide: contributing/code-style.md
+    #- Development Setup: contributing/development-setup.md
+    #- Code Style Guide: contributing/code-style.md
   - About:
     - Changelog: changelog.md
     - License: license.md
-    - Credits: credits.md
+    #- Credits: credits.md
 
 markdown_extensions:
   - admonition
