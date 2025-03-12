@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.2.2] - 2025-03-12
+- **Refactored Handlers**: Improved structure and performance of maxar_image.py, osm.py and overture.py to enhance geospatial data handling.
+
+- **Documentation Improvements**:
+	- Updated index.md, advanced.md, and use-cases.md for better clarity.
+	- Added installation.md under docs/getting-started for setup guidance.
+	- Refined API documentation in docs/api/index.md.
+
+- **Configuration & Setup Enhancements**:
+	•	Improved .gitignore to exclude unnecessary files.
+	•	Updated mkdocs.yml for better documentation structuring.
+- **Bug Fixes & Minor Optimizations**: Small fixes and improvements across the codebase for stability and maintainability.
+
 ## [v0.2.1] - 2025-02-28
 ### Added
 - Introduced WorldPopDownloader feature to handlers
