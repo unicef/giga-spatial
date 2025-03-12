@@ -137,7 +137,7 @@ class MaxarImageDownloader:
                     transparent=self.config.transparent,
                     format=self.config.image_format,
                 )
-                self.data_store.write_file(output_path, img_data.read())
+                self.data_store.write_file(str(output_path), img_data.read())
                 return True
             except Exception as e:
                 self.logger.warning(f"Attempt {attempt + 1} of downloading {output_path.name} failed: {str(e)}")

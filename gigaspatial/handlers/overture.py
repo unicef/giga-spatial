@@ -106,7 +106,7 @@ class OvertureAmenityFetcher:
         s = STRtree(gdf.geometry)
         result = s.query(self.geom, predicate="intersects")
         
-        locations = gdf.iloc[result].reset_index()
+        locations = gdf.iloc[result].reset_index(drop=True)
 
         self.logger.info(f"Successfully processed {len(locations)} amenity locations")
         return locations
