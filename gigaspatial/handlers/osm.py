@@ -53,12 +53,15 @@ class OSMLocationFetcher:
 
         # Query for nodes and relations (with center output)
         nodes_relations_queries = []
-        for category, types in self.location_types.items():
-            for _type in types:
-                nodes_relations_queries.extend([
-                    f"node[{category}={_type}]{date_filter}(area.searchArea);",
-                    f"relation[{category}={_type}]{date_filter}(area.searchArea);"
-                ])
+        for _type in self.location_types:
+            values = self.location_types[_type]
+            
+            nodes_relations_queries.extend(
+                [
+                    f"""node["{_type}"~"^({"|".join(values)})"]{date_filter}(area.searchArea);""",
+                    f"""relation["{_type}"~"^({"|".join(values)})"]{date_filter}(area.searchArea);""",
+                ]
+            )
 
         nodes_relations_queries = "\n".join(nodes_relations_queries)
 
@@ -73,9 +76,10 @@ class OSMLocationFetcher:
 
         # Query for ways (with geometry output)
         ways_queries = []
-        for category, types in self.location_types.items():
-            for _type in types:
-                ways_queries.append(f"way[{category}={_type}]{date_filter}(area.searchArea);")
+        for _type in self.location_types:
+            values = self.location_types[_type]
+            ways_queries.append(f"""way["{_type}"~"^({"|".join(values)})"]{date_filter}(area.searchArea);""")
+
 
         ways_queries = "\n".join(ways_queries)
 
@@ -151,7 +155,7 @@ class OSMLocationFetcher:
                     "geometry": point_geom,
                     "latitude": _lat,
                     "longitude": _lon,
-                    "tags": tags,
+                    #"tags": tags,
                     "matching_categories": list(matching_categories.keys())
                 })
             
@@ -191,7 +195,7 @@ class OSMLocationFetcher:
                     "geometry": polygon,
                     "latitude": centroid.y,
                     "longitude": centroid.x,
-                    "tags": tags,
+                    #"tags": tags,
                     "matching_categories": list(matching_categories.keys())
                 })
             
