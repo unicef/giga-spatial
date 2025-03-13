@@ -5,11 +5,11 @@ This guide provides examples of how to use various data handlers in GigaSpatial 
 ## Population Data (WorldPop)
 
 ```python
-from gigaspatial.handlers.worldpop import WorldPopHandler
+from gigaspatial.handlers.worldpop import WorldPopDownloader
 
 # Get population data for a specific country and year
 config = {
-    "country_code": "KEN",
+    "country": "KEN",
     "year": 2020,
 }
 
@@ -82,7 +82,7 @@ list_of_paths = mgb.download_by_points(
 ### Maxar Imagery
 
 ```python
-from gigaspatial.handlers.maxar_image import MaxarImageHandler
+from gigaspatial.handlers.maxar_image import MaxarImageDownloader
 
 # Initialize woith default config which reads credentials config from your environment
 maxar = MaxarImageDownloader()
@@ -161,21 +161,21 @@ gdf = admin_boundaries.to_geodataframe()
 ## OpenStreetMap Data
 
 ```python
-from gigaspatial.handlers.osm import OSMAmenityFetcher
+from gigaspatial.handlers.osm import OSMLocationFetcher
 
 # Example 1: Fetching school amenities in Kenya
-fetcher = OSMAmenityFetcher(country_iso2="KE", amenity_types=["school"])
-schools_df = fetcher.get_locations()
+fetcher = OSMAmenityFetcher(country="KE", location_types=["school"])
+schools_df = fetcher.fetch_locations()
 print(schools_df.head())
 
 # Example 2: Fetching hospital and clinic amenities in Tanzania
-fetcher = OSMAmenityFetcher(country_iso2="TZ", amenity_types=["hospital", "clinic"])
-healthcare_df = fetcher.get_locations()
+fetcher = OSMLocationFetcher(country="TZ", location_types=["hospital", "clinic"])
+healthcare_df = fetcher.fetch_locations()
 print(healthcare_df.head())
 
 # Example 3: Fetching restaurant amenities in Ghana since 2020
-fetcher = OSMAmenityFetcher(country_iso2="GH", amenity_types=["restaurant"])
-restaurants_df = fetcher.get_locations(since_year=2020)
+fetcher = OSMLocationFetcher(country="GH", location_types=["restaurant"])
+restaurants_df = fetcher.fetch_locations(since_year=2020)
 print(restaurants_df.head())
 ```
 
@@ -187,15 +187,15 @@ from shapely.geometry import Polygon
 import geopandas as gpd
 
 # Initialize the fetcher with country ISO3 code and amenity types
-fetcher = OvertureAmenityFetcher(country_iso3='KEN', amenity_types=['school', 'hospital'])
+fetcher = OvertureAmenityFetcher(country='KEN', amenity_types=['school', 'hospital'])
 
 # Example 1: Fetching all amenities for a given release
-gdf_all = fetcher.get_locations(release='2024-01-01')
+gdf_all = fetcher.fetch_locations(release='2024-01-01')
 print(gdf_all.head())
 
 # Example 2: Fetching amenities within a specific bounding polygon
 polygon = Polygon([(36.8, -1.3), (36.9, -1.3), (36.9, -1.2), (36.8, -1.2), (36.8, -1.3)])
-gdf_filtered = fetcher.get_locations(release='2024-01-01', geometry=polygon)
+gdf_filtered = fetcher.fetch_locations(release='2024-01-01', geometry=polygon)
 print(gdf_filtered.head())
 ```
 
