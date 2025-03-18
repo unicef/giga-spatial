@@ -214,7 +214,8 @@ def convert_to_geodataframe(data: pd.DataFrame, lat_col: str=None, lon_col: str=
                     raise ValueError("Missing values found in geometry column")
 
                 # Convert WKT strings to geometry objects
-                geometry = df["geometry"].apply(wkt.loads)
+                #geometry = df["geometry"].apply(wkt.loads)
+                geometry = df["geometry"].apply(lambda x: wkt.loads(x) if isinstance(x, str) else x)
                 df = df.drop("geometry", axis=1)  # Remove WKT column
 
             except (ValueError, TypeError) as e:

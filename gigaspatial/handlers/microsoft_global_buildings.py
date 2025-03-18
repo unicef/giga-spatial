@@ -44,6 +44,7 @@ class MSBuildingsConfig:
     SIMILARITY_SCORE: float = 0.8
     DEFAULT_MAPPING: Dict[str, str] = field(
         default_factory=lambda: {
+            "AntiguaandBarbuda":"ATG",
             "Bonaire": "BES",
             "Brunei": "BRN",
             "IvoryCoast": "CIV",
@@ -180,12 +181,14 @@ class MSBuildingsConfig:
         country_tiles = country_mercator.filter_quadkeys(self.df_tiles.quadkey)
 
         if country_tiles:
-            filtered_tiles = self.df_tiles[
-                self.df_tiles[self.df_tiles.country.isnull()].quadkey.isin(
-                    country_tiles.quadkeys
-                )
-            ]
-            # filtered_tiles["country"] = country_code
+            null_country_tiles = self.df_tiles.loc[self.df_tiles.country.isnull(),:]
+            filtered_tiles = null_country_tiles[null_country_tiles.quadkey.isin(country_tiles.quadkeys)]
+            # filtered_tiles = self.df_tiles[
+            #     self.df_tiles[self.df_tiles.country.isnull()].quadkey.isin(
+            #         country_tiles.quadkeys
+            #     )
+            # ]
+            filtered_tiles.loc[:,"country"] = country_code
             return filtered_tiles
 
         return pd.DataFrame(columns=self.df_tiles.columns)
