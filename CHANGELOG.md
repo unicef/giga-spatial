@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-03-18  
+### Added  
+- Compression support in readers for improved efficiency  
+- New GHSL data handler to manage GHSL dataset downloads  
+
+### Fixed  
+- Small fixes/improvements in Microsoft Buildings, Maxar, and Overture handlers  
+
 ## [v0.2.2] - 2025-03-12
 - **Refactored Handlers**: Improved structure and performance of maxar_image.py, osm.py and overture.py to enhance geospatial data handling.
 

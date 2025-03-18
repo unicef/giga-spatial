@@ -3,6 +3,7 @@ import pandas as pd
 from typing import List, Dict, Union, Optional, Literal
 from dataclasses import dataclass
 from time import sleep
+from concurrent.futures import ThreadPoolExecutor
 from requests.exceptions import RequestException
 from shapely.geometry import Polygon, Point
 import pycountry
@@ -14,7 +15,7 @@ from gigaspatial.utils.logging import get_logger
 class OSMLocationFetcher:
     """
     A class to fetch and process location data from OpenStreetMap using the Overpass API.
-    
+
     This class supports fetching various OSM location types including amenities, buildings,
     shops, and other POI categories.
     """
@@ -32,15 +33,17 @@ class OSMLocationFetcher:
             self.country = pycountry.countries.lookup(self.country).alpha_2
         except LookupError:
             raise ValueError(f"Invalid country code provided: {self.country}")
-        
+
         # Normalize location_types to always be a dictionary
         if isinstance(self.location_types, list):
             self.location_types = {"amenity": self.location_types}
         elif not isinstance(self.location_types, dict):
-            raise TypeError("location_types must be a list of strings or a dictionary mapping categories to type lists")
-        
+            raise TypeError(
+                "location_types must be a list of strings or a dictionary mapping categories to type lists"
+            )
+
         self.logger = get_logger(__name__)
-    
+
     def _build_queries(self, since_year: Optional[int] = None) -> List[str]:
         """
         Construct separate Overpass QL queries for different element types and categories.
@@ -54,11 +57,12 @@ class OSMLocationFetcher:
         # Query for nodes and relations (with center output)
         nodes_relations_queries = []
         for category, types in self.location_types.items():
-            for _type in types:
-                nodes_relations_queries.extend([
-                    f"node[{category}={_type}]{date_filter}(area.searchArea);",
-                    f"relation[{category}={_type}]{date_filter}(area.searchArea);"
-                ])
+            nodes_relations_queries.extend(
+                [
+                    f"""node["{category}"~"^({"|".join(types)})"]{date_filter}(area.searchArea);""",
+                    f"""relation["{category}"~"^({"|".join(types)})"]{date_filter}(area.searchArea);""",
+                ]
+            )
 
         nodes_relations_queries = "\n".join(nodes_relations_queries)
 
@@ -74,8 +78,9 @@ class OSMLocationFetcher:
         # Query for ways (with geometry output)
         ways_queries = []
         for category, types in self.location_types.items():
-            for _type in types:
-                ways_queries.append(f"way[{category}={_type}]{date_filter}(area.searchArea);")
+            ways_queries.append(
+                f"""way["{category}"~"^({"|".join(types)})"]{date_filter}(area.searchArea);"""
+            )
 
         ways_queries = "\n".join(ways_queries)
 
@@ -108,7 +113,7 @@ class OSMLocationFetcher:
                     raise RuntimeError(
                         f"Failed to fetch data after {self.max_retries} attempts"
                     ) from e
-    
+
     def _extract_matching_categories(self, tags: Dict[str, str]) -> Dict[str, str]:
         """
         Extract all matching categories and their values from the tags.
@@ -120,7 +125,7 @@ class OSMLocationFetcher:
             if category in tags and tags[category] in types:
                 matches[category] = tags[category]
         return matches
-    
+
     def _process_node_relation(self, element: Dict) -> List[Dict[str, any]]:
         """
         Process a node or relation element.
@@ -129,38 +134,41 @@ class OSMLocationFetcher:
         try:
             tags = element.get("tags", {})
             matching_categories = self._extract_matching_categories(tags)
-            
+
             if not matching_categories:
-                self.logger.warning(f"Element {element['id']} missing or not matching specified category tags")
+                self.logger.warning(
+                    f"Element {element['id']} missing or not matching specified category tags"
+                )
                 return []
-                
+
             _lat = element.get("lat") or element["center"]["lat"]
             _lon = element.get("lon") or element["center"]["lon"]
             point_geom = Point(_lon, _lat)
-            
+
             # for each matching category, create a separate element
             results = []
             for category, value in matching_categories.items():
-                results.append({
-                    "source_id": element["id"],
-                    "category": category,
-                    "category_value": value,
-                    "name": tags.get("name", ""),
-                    "name_en": tags.get("name:en", ""),
-                    "type": element["type"],
-                    "geometry": point_geom,
-                    "latitude": _lat,
-                    "longitude": _lon,
-                    "tags": tags,
-                    "matching_categories": list(matching_categories.keys())
-                })
-            
+                results.append(
+                    {
+                        "source_id": element["id"],
+                        "category": category,
+                        "category_value": value,
+                        "name": tags.get("name", ""),
+                        "name_en": tags.get("name:en", ""),
+                        "type": element["type"],
+                        "geometry": point_geom,
+                        "latitude": _lat,
+                        "longitude": _lon,
+                        "matching_categories": list(matching_categories.keys()),
+                    }
+                )
+
             return results
-            
+
         except KeyError as e:
             self.logger.error(f"Corrupt data received for node/relation: {str(e)}")
             return []
-    
+
     def _process_way(self, element: Dict) -> List[Dict[str, any]]:
         """
         Process a way element with geometry.
@@ -169,38 +177,45 @@ class OSMLocationFetcher:
         try:
             tags = element.get("tags", {})
             matching_categories = self._extract_matching_categories(tags)
-            
+
             if not matching_categories:
-                self.logger.warning(f"Element {element['id']} missing or not matching specified category tags")
+                self.logger.warning(
+                    f"Element {element['id']} missing or not matching specified category tags"
+                )
                 return []
-                
+
             # Create polygon from geometry points
             polygon = Polygon([(p["lon"], p["lat"]) for p in element["geometry"]])
             centroid = polygon.centroid
-            
+
             # For each matching category, create a separate element
             results = []
             for category, value in matching_categories.items():
-                results.append({
-                    "source_id": element["id"],
-                    "category": category,
-                    "category_value": value,
-                    "name": tags.get("name", ""),
-                    "name_en": tags.get("name:en", ""),
-                    "type": element["type"],
-                    "geometry": polygon,
-                    "latitude": centroid.y,
-                    "longitude": centroid.x,
-                    "tags": tags,
-                    "matching_categories": list(matching_categories.keys())
-                })
-            
+                results.append(
+                    {
+                        "source_id": element["id"],
+                        "category": category,
+                        "category_value": value,
+                        "name": tags.get("name", ""),
+                        "name_en": tags.get("name:en", ""),
+                        "type": element["type"],
+                        "geometry": polygon,
+                        "latitude": centroid.y,
+                        "longitude": centroid.x,
+                        "matching_categories": list(matching_categories.keys()),
+                    }
+                )
+
             return results
         except (KeyError, ValueError) as e:
             self.logger.error(f"Error processing way geometry: {str(e)}")
             return []
 
-    def fetch_locations(self, since_year: Optional[int] = None, handle_duplicates: Literal['separate', 'combine', 'primary'] = 'separate') -> pd.DataFrame:
+    def fetch_locations(
+        self,
+        since_year: Optional[int] = None,
+        handle_duplicates: Literal["separate", "combine", "primary"] = "separate",
+    ) -> pd.DataFrame:
         """
         Fetch and process OSM locations.
 
@@ -214,10 +229,14 @@ class OSMLocationFetcher:
         Returns:
             pd.DataFrame: Processed OSM locations
         """
-        if handle_duplicates not in ('separate', 'combine', 'primary'):
-            raise ValueError("handle_duplicates must be one of: 'separate', 'combine', 'primary'")
-            
-        self.logger.info(f"Fetching OSM locations from Overpass API for country: {self.country}")
+        if handle_duplicates not in ("separate", "combine", "primary"):
+            raise ValueError(
+                "handle_duplicates must be one of: 'separate', 'combine', 'primary'"
+            )
+
+        self.logger.info(
+            f"Fetching OSM locations from Overpass API for country: {self.country}"
+        )
         self.logger.info(f"Location types: {self.location_types}")
         self.logger.info(f"Handling duplicate category matches as: {handle_duplicates}")
 
@@ -241,42 +260,53 @@ class OSMLocationFetcher:
         )
 
         # Process nodes and relations
-        processed_nodes_relations = []
-        for element in nodes_relations:
-            processed_nodes_relations.extend(self._process_node_relation(element))
+        with ThreadPoolExecutor() as executor:
+            processed_nodes_relations = list(
+                executor.map(self._process_node_relation, nodes_relations)
+            )
 
         # Process ways
-        processed_ways = []
-        for element in ways:
-            processed_ways.extend(self._process_way(element))
+        with ThreadPoolExecutor() as executor:
+            processed_ways = list(executor.map(self._process_way, ways))
 
         # Combine all processed elements
         all_elements = processed_nodes_relations + processed_ways
-        
+
         if not all_elements:
             self.logger.warning("No matching elements found after processing")
             return pd.DataFrame()
 
         # Handle duplicates based on the specified strategy
-        if handle_duplicates != 'separate':
+        if handle_duplicates != "separate":
             # Group by source_id
             grouped_elements = {}
             for elem in all_elements:
-                source_id = elem['source_id']
+                source_id = elem["source_id"]
                 if source_id not in grouped_elements:
                     grouped_elements[source_id] = elem
-                elif handle_duplicates == 'combine':
+                elif handle_duplicates == "combine":
                     # Combine matching categories
-                    if grouped_elements[source_id]['category'] != elem['category']:
-                        if isinstance(grouped_elements[source_id]['category'], str):
-                            grouped_elements[source_id]['category'] = [grouped_elements[source_id]['category']]
-                            grouped_elements[source_id]['category_value'] = [grouped_elements[source_id]['category_value']]
-                        
-                        if elem['category'] not in grouped_elements[source_id]['category']:
-                            grouped_elements[source_id]['category'].append(elem['category'])
-                            grouped_elements[source_id]['category_value'].append(elem['category_value'])
+                    if grouped_elements[source_id]["category"] != elem["category"]:
+                        if isinstance(grouped_elements[source_id]["category"], str):
+                            grouped_elements[source_id]["category"] = [
+                                grouped_elements[source_id]["category"]
+                            ]
+                            grouped_elements[source_id]["category_value"] = [
+                                grouped_elements[source_id]["category_value"]
+                            ]
+
+                        if (
+                            elem["category"]
+                            not in grouped_elements[source_id]["category"]
+                        ):
+                            grouped_elements[source_id]["category"].append(
+                                elem["category"]
+                            )
+                            grouped_elements[source_id]["category_value"].append(
+                                elem["category_value"]
+                            )
                 # For 'primary', just keep the first one we encountered
-            
+
             all_elements = list(grouped_elements.values())
 
         locations = pd.DataFrame(all_elements)
@@ -286,9 +316,9 @@ class OSMLocationFetcher:
         self.logger.info("\nElement type distribution:")
         for element_type, count in type_counts.items():
             self.logger.info(f"{element_type}: {count}")
-            
+
         # Log category distribution
-        if handle_duplicates == 'combine':
+        if handle_duplicates == "combine":
             # Count each category separately when they're in lists
             category_counts = {}
             for cats in locations["category"]:
@@ -297,7 +327,7 @@ class OSMLocationFetcher:
                         category_counts[cat] = category_counts.get(cat, 0) + 1
                 else:
                     category_counts[cats] = category_counts.get(cats, 0) + 1
-                    
+
             self.logger.info("\nCategory distribution:")
             for category, count in category_counts.items():
                 self.logger.info(f"{category}: {count}")
@@ -310,7 +340,9 @@ class OSMLocationFetcher:
         # Log elements with multiple matching categories
         multi_category = [e for e in all_elements if len(e["matching_categories"]) > 1]
         if multi_category:
-            self.logger.info(f"\n{len(multi_category)} elements matched multiple categories")
-            
+            self.logger.info(
+                f"\n{len(multi_category)} elements matched multiple categories"
+            )
+
         self.logger.info(f"Successfully processed {len(locations)} locations")
         return locations

@@ -183,6 +183,7 @@ class GoogleOpenBuildingsDownloader:
         gdf_tiles = self._get_intersecting_tiles(gdf_admin0)
 
         if gdf_tiles.empty:
+            self.logger.warning(f"There is no matching data for {country_code}")
             return []
 
         # Download tiles in parallel
@@ -218,6 +219,7 @@ class GoogleOpenBuildingsDownloader:
         gdf_tiles = self._get_intersecting_tiles(points_gdf)
 
         if gdf_tiles.empty:
+            self.logger.warning(f"There is no matching data for the points")
             return []
 
         # Download tiles in parallel

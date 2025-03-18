@@ -43,7 +43,7 @@ def read_kmz(file_obj, **kwargs):
         raise RuntimeError(f"An error occurred: {e}")
 
 
-def read_dataset(data_store: DataStore, path, **kwargs):
+def read_dataset(data_store: DataStore, path: str, compression: str = None, **kwargs):
     """
     Read data from various file formats stored in both local and cloud-based storage.
 
@@ -51,7 +51,7 @@ def read_dataset(data_store: DataStore, path, **kwargs):
     ----------
     data_store : DataStore
         Instance of DataStore for accessing data storage.
-    path : str
+    path : str, Path
         Path to the file in data storage.
     **kwargs : dict
         Additional arguments passed to the specific reader function.
@@ -78,7 +78,7 @@ def read_dataset(data_store: DataStore, path, **kwargs):
         ".xlsx",
         ".xls",
         ".kmz",
-        ".csv.gz",
+        ".gz",
     }
 
     PANDAS_READERS = {
@@ -86,7 +86,7 @@ def read_dataset(data_store: DataStore, path, **kwargs):
         ".xlsx": lambda f, **kw: pd.read_excel(f, engine="openpyxl", **kw),
         ".xls": lambda f, **kw: pd.read_excel(f, engine="xlrd", **kw),
         ".json": pd.read_json,
-        ".csv.gz": lambda f, **kw: pd.read_csv(f, compression="gzip", **kw),
+        # ".gz": lambda f, **kw: pd.read_csv(f, compression="gzip", **kw),
     }
 
     GEO_READERS = {
@@ -98,38 +98,95 @@ def read_dataset(data_store: DataStore, path, **kwargs):
         ".kmz": read_kmz,
     }
 
+    COMPRESSION_FORMATS = {
+        ".gz": "gzip",
+        ".bz2": "bz2",
+        ".zip": "zip",
+        ".xz": "xz",
+    }
+
     try:
         # Check if file exists
         if not data_store.file_exists(path):
             raise FileNotFoundError(f"File '{path}' not found in blob storage")
 
-        # Get file suffix and ensure it's lowercase
-        suffix = Path(path).suffix.lower()
+        path_obj = Path(path)
+        suffixes = path_obj.suffixes
+        file_extension = suffixes[-1].lower() if suffixes else ""
+
+        if compression is None and file_extension in COMPRESSION_FORMATS:
+            compression_format = COMPRESSION_FORMATS[file_extension]
+
+            # if file has multiple extensions (e.g., .csv.gz), get the inner format
+            if len(suffixes) > 1:
+                inner_extension = suffixes[-2].lower()
+
+                if inner_extension == ".tar":
+                    raise ValueError(
+                        "Tar archives (.tar.gz) are not directly supported"
+                    )
+
+                if inner_extension in PANDAS_READERS:
+                    try:
+                        with data_store.open(path, "rb") as f:
+                            return PANDAS_READERS[inner_extension](
+                                f, compression=compression_format, **kwargs
+                            )
+                    except Exception as e:
+                        raise ValueError(f"Error reading compressed file: {str(e)}")
+                elif inner_extension in GEO_READERS:
+                    try:
+                        with data_store.open(path, "rb") as f:
+                            if compression_format == "gzip":
+                                import gzip
+
+                                decompressed_data = gzip.decompress(f.read())
+                                import io
+
+                                return GEO_READERS[inner_extension](
+                                    io.BytesIO(decompressed_data), **kwargs
+                                )
+                            else:
+                                raise ValueError(
+                                    f"Compression format {compression_format} not supported for geo data"
+                                )
+                    except Exception as e:
+                        raise ValueError(f"Error reading compressed geo file: {str(e)}")
+            else:
+                # if just .gz without clear inner type, assume csv
+                try:
+                    with data_store.open(path, "rb") as f:
+                        return pd.read_csv(f, compression=compression_format, **kwargs)
+                except Exception as e:
+                    raise ValueError(
+                        f"Error reading compressed file as CSV: {str(e)}. "
+                        f"If not a CSV, specify the format in the filename (e.g., .json.gz)"
+                    )
 
         # Special handling for compressed files
-        if suffix == ".zip":
+        if file_extension == ".zip":
             # For zip files, we need to use binary mode
             with data_store.open(path, "rb") as f:
                 return gpd.read_file(f)
 
         # Determine if we need binary mode based on file type
-        mode = "rb" if suffix in BINARY_FORMATS else "r"
+        mode = "rb" if file_extension in BINARY_FORMATS else "r"
 
         # Try reading with appropriate reader
-        if suffix in PANDAS_READERS:
+        if file_extension in PANDAS_READERS:
             try:
                 with data_store.open(path, mode) as f:
-                    return PANDAS_READERS[suffix](f, **kwargs)
+                    return PANDAS_READERS[file_extension](f, **kwargs)
             except Exception as e:
                 raise ValueError(f"Error reading file with pandas: {str(e)}")
 
-        if suffix in GEO_READERS:
+        if file_extension in GEO_READERS:
             try:
                 with data_store.open(path, "rb") as f:
-                    return GEO_READERS[suffix](f, **kwargs)
+                    return GEO_READERS[file_extension](f, **kwargs)
             except Exception as e:
                 # For parquet files, try pandas reader if geopandas fails
-                if suffix == ".parquet":
+                if file_extension == ".parquet":
                     try:
                         with data_store.open(path, "rb") as f:
                             return pd.read_parquet(f, **kwargs)
@@ -142,9 +199,11 @@ def read_dataset(data_store: DataStore, path, **kwargs):
 
         # If we get here, the file type is unsupported
         supported_formats = sorted(set(PANDAS_READERS.keys()) | set(GEO_READERS.keys()))
+        supported_compressions = sorted(COMPRESSION_FORMATS.keys())
         raise ValueError(
-            f"Unsupported file type: {suffix}\n"
+            f"Unsupported file type: {file_extension}\n"
             f"Supported formats: {', '.join(supported_formats)}"
+            f"Supported compressions: {', '.join(supported_compressions)}"
         )
 
     except Exception as e:

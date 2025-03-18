@@ -73,10 +73,10 @@ class MaxarConfig(BaseModel):
     )
 
     max_retries: int = Field(
-        default=3, description="Number of retries for failed image downloads")
-    
-    retry_delay: int = Field(
-        default=5, description="Delay in seconds between retries")
+        default=3, description="Number of retries for failed image downloads"
+    )
+
+    retry_delay: int = Field(default=5, description="Delay in seconds between retries")
 
     @field_validator("username", "password", "connection_string")
     @classmethod
@@ -122,7 +122,7 @@ class MaxarImageDownloader:
         self.data_store = data_store or LocalDataStore()
         self.logger = get_logger(__name__)
 
-    def _download_single_image(self, bbox, output_path, size) -> bool:
+    def _download_single_image(self, bbox, output_path: Union[Path, str], size) -> bool:
         """Download a single image from bbox and pixel size"""
         for attempt in range(self.config.max_retries):
             try:
@@ -137,14 +137,18 @@ class MaxarImageDownloader:
                     transparent=self.config.transparent,
                     format=self.config.image_format,
                 )
-                self.data_store.write_file(output_path, img_data.read())
+                self.data_store.write_file(str(output_path), img_data.read())
                 return True
             except Exception as e:
-                self.logger.warning(f"Attempt {attempt + 1} of downloading {output_path.name} failed: {str(e)}")
+                self.logger.warning(
+                    f"Attempt {attempt + 1} of downloading {output_path.name} failed: {str(e)}"
+                )
                 if attempt < self.max_retries - 1:
                     sleep(self.config.retry_delay)
                 else:
-                    self.logger.warning(f"Failed to download {output_path.name} after {self.config.max_retries} attemps: {str(e)}")
+                    self.logger.warning(
+                        f"Failed to download {output_path.name} after {self.config.max_retries} attemps: {str(e)}"
+                    )
                     return False
 
     def download_images_by_tiles(
@@ -277,7 +281,9 @@ class MaxarImageDownloader:
 
         gdf = convert_to_geodataframe(coordinates_df)
 
-        buffered_gdf = buffer_geodataframe(gdf, res_meters_pixel / 2, cap_style="square")
+        buffered_gdf = buffer_geodataframe(
+            gdf, res_meters_pixel / 2, cap_style="square"
+        )
 
         buffered_gdf = buffered_gdf.to_crs(self.config.data_crs)
 

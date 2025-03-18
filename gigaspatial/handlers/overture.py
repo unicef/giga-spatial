@@ -19,14 +19,22 @@ class OvertureAmenityFetcher:
     """
     A class to fetch and process amenity locations from OpenStreetMap using the Overpass API.
     """
+
     # constants
     release: Optional[str] = "2024-12-18.0"
-    base_url: Optional[str] = "s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
+    base_url: Optional[str] = (
+        "s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
+    )
 
     # user config
     country: str = Field(...)
     amenity_types: List[str] = Field(..., description="List of amenity types to fetch")
     geom: Union[Polygon, MultiPolygon] = None
+
+    # config for country boundary access from data storage
+    # if None GADM boundaries will be used
+    data_store: DataStore = None
+    country_geom_path: Optional[Union[str, Path]] = None
 
     def __post_init__(self):
         """Validate inputs and set up logging."""
@@ -34,7 +42,7 @@ class OvertureAmenityFetcher:
             self.country = pycountry.countries.lookup(self.country).alpha_2
         except LookupError:
             raise ValueError(f"Invalid country code provided: {self.country}")
-        
+
         self.base_url = self.base_url.format(release=self.release)
         self.logger = get_logger(__name__)
 
@@ -46,16 +54,17 @@ class OvertureAmenityFetcher:
         db.install_extension("spatial")
         db.load_extension("spatial")
         return db
-    
+
     def _load_country_geometry(
         self,
-        data_store: Optional[DataStore] = None,
-        country_geom_path: Optional[Union[str, Path]] = None,
     ) -> Union[Polygon, MultiPolygon]:
         """Load country boundary geometry from DataStore or GADM."""
 
         gdf_admin0 = AdminBoundaries.create(
-            country_code=pycountry.countries.lookup(self.country).alpha_3, admin_level=0, data_store=data_store, path=country_geom_path
+            country_code=pycountry.countries.lookup(self.country).alpha_3,
+            admin_level=0,
+            data_store=self.data_store,
+            path=self.country_geom_path,
         ).to_geodataframe()
 
         return gdf_admin0.geometry.iloc[0]
@@ -64,9 +73,13 @@ class OvertureAmenityFetcher:
         """Constructs and returns the query"""
 
         if match_pattern:
-            amenity_query = " OR ".join([f"category ilike '%{amenity}%'" for amenity in self.amenity_types])
+            amenity_query = " OR ".join(
+                [f"category ilike '%{amenity}%'" for amenity in self.amenity_types]
+            )
         else:
-            amenity_query = " OR ".join([f"category == '{amenity}'" for amenity in self.amenity_types])
+            amenity_query = " OR ".join(
+                [f"category == '{amenity}'" for amenity in self.amenity_types]
+            )
 
         query = """
         SELECT id,
@@ -87,26 +100,27 @@ class OvertureAmenityFetcher:
             self.geom = self._load_country_geometry()
 
         return query.format(*self.geom.bounds, amenity_query)
-        
 
-    def fetch_locations(self, match_pattern: bool = False, **kwargs) -> gpd.GeoDataFrame:
+    def fetch_locations(
+        self, match_pattern: bool = False, **kwargs
+    ) -> gpd.GeoDataFrame:
         """Fetch and process amenity locations."""
         self.logger.info("Fetching amenity locations from Overture DB...")
 
         query = self._build_query(match_pattern=match_pattern, **kwargs)
 
-        df = self.connection.execute(
-            query
-        ).df()
+        df = self.connection.execute(query).df()
 
         self.logger.info("Processing geometries")
-        gdf = gpd.GeoDataFrame(df, geometry=gpd.GeoSeries.from_wkt(df["geometry"]), crs="EPSG:4326")
+        gdf = gpd.GeoDataFrame(
+            df, geometry=gpd.GeoSeries.from_wkt(df["geometry"]), crs="EPSG:4326"
+        )
 
         # filter by geometry boundary
         s = STRtree(gdf.geometry)
         result = s.query(self.geom, predicate="intersects")
-        
-        locations = gdf.iloc[result].reset_index()
+
+        locations = gdf.iloc[result].reset_index(drop=True)
 
         self.logger.info(f"Successfully processed {len(locations)} amenity locations")
         return locations
