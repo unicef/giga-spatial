@@ -122,7 +122,7 @@ class MSBuildingsConfig:
         for country in pycountry.countries:
             if country.name not in self.df_tiles.location.unique():
                 try:
-                    country_quadkey = CountryMercatorTiles.from_country(
+                    country_quadkey = CountryMercatorTiles.create(
                         country.alpha_3, self.MERCATOR_ZOOM_LEVEL
                     )
                 except:
@@ -181,9 +181,8 @@ class MSBuildingsConfig:
 
         if country_tiles:
             filtered_tiles = self.df_tiles[
-                self.df_tiles[self.df_tiles.country.isnull()].quadkey.isin(
-                    country_tiles.quadkeys
-                )
+                self.df_tiles.country.isnull()
+                & self.df_tiles.quadkey.isin(country_tiles.quadkeys)
             ]
             # filtered_tiles["country"] = country_code
             return filtered_tiles

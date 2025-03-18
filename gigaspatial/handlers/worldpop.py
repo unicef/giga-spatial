@@ -192,11 +192,6 @@ class WorldPopDownloader:
     def download_dataset(self) -> str:
         """
         Download the configured dataset to the provided output path.
-
-        Args:
-            output_path: Path to save the downloaded dataset.
-
-        Returns:
         """
 
         try:

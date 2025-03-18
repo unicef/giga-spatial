@@ -59,6 +59,7 @@ class Config(BaseSettings):
             "ookla_speedtest": "ookla",
             "srtm": "srtm",
             "worldpop": "worldpop",
+            "ghsl": "ghsl"
         },
         description="Mapping of data types to directory names",
     )
