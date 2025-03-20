@@ -17,7 +17,6 @@ from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.handlers.boundaries import AdminBoundaries
 from gigaspatial.processing.geo import calculate_distance, convert_to_geodataframe
-from gigaspatial.utils.logging import get_logger
 from gigaspatial.config import config
 
 
@@ -67,7 +66,7 @@ class GoogleOpenBuildingsDownloader:
             data_store: Instance of DataStore for accessing data storage
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or get_logger(__name__)
+        self.logger = logger or config.get_logger(__name__)
         self.data_store = data_store or LocalDataStore()
         self.config = config or GoogleOpenBuildingsConfig()
 

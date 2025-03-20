@@ -8,7 +8,7 @@ from requests.exceptions import RequestException
 from shapely.geometry import Polygon, Point
 import pycountry
 
-from gigaspatial.utils.logging import get_logger
+from gigaspatial.config import config
 
 
 @dataclass
@@ -42,7 +42,7 @@ class OSMLocationFetcher:
                 "location_types must be a list of strings or a dictionary mapping categories to type lists"
             )
 
-        self.logger = get_logger(__name__)
+        self.logger = config.get_logger(__name__)
 
     def _build_queries(self, since_year: Optional[int] = None) -> List[str]:
         """

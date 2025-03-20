@@ -11,7 +11,7 @@ import rasterio
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.utils.logging import get_logger
+from gigaspatial.config import config
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -27,7 +27,7 @@ class TifProcessor:
     def __post_init__(self):
         """Validate inputs and set up logging."""
         self.data_store = self.data_store or LocalDataStore()
-        self.logger = get_logger(__name__)
+        self.logger = config.get_logger(__name__)
         self._cache = {}
 
         if not self.data_store.file_exists(self.dataset_path):

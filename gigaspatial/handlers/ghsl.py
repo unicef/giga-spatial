@@ -33,7 +33,6 @@ from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.handlers.boundaries import AdminBoundaries
-from gigaspatial.utils.logging import get_logger
 from gigaspatial.config import config
 
 
@@ -72,7 +71,7 @@ class GHSLDataConfig:
     year: int = 2020
     resolution: int = 100
 
-    logger: Optional[logging.Logger] = get_logger(__name__)
+    logger: Optional[logging.Logger] = config.get_logger(__name__)
     n_workers: int = 4
 
     def _load_tiles(self):
@@ -243,7 +242,7 @@ class GHSLDataDownloader:
             data_store: Optional data storage interface. If not provided, uses LocalDataStore.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or get_logger(__name__)
+        self.logger = logger or config.get_logger(__name__)
         self.data_store = data_store or LocalDataStore()
         self.config = (
             config if isinstance(config, GHSLDataConfig) else GHSLDataConfig(**config)
@@ -411,6 +410,7 @@ class GHSLDataDownloader:
         country: str,
         data_store: Optional[DataStore] = None,
         country_geom_path: Optional[Union[str, Path]] = None,
+        extract: bool = False,
     ) -> List[str]:
         """
         Download GHSL data for a specific country.
@@ -433,7 +433,9 @@ class GHSLDataDownloader:
 
         # Download tiles in parallel
         with multiprocessing.Pool(self.config.n_workers) as pool:
-            download_func = functools.partial(self._download_tile)
+            download_func = functools.partial(
+                self._download_tile if not extract else self.download_and_extract_tile
+            )
             file_paths = list(
                 tqdm(
                     pool.imap(download_func, country_tiles),
@@ -446,8 +448,7 @@ class GHSLDataDownloader:
         return [path for path in file_paths if path is not None]
 
     def download_by_points(
-        self,
-        points_gdf: gpd.GeoDataFrame,
+        self, points_gdf: gpd.GeoDataFrame, extract: bool = False
     ) -> List[str]:
         """
         Download GHSL data for areas containing specific points.
@@ -467,7 +468,9 @@ class GHSLDataDownloader:
 
         # Download tiles in parallel
         with multiprocessing.Pool(self.config.n_workers) as pool:
-            download_func = functools.partial(self._download_tile)
+            download_func = functools.partial(
+                self._download_tile if not extract else self.download_and_extract_tile
+            )
             file_paths = list(
                 tqdm(
                     pool.imap(download_func, int_tiles),

@@ -9,7 +9,7 @@ from pathlib import Path
 import pycountry
 import duckdb
 
-from gigaspatial.utils.logging import get_logger
+from gigaspatial.config import config
 from gigaspatial.handlers.boundaries import AdminBoundaries
 from gigaspatial.core.io.data_store import DataStore
 
@@ -44,7 +44,7 @@ class OvertureAmenityFetcher:
             raise ValueError(f"Invalid country code provided: {self.country}")
 
         self.base_url = self.base_url.format(release=self.release)
-        self.logger = get_logger(__name__)
+        self.logger = config.get_logger(__name__)
 
         self.connection = self._set_connection()
 

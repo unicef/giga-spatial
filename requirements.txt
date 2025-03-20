@@ -1,9 +1,7 @@
 azure-storage-blob>=12.22.0
-country_converter==1.3
 delta_sharing==1.2.0
 duckdb==1.2.0
 geopandas==0.14.4
-h3==4.0.0b5
 mercantile==1.2.1
 numpy==2.2.2
 pandas==2.2.3

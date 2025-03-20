@@ -2,8 +2,14 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely import wkt
-from typing import Literal, List, Tuple
+from typing import Literal, List, Tuple, Optional
 import re
+
+from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.handlers.boundaries import AdminBoundaries
+from gigaspatial.config import config
+
+LOGGER = config.get_logger(__name__)
 
 
 def detect_coordinate_columns(
@@ -130,7 +136,9 @@ def detect_coordinate_columns(
         raise RuntimeError(f"Error detecting coordinate columns: {str(e)}")
 
 
-def convert_to_geodataframe(data: pd.DataFrame, lat_col: str=None, lon_col: str=None, crs="EPSG:4326") -> gpd.GeoDataFrame:
+def convert_to_geodataframe(
+    data: pd.DataFrame, lat_col: str = None, lon_col: str = None, crs="EPSG:4326"
+) -> gpd.GeoDataFrame:
     """
     Convert a pandas DataFrame to a GeoDataFrame, either from latitude/longitude columns
     or from a WKT geometry column.
@@ -234,7 +242,7 @@ def convert_to_geodataframe(data: pd.DataFrame, lat_col: str=None, lon_col: str=
 def buffer_geodataframe(
     gdf: gpd.GeoDataFrame,
     buffer_distance_meters: float,
-    cap_style: Literal['round', 'square', 'flat'] = 'round',
+    cap_style: Literal["round", "square", "flat"] = "round",
     copy=True,
 ) -> gpd.GeoDataFrame:
     """
@@ -260,7 +268,7 @@ def buffer_geodataframe(
     if not isinstance(buffer_distance_meters, (float, int)):
         raise TypeError("Buffer distance must be a number")
 
-    if cap_style not in ['round', 'square', 'flat']:
+    if cap_style not in ["round", "square", "flat"]:
         raise ValueError("cap_style must be round, flat or square.")
 
     if gdf.crs is None:
@@ -289,7 +297,13 @@ def buffer_geodataframe(
         raise RuntimeError(f"Error during buffering operation: {str(e)}")
 
 
-def add_spatial_jitter(df: pd.DataFrame, columns: List[str]=["latitude", "longitude"], amount: float=0.0001, seed=None, copy=True) -> pd.DataFrame:
+def add_spatial_jitter(
+    df: pd.DataFrame,
+    columns: List[str] = ["latitude", "longitude"],
+    amount: float = 0.0001,
+    seed=None,
+    copy=True,
+) -> pd.DataFrame:
     """
     Add random jitter to duplicated geographic coordinates to create slight separation
     between overlapping points.
@@ -667,3 +681,106 @@ def calculate_distance(lat1, lon1, lat2, lon2, R=6371e3):
     c = 2 * np.arcsin(np.sqrt(a))
     distance = R * c
     return distance
+
+def annotate_with_admin_regions(
+    gdf: gpd.GeoDataFrame, country_code: str, data_store: Optional[DataStore] = None, admin_id_column_suffix = "_giga"
+) -> gpd.GeoDataFrame:
+    """
+    Annotate a GeoDataFrame with administrative region information.
+    
+    Performs a spatial join between the input points and administrative boundaries
+    at levels 1 and 2, resolving conflicts when points intersect multiple admin regions.
+    
+    Args:
+        gdf: GeoDataFrame containing points to annotate
+        country_code: Country code for administrative boundaries
+        data_store: Optional DataStore for loading admin boundary data
+        
+    Returns:
+        GeoDataFrame with added administrative region columns
+    """
+    
+    if not isinstance(gdf, gpd.GeoDataFrame):
+       raise TypeError("gdf must be a GeoDataFrame")
+       
+    if gdf.empty:
+        LOGGER.warning("Empty GeoDataFrame provided, returning as-is")
+        return gdf
+
+    # read country admin data
+    admin1_data = AdminBoundaries.create(
+        country_code=country_code, admin_level=1, data_store=data_store
+    ).to_geodataframe()
+
+    admin1_data.rename(columns={"id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"}, inplace=True)
+    admin1_data.drop(columns=["name_en", "parent_id", "country_code"], inplace=True)
+
+    admin2_data = AdminBoundaries.create(
+        country_code=country_code, admin_level=2, data_store=data_store
+    ).to_geodataframe()
+
+    admin2_data.rename(
+        columns={
+            "id": f"admin2_id{admin_id_column_suffix}",
+            "parent_id": f"admin1_id{admin_id_column_suffix}",
+            "name": "admin2",
+        },
+        inplace=True,
+    )
+    admin2_data.drop(columns=["name_en", "country_code"], inplace=True)
+
+    # Join dataframes based on 'admin1_id_giga'
+    admin_data = admin2_data.merge(
+        admin1_data[[f"admin1_id{admin_id_column_suffix}", "admin1", "geometry"]],
+        left_on=f"admin1_id{admin_id_column_suffix}",
+        right_on=f"admin1_id{admin_id_column_suffix}",
+        how="outer",
+    )
+
+    admin_data["geometry"] = admin_data.apply(
+        lambda x: x.geometry_x if x.geometry_x else x.geometry_y, axis=1
+    )
+
+    admin_data = gpd.GeoDataFrame(
+        admin_data.drop(columns=["geometry_x", "geometry_y"]),
+        geometry="geometry",
+        crs=4326,
+    )
+
+    if gdf.crs is None:
+       LOGGER.warning("Input GeoDataFrame has no CRS, assuming EPSG:4326")
+       gdf.set_crs(epsg=4326, inplace=True)
+    elif gdf.crs != "EPSG:4326":
+        LOGGER.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
+        gdf = gdf.to_crs(epsg=4326)
+
+    # spatial join gdf to admins
+    gdf_w_admins = gdf.copy().sjoin(
+        admin_data,
+        how="left",
+        predicate="intersects",
+    )
+
+    # Check for duplicates caused by points intersecting multiple polygons
+    if len(gdf_w_admins) != len(gdf):
+        LOGGER.warning(
+            "Some points intersect multiple administrative boundaries. Resolving conflicts..."
+        )
+
+        # Group by original index and select the closest admin area for ties
+        gdf_w_admins["distance"] = gdf_w_admins.apply(
+            lambda row: row.geometry.distance(
+                admin_data.loc[row.index_right, "geometry"].centroid
+            ),
+            axis=1,
+        )
+
+        # For points with multiple matches, keep the closest polygon
+        gdf_w_admins = gdf_w_admins.loc[
+            gdf_w_admins.groupby(gdf.index)["distance"].idxmin()
+        ].drop(columns="distance")
+
+    # Drop unnecessary columns and reset the index
+    gdf_w_admins = gdf_w_admins.drop(columns="index_right").reset_index(drop=True)
+
+    return gdf_w_admins

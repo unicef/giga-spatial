@@ -3,7 +3,6 @@ import os
 from typing import Any, List, Generator, Tuple, Union, IO
 
 from .data_store import DataStore
-from gigaspatial.utils.logging import get_logger
 
 
 class LocalDataStore(DataStore):

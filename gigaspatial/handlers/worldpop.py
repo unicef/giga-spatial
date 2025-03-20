@@ -13,7 +13,6 @@ from gigaspatial.core.io.readers import *
 from gigaspatial.core.io.writers import *
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.utils.logging import get_logger
 from gigaspatial.config import config
 
 
@@ -173,7 +172,7 @@ class WorldPopDownloader:
             data_store: Optional data storage interface. If not provided, uses LocalDataStore.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or get_logger(__name__)
+        self.logger = logger or config.get_logger(__name__)
         self.data_store = data_store or LocalDataStore()
         self.config = config if isinstance(config, WorldPopConfig) else WorldPopConfig(**config)
     

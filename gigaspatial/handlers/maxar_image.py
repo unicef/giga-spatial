@@ -8,7 +8,6 @@ import pandas as pd
 from owslib.wms import WebMapService
 from time import sleep
 from gigaspatial.grid.mercator_tiles import MercatorTiles
-from gigaspatial.utils.logging import get_logger
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.processing.geo import (
@@ -120,7 +119,7 @@ class MaxarImageDownloader:
             password=self.config.password,
         )
         self.data_store = data_store or LocalDataStore()
-        self.logger = get_logger(__name__)
+        self.logger = config.get_logger(__name__)
 
     def _download_single_image(self, bbox, output_path: Union[Path, str], size) -> bool:
         """Download a single image from bbox and pixel size"""

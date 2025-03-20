@@ -22,7 +22,6 @@ from gigaspatial.grid.mercator_tiles import (
     MercatorTiles,
     CountryMercatorTiles,
 )
-from gigaspatial.utils.logging import get_logger
 from gigaspatial.config import config
 
 
@@ -74,7 +73,7 @@ class MSBuildingsConfig:
     CUSTOM_MAPPING: Optional[Dict[str, str]] = None
 
     n_workers: int = 4  # number of workers for parallel processing
-    logger: Optional[logging.Logger] = get_logger(__name__)
+    logger: Optional[logging.Logger] = config.get_logger(__name__)
 
     def __post_init__(self):
         """Validate inputs and set location mapping"""
@@ -240,7 +239,7 @@ class MSBuildingsDownloader:
             config: Optional configuration for customizing file paths.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or get_logger(__name__)
+        self.logger = logger or config.get_logger(__name__)
         self.config = config or MSBuildingsConfig(logger=self.logger)
 
     def _download_tile(

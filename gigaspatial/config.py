@@ -3,6 +3,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, Union, Literal, Dict, Any
 from functools import lru_cache
+import logging
 
 
 class Config(BaseSettings):
@@ -59,10 +60,18 @@ class Config(BaseSettings):
             "ookla_speedtest": "ookla",
             "srtm": "srtm",
             "worldpop": "worldpop",
-            "ghsl": "ghsl"
+            "ghsl": "ghsl",
         },
         description="Mapping of data types to directory names",
     )
+
+    LOG_FORMAT = "%(levelname) -10s %(asctime) " "-30s: %(message)s"
+
+    def get_logger(self, name):
+        logger = logging.getLogger(name)
+        logging.basicConfig(level=logging.INFO, format=self.LOG_FORMAT)
+
+        return logger
 
     def get_path(
         self,
@@ -92,7 +101,11 @@ class Config(BaseSettings):
         return base_dir / level_dir / file
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_prefix = "", validate_assignment=True, case_sensitive=True, extra="allow"
+        env_file=".env",
+        env_prefix="",
+        validate_assignment=True,
+        case_sensitive=True,
+        extra="allow",
     )
 
     @field_validator(
@@ -103,7 +116,9 @@ class Config(BaseSettings):
         "ADMIN_BOUNDARIES_DATA_DIR",
         mode="before",
     )
-    def resolve_and_validate_paths(cls, value: Union[str, Path], resolve=False) -> Union[Path, Any]:
+    def resolve_and_validate_paths(
+        cls, value: Union[str, Path], resolve=False
+    ) -> Union[Path, Any]:
         """Smart validator that only processes Path fields"""
 
         if isinstance(value, str):

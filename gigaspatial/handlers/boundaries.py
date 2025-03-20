@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, ClassVar, Union, Dict, List
 import geopandas as gpd
 from pathlib import Path
+from urllib.error import HTTPError
 from shapely.geometry import Polygon, MultiPolygon
 
 from gigaspatial.core.io.data_store import DataStore
@@ -44,6 +45,8 @@ class AdminBoundaries(BaseModel):
         description="Administrative level (e.g., 0=country, 1=state, etc.)",
     )
 
+    logger: ClassVar = config.get_logger(__name__)
+
     _schema_config: ClassVar[Dict[str, Dict[str, str]]] = {
         "gadm": {
             "country_code": "GID_0",
@@ -66,50 +69,67 @@ class AdminBoundaries(BaseModel):
 
     @classmethod
     def from_gadm(
-        cls, country_code: str, admin_level: Optional[int] = 0, **kwargs
-    ) -> gpd.GeoDataFrame:
-        """Load GADM data from URL"""
+        cls, country_code: str, admin_level: int = 0, **kwargs
+    ) -> "AdminBoundaries":
+        """Load and create instance from GADM data."""
         url = f"https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_{country_code}_{admin_level}.json"
-        gdf = gpd.read_file(url)
 
-        gdf = cls._map_fields(gdf, "gadm", admin_level)
+        try:
+            gdf = gpd.read_file(url)
 
-        if admin_level == 0:
-            gdf["country_code"] = gdf["id"]
-            gdf["name"] = gdf["COUNTRY"]
-        elif admin_level == 1:
-            gdf["country_code"] = gdf["parent_id"]
+            gdf = cls._map_fields(gdf, "gadm", admin_level)
 
-        return cls(
-            boundaries=[
+            if admin_level == 0:
+                gdf["country_code"] = gdf["id"]
+                gdf["name"] = gdf["COUNTRY"]
+            elif admin_level == 1:
+                gdf["country_code"] = gdf["parent_id"]
+
+            boundaries = [
                 AdminBoundary(**row_dict) for row_dict in gdf.to_dict("records")
-            ],
-            level=admin_level,
-        )
+            ]
+            return cls(
+                boundaries=boundaries, level=admin_level, country_code=country_code
+            )
+
+        except (ValueError, HTTPError, FileNotFoundError) as e:
+            cls.logger.warning(
+                f"No data found for {country_code} at admin level {admin_level}: {str(e)}"
+            )
+            return cls._create_empty_instance(country_code, admin_level, "gadm")
 
     @classmethod
     def from_data_store(
         cls,
         data_store: DataStore,
         path: Union[str, "Path"],
-        admin_level: Optional[int] = 0,
+        admin_level: int = 0,
         **kwargs,
-    ) -> gpd.GeoDataFrame:
-        """Load internal data from datastore"""
-        gdf = read_dataset(data_store, str(path), **kwargs)
-        gdf = cls._map_fields(gdf, "internal", admin_level)
+    ) -> "AdminBoundaries":
+        """Load and create instance from internal data store."""
+        try:
+            gdf = read_dataset(data_store, str(path), **kwargs)
 
-        if admin_level == 0:
-            gdf["id"] = gdf["country_code"]
-        else:
-            gdf["parent_id"] = gdf["id"].apply(lambda x: x[:-3])
+            if gdf.empty:
+                return cls._create_empty_instance(None, admin_level, "internal")
 
-        return cls(
-            boundaries=[
+            gdf = cls._map_fields(gdf, "internal", admin_level)
+
+            if admin_level == 0:
+                gdf["id"] = gdf["country_code"]
+            else:
+                gdf["parent_id"] = gdf["id"].apply(lambda x: x[:-3])
+
+            boundaries = [
                 AdminBoundary(**row_dict) for row_dict in gdf.to_dict("records")
-            ],
-            level=admin_level,
-        )
+            ]
+            return cls(boundaries=boundaries, level=admin_level)
+
+        except (FileNotFoundError, KeyError) as e:
+            cls.logger.warning(
+                f"No data found at {path} for admin level {admin_level}: {str(e)}"
+            )
+            return cls._create_empty_instance(None, admin_level, "internal")
 
     @classmethod
     def create(
@@ -139,6 +159,22 @@ class AdminBoundaries(BaseModel):
             )
 
     @classmethod
+    def _create_empty_instance(
+        cls, country_code: Optional[str], admin_level: int, source_type: str
+    ) -> "AdminBoundaries":
+        """Create an empty instance with the required schema structure."""
+        # for to_geodataframe() to use later
+        instance = cls(boundaries=[], level=admin_level, country_code=country_code)
+
+        schema_fields = set(cls.get_schema_config()[source_type].keys())
+        schema_fields.update(["geometry", "country_code", "id", "name", "name_en"])
+        if admin_level > 0:
+            schema_fields.add("parent_id")
+
+        instance._empty_schema = list(schema_fields)
+        return instance
+
+    @classmethod
     def _map_fields(
         cls,
         gdf: gpd.GeoDataFrame,
@@ -162,6 +198,16 @@ class AdminBoundaries(BaseModel):
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
         """Convert the AdminBoundaries to a GeoDataFrame."""
+        if not self.boundaries:
+            if hasattr(self, "_empty_schema"):
+                columns = self._empty_schema
+            else:
+                columns = ["id", "name", "country_code", "geometry"]
+                if self.level > 0:
+                    columns.append("parent_id")
+
+            return gpd.GeoDataFrame(columns=columns, geometry="geometry", crs=4326)
+
         return gpd.GeoDataFrame(
             [boundary.model_dump() for boundary in self.boundaries],
             geometry="geometry",
