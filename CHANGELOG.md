@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2025-03-20
+
+## Added
+- Enhanced AdminBoundaries handler with improved error handling for cases where administrative level data is unavailable for a country.
+- Added pyproject.toml and setup.py, enabling pip install support for the package.
+- Introduced a new method annotate_with_admin_regions in geo.py to perform spatial joins between input points and administrative boundaries (levels 1 and 2), handling conflicts where points intersect multiple admin regions.
+
+## Removed
+- Removed the utils module containing logger.py and integrated LOG_FORMAT and get_logger into config.py for a more streamlined logging approach.
+
 ## [0.3.0] - 2025-03-18  
 ### Added  
 - Compression support in readers for improved efficiency  
