@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.3.2] - 2025-03-21
+### Added
+- Added a method to efficiently assign unique IDs to features.
+
+### Changed
+- Enhanced logging for better debugging and clarity.
+
+### Fixed
+- Minor bug fix in config.py
+
 ## [0.3.1] - 2025-03-20
 
 ## Added
