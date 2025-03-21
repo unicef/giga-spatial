@@ -65,11 +65,20 @@ class Config(BaseSettings):
         description="Mapping of data types to directory names",
     )
 
-    LOG_FORMAT = "%(levelname) -10s %(asctime) " "-30s: %(message)s"
-
-    def get_logger(self, name):
+    def get_logger(self, name, console_level=logging.INFO):
         logger = logging.getLogger(name)
-        logging.basicConfig(level=logging.INFO, format=self.LOG_FORMAT)
+        logger.setLevel(logging.INFO)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(console_level)
+
+        LOG_FORMAT = "%(levelname) -10s  %(name) -10s %(asctime) " "-30s: %(message)s"
+
+        formatter = logging.Formatter(LOG_FORMAT)
+        console_handler.setFormatter(formatter)
+
+        if not logger.hasHandlers():
+            logger.addHandler(console_handler)
 
         return logger
 
