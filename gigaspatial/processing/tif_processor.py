@@ -5,9 +5,10 @@ from typing import List, Optional, Tuple, Union, Literal
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 from contextlib import contextmanager
-from shapely.geometry import box
+from shapely.geometry import box, Polygon, MultiPolygon
 from pathlib import Path
 import rasterio
+from rasterio.mask import mask
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
@@ -100,6 +101,11 @@ class TifProcessor:
         return self._cache["count"]
 
     @property
+    def nodata(self) -> int:
+        """Get the value representing no data in the rasters"""
+        return self._cache["nodata"]
+
+    @property
     def tabular(self) -> pd.DataFrame:
         """Get the data from the TIF file"""
         if not hasattr(self, "_tabular"):
@@ -180,6 +186,61 @@ class TifProcessor:
                 if src.count != 1:
                     raise ValueError("Single band mode requires a 1-band TIF file")
                 return np.array([vals[0] for vals in src.sample(coordinate_list)])
+
+    def sample_by_polygons(
+        self, polygon_list: List[Union[Polygon, MultiPolygon]], stat: str = "mean"
+    ) -> gpd.GeoDataFrame:
+        """
+        Sample raster values within each polygon of a GeoDataFrame.
+
+        Parameters:
+            polygon_list: List of polygon geometries (can include MultiPolygons).
+            stat (str): Aggregation statistic to compute within each polygon.
+                        Options: "mean", "median", "sum", "min", "max".
+
+        Returns:
+            GeoDataFrame: A copy of the input GeoDataFrame with an added column
+                        containing sampled raster values.
+        """
+        self.logger.info("Sampling raster values within polygons...")
+
+        with self.open_dataset() as src:
+            results = []
+
+            for geom in polygon_list:
+                if geom.is_empty:
+                    results.append(np.nan)
+                    continue
+
+                try:
+                    # Mask the raster with the polygon
+                    out_image, _ = mask(src, [geom], crop=True)
+
+                    # Flatten the raster values and remove NoData values
+                    values = out_image[out_image != src.nodata].flatten()
+
+                    # Compute the desired statistic
+                    if len(values) == 0:
+                        results.append(np.nan)
+                    else:
+                        if stat == "mean":
+                            results.append(np.mean(values))
+                        elif stat == "median":
+                            results.append(np.median(values))
+                        elif stat == "sum":
+                            results.append(np.sum(values))
+                        elif stat == "min":
+                            results.append(np.min(values))
+                        elif stat == "max":
+                            results.append(np.max(values))
+                        else:
+                            raise ValueError(f"Unknown statistic: {stat}")
+
+                except Exception as e:
+                    self.logger.error(f"Error processing polygon: {e}")
+                    results.append(np.nan)
+
+        return np.array(results)
 
     def _to_rgba_dataframe(self, drop_transparent: bool = False) -> pd.DataFrame:
         """
@@ -355,3 +416,61 @@ class TifProcessor:
             )
 
         return self._cache["pixel_coords"]
+
+
+def sample_multiple_tifs_by_coordinates(
+    tif_processors: List[TifProcessor], coordinate_list: List[Tuple[float, float]]
+):
+    """
+    Sample raster values from multiple TIFF files for given coordinates.
+
+    Parameters:
+    - tif_processors: List of TifProcessor instances.
+    - coordinate_list: List of (x, y) coordinates.
+
+    Returns:
+    - A NumPy array of sampled values, taking the first non-nodata value encountered.
+    """
+    sampled_values = np.full(len(coordinate_list), np.nan, dtype=np.float32)
+
+    for tp in tif_processors:
+        values = tp.sample_by_coordinates(coordinate_list=coordinate_list)
+
+        if tp.nodata is not None:
+            mask = (np.isnan(sampled_values)) & (
+                values != tp.nodata
+            )  # Replace only NaNs
+        else:
+            mask = np.isnan(sampled_values)  # No explicit nodata, replace all NaNs
+
+        sampled_values[mask] = values[mask]  # Update only missing values
+
+    return sampled_values
+
+
+def sample_multiple_tifs_by_polygons(
+    tif_processors: List[TifProcessor],
+    polygon_list: List[Union[Polygon, MultiPolygon]],
+    stat: str = "mean",
+):
+    """
+    Sample raster values from multiple TIFF files for polygons in a list and join the results.
+
+    Parameters:
+    - tif_processors: List of TifProcessor instances.
+    - polygon_list: List of polygon geometries (can include MultiPolygons).
+    - stat: Aggregation statistic to compute within each polygon (mean, median, sum, min, max).
+
+    Returns:
+    - A NumPy array of sampled values, taking the first non-nodata value encountered.
+    """
+    sampled_values = np.full(len(polygon_list), np.nan, dtype=np.float32)
+
+    for tp in tif_processors:
+        values = tp.sample_by_polygons(polygon_list=polygon_list, stat=stat)
+
+        mask = np.isnan(sampled_values)  # replace all NaNs
+
+        sampled_values[mask] = values[mask]  # Update only values with samapled value
+
+    return sampled_values

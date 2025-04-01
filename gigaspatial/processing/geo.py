@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely import wkt
+from shapely.geometry import base
 from typing import Literal, List, Tuple, Optional
 import re
 
@@ -183,11 +184,10 @@ def convert_to_geodataframe(
                     lat_col = lat_col or detected_lat
                     lon_col = lon_col or detected_lon
                 except ValueError as e:
-                    if "geometry" not in df.columns:
-                        raise ValueError(
-                            f"Could not automatically detect coordinate columns and no "
-                            f"'geometry' column found. Error: {str(e)}"
-                        )
+                    raise ValueError(
+                        f"Could not automatically detect coordinate columns and no "
+                        f"'geometry' column found. Error: {str(e)}"
+                    )
 
             # Validate latitude/longitude columns exist
             if lat_col not in df.columns or lon_col not in df.columns:
@@ -201,39 +201,31 @@ def convert_to_geodataframe(
                     f"Missing values found in {lat_col} and/or {lon_col} columns"
                 )
 
-            # Validate latitude/longitude values
-            if not (
-                df[lat_col].between(-90, 90).all()
-                and df[lon_col].between(-180, 180).all()
-            ):
-                raise ValueError(
-                    f"Invalid values found: latitude must be between -90 and 90, "
-                    f"longitude must be between -180 and 180"
-                )
-
             # Create geometry from lat/lon
-            geometry = gpd.points_from_xy(x=df[lon_col], y=df[lat_col], crs=crs)
+            geometry = gpd.points_from_xy(x=df[lon_col], y=df[lat_col])
 
         else:
-            # Handle WKT geometry column
-            try:
-                # Check for missing values
-                if df["geometry"].isna().any():
-                    raise ValueError("Missing values found in geometry column")
-
+            # Check if geometry column already contains valid geometries
+            if df["geometry"].apply(lambda x: isinstance(x, base.BaseGeometry)).all():
+                geometry = df["geometry"]
+            elif df["geometry"].apply(lambda x: isinstance(x, str)).all():
                 # Convert WKT strings to geometry objects
                 geometry = df["geometry"].apply(wkt.loads)
-                df = df.drop("geometry", axis=1)  # Remove WKT column
-
-            except (ValueError, TypeError) as e:
+            else:
                 raise ValueError(
-                    f"Invalid geometry format in 'geometry' column: {str(e)}"
+                    "Invalid geometry format: contains mixed or unsupported types"
                 )
 
-        # Create GeoDataFrame
-        gdf = gpd.GeoDataFrame(df, geometry=geometry, crs=crs)
+        # drop the WKT column if conversion was done
+        if (
+            "geometry" in df.columns
+            and not df["geometry"]
+            .apply(lambda x: isinstance(x, base.BaseGeometry))
+            .all()
+        ):
+            df = df.drop(columns=["geometry"])
 
-        return gdf
+        return gpd.GeoDataFrame(df, geometry=geometry, crs=crs)
 
     except Exception as e:
         raise RuntimeError(f"Error converting to GeoDataFrame: {str(e)}")
@@ -673,6 +665,7 @@ def map_points_within_polygons(base_points_gdf, polygon_gdf):
 
     return base_points_gdf
 
+
 def calculate_distance(lat1, lon1, lat2, lon2, R=6371e3):
     lat1, lon1, lat2, lon2 = np.radians([lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
@@ -682,27 +675,31 @@ def calculate_distance(lat1, lon1, lat2, lon2, R=6371e3):
     distance = R * c
     return distance
 
+
 def annotate_with_admin_regions(
-    gdf: gpd.GeoDataFrame, country_code: str, data_store: Optional[DataStore] = None, admin_id_column_suffix = "_giga"
+    gdf: gpd.GeoDataFrame,
+    country_code: str,
+    data_store: Optional[DataStore] = None,
+    admin_id_column_suffix="_giga",
 ) -> gpd.GeoDataFrame:
     """
     Annotate a GeoDataFrame with administrative region information.
-    
+
     Performs a spatial join between the input points and administrative boundaries
     at levels 1 and 2, resolving conflicts when points intersect multiple admin regions.
-    
+
     Args:
         gdf: GeoDataFrame containing points to annotate
         country_code: Country code for administrative boundaries
         data_store: Optional DataStore for loading admin boundary data
-        
+
     Returns:
         GeoDataFrame with added administrative region columns
     """
-    
+
     if not isinstance(gdf, gpd.GeoDataFrame):
-       raise TypeError("gdf must be a GeoDataFrame")
-       
+        raise TypeError("gdf must be a GeoDataFrame")
+
     if gdf.empty:
         LOGGER.warning("Empty GeoDataFrame provided, returning as-is")
         return gdf
@@ -712,7 +709,10 @@ def annotate_with_admin_regions(
         country_code=country_code, admin_level=1, data_store=data_store
     ).to_geodataframe()
 
-    admin1_data.rename(columns={"id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"}, inplace=True)
+    admin1_data.rename(
+        columns={"id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"},
+        inplace=True,
+    )
     admin1_data.drop(columns=["name_en", "parent_id", "country_code"], inplace=True)
 
     admin2_data = AdminBoundaries.create(
@@ -747,9 +747,14 @@ def annotate_with_admin_regions(
         crs=4326,
     )
 
+    admin_data["admin2"].fillna("Unknown", inplace=True)
+    admin_data[f"admin2_id{admin_id_column_suffix}"] = admin_data[
+        f"admin2_id{admin_id_column_suffix}"
+    ].replace({np.nan: None})
+
     if gdf.crs is None:
-       LOGGER.warning("Input GeoDataFrame has no CRS, assuming EPSG:4326")
-       gdf.set_crs(epsg=4326, inplace=True)
+        LOGGER.warning("Input GeoDataFrame has no CRS, assuming EPSG:4326")
+        gdf.set_crs(epsg=4326, inplace=True)
     elif gdf.crs != "EPSG:4326":
         LOGGER.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
         gdf = gdf.to_crs(epsg=4326)

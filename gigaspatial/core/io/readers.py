@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import io
 import zipfile
+import gzip
 
 from .data_store import DataStore
 
@@ -41,6 +42,24 @@ def read_kmz(file_obj, **kwargs):
         raise ValueError("No KML file found in the KMZ archive.")
     except Exception as e:
         raise RuntimeError(f"An error occurred: {e}")
+
+
+def read_gzipped_json_or_csv(file_path, data_store):
+    """Reads a gzipped file, attempting to parse it as JSON (lines=True) or CSV."""
+
+    with data_store.open(file_path, "rb") as f:
+        g = gzip.GzipFile(fileobj=f)
+        text = g.read().decode("utf-8")
+        try:
+            df = pd.read_json(io.StringIO(text), lines=True)
+            return df
+        except json.JSONDecodeError:
+            try:
+                df = pd.read_csv(io.StringIO(text))
+                return df
+            except pd.errors.ParserError:
+                print(f"Error: Could not parse {file_path} as JSON or CSV.")
+                return None
 
 
 def read_dataset(data_store: DataStore, path: str, compression: str = None, **kwargs):

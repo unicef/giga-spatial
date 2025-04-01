@@ -43,11 +43,11 @@ class GigaEntity(BaseGigaEntity):
         max_length=50,
         description="Unique identifier for the primary administrative division",
     )
-    admin2: str = Field(
-        ..., max_length=100, description="Secondary administrative division"
+    admin2: Optional[str] = Field(
+        "Unknown", max_length=100, description="Secondary administrative division"
     )
-    admin2_id_giga: str = Field(
-        ...,
+    admin2_id_giga: Optional[str] = Field(
+        None,
         max_length=50,
         description="Unique identifier for the secondary administrative division",
     )

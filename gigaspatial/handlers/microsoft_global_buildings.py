@@ -22,7 +22,7 @@ from gigaspatial.grid.mercator_tiles import (
     MercatorTiles,
     CountryMercatorTiles,
 )
-from gigaspatial.config import config
+from gigaspatial.config import config as global_config
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -32,7 +32,7 @@ class MSBuildingsConfig:
     data_store: DataStore = field(
         default_factory=LocalDataStore
     )  # instance of DataStore for accessing data storage
-    BASE_PATH: Path = config.get_path("microsoft_global_buildings", "bronze")
+    BASE_PATH: Path = global_config.get_path("microsoft_global_buildings", "bronze")
 
     TILE_URLS: str = (
         "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
@@ -73,7 +73,7 @@ class MSBuildingsConfig:
     CUSTOM_MAPPING: Optional[Dict[str, str]] = None
 
     n_workers: int = 4  # number of workers for parallel processing
-    logger: Optional[logging.Logger] = config.get_logger(__name__)
+    logger: logging.Logger = global_config.get_logger(__name__)
 
     def __post_init__(self):
         """Validate inputs and set location mapping"""
@@ -98,6 +98,8 @@ class MSBuildingsConfig:
         self.location_mapping.update(self.CUSTOM_MAPPING or {})
 
         self._map_locations()
+
+        self.df_tiles.loc[self.df_tiles.country.isnull(), "country"] = None
 
     def _load_tile_urls(self):
         """Load dataset links from csv file."""
@@ -183,7 +185,6 @@ class MSBuildingsConfig:
                 self.df_tiles.country.isnull()
                 & self.df_tiles.quadkey.isin(country_tiles.quadkeys)
             ]
-            # filtered_tiles["country"] = country_code
             return filtered_tiles
 
         return pd.DataFrame(columns=self.df_tiles.columns)
@@ -230,6 +231,7 @@ class MSBuildingsDownloader:
     def __init__(
         self,
         config: Optional[MSBuildingsConfig] = None,
+        data_store: Optional[DataStore] = None,
         logger: Optional[logging.Logger] = None,
     ):
         """
@@ -239,8 +241,11 @@ class MSBuildingsDownloader:
             config: Optional configuration for customizing file paths.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or config.get_logger(__name__)
-        self.config = config or MSBuildingsConfig(logger=self.logger)
+        self.logger = logger or global_config.get_logger(__name__)
+        self.data_store = data_store or LocalDataStore()
+        self.config = config or MSBuildingsConfig(
+            data_store=self.data_store, logger=self.logger
+        )
 
     def _download_tile(
         self,

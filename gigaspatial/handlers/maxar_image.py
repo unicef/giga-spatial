@@ -15,20 +15,20 @@ from gigaspatial.processing.geo import (
     buffer_geodataframe,
 )
 from gigaspatial.processing.sat_images import calculate_pixels_at_location
-from gigaspatial.config import config
+from gigaspatial.config import config as global_config
 
 
 class MaxarConfig(BaseModel):
     """Configuration for Maxar Image Downloader using Pydantic"""
 
     username: str = Field(
-        default=config.MAXAR_USERNAME, description="Maxar API username"
+        default=global_config.MAXAR_USERNAME, description="Maxar API username"
     )
     password: str = Field(
-        default=config.MAXAR_PASSWORD, description="Maxar API password"
+        default=global_config.MAXAR_PASSWORD, description="Maxar API password"
     )
     connection_string: str = Field(
-        default=config.MAXAR_CONNECTION_STRING,
+        default=global_config.MAXAR_CONNECTION_STRING,
         description="Maxar WMS connection string",
     )
 
@@ -119,7 +119,7 @@ class MaxarImageDownloader:
             password=self.config.password,
         )
         self.data_store = data_store or LocalDataStore()
-        self.logger = config.get_logger(__name__)
+        self.logger = global_config.get_logger(__name__)
 
     def _download_single_image(self, bbox, output_path: Union[Path, str], size) -> bool:
         """Download a single image from bbox and pixel size"""

@@ -166,11 +166,14 @@ class ADLSDataStore(DataStore):
         except Exception as e:
             print(f"Failed to copy directory {source_dir}: {e}")
 
-    def file_exists(self, path: str) -> bool:
+    def exists(self, path: str) -> bool:
         blob_client = self.blob_service_client.get_blob_client(
             container=self.container, blob=path, snapshot=None
         )
         return blob_client.exists()
+
+    def file_exists(self, path: str) -> bool:
+        return self.exists(path) and not self.is_dir(path)
 
     def file_size(self, path: str) -> float:
         blob_client = self.blob_service_client.get_blob_client(
@@ -245,15 +248,50 @@ class ADLSDataStore(DataStore):
         return self.file_exists(path)
 
     def is_dir(self, path: str) -> bool:
-        blobs = self.list_files(path=path)
-        for blob in blobs:
-            if blob != path:
+        dir_path = path.rstrip("/") + "/"
+
+        existing_blobs = self.list_files(dir_path)
+
+        if len(existing_blobs) > 1:
+            return True
+        elif len(existing_blobs) == 1:
+            if existing_blobs[0] != path.rstrip("/"):
                 return True
+
         return False
 
     def rmdir(self, dir: str) -> None:
         blobs = self.list_files(dir)
         self.container_client.delete_blobs(*blobs)
+
+    def mkdir(self, path: str, exist_ok: bool = False) -> None:
+        """
+        Create a directory in Azure Blob Storage.
+
+        In ADLS, directories are conceptual and created by adding a placeholder blob.
+
+        :param path: Path of the directory to create
+        :param exist_ok: If False, raise an error if the directory already exists
+        """
+        dir_path = path.rstrip("/") + "/"
+
+        existing_blobs = list(self.list_files(dir_path))
+
+        if existing_blobs and not exist_ok:
+            raise FileExistsError(f"Directory {path} already exists")
+
+        # Create a placeholder blob to represent the directory
+        placeholder_blob_path = os.path.join(dir_path, ".placeholder")
+
+        # Only create placeholder if it doesn't already exist
+        if not self.file_exists(placeholder_blob_path):
+            placeholder_content = (
+                b"This is a placeholder blob to represent a directory."
+            )
+            blob_client = self.blob_service_client.get_blob_client(
+                container=self.container, blob=placeholder_blob_path
+            )
+            blob_client.upload_blob(placeholder_content, overwrite=True)
 
     def remove(self, path: str) -> None:
         blob_client = self.blob_service_client.get_blob_client(

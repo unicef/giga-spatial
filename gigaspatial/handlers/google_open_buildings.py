@@ -5,8 +5,6 @@ import multiprocessing
 from typing import List, Optional, Union, Literal
 import geopandas as gpd
 import pandas as pd
-from scipy.spatial import cKDTree
-from shapely import wkt
 from shapely.geometry import Polygon, MultiPolygon
 import requests
 from tqdm import tqdm
@@ -14,17 +12,15 @@ import logging
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.handlers.boundaries import AdminBoundaries
-from gigaspatial.processing.geo import calculate_distance, convert_to_geodataframe
-from gigaspatial.config import config
+from gigaspatial.config import config as global_config
 
 
 @dataclass
 class GoogleOpenBuildingsConfig:
     """Configuration for Google Open Buildings dataset files."""
 
-    base_path: Path = config.get_path("google_open_buildings", "bronze")
+    base_path: Path = global_config.get_path("google_open_buildings", "bronze")
     data_types: tuple = ("polygons", "points")
     n_workers: int = 4  # number of workers for parallel processing
 
@@ -66,9 +62,9 @@ class GoogleOpenBuildingsDownloader:
             data_store: Instance of DataStore for accessing data storage
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or config.get_logger(__name__)
         self.data_store = data_store or LocalDataStore()
         self.config = config or GoogleOpenBuildingsConfig()
+        self.logger = logger or global_config.get_logger(__name__)
 
         # Load and cache S2 tiles
         self._load_s2_tiles()
@@ -92,8 +88,12 @@ class GoogleOpenBuildingsDownloader:
             if geometry.crs != "EPSG:4326":
                 geometry = geometry.to_crs("EPSG:4326")
             search_geom = geometry.geometry.unary_union
-        else:
+        elif isinstance(geometry, (Polygon, MultiPolygon)):
             search_geom = geometry
+        else:
+            raise ValueError(
+                f"Expected Polygon, Multipolygon or GeoDataFrame got {geometry.__class__}"
+            )
 
         # Find intersecting tiles
         mask = (
@@ -234,119 +234,3 @@ class GoogleOpenBuildingsDownloader:
 
         # Filter out None values (failed downloads)
         return [path for path in file_paths if path is not None]
-
-
-class GoogleOpenBuildingsMapper:
-    """A class to map and analyze Google Open Buildings data in relation to points of interest."""
-
-    def __init__(
-        self,
-        config: Optional[GoogleOpenBuildingsConfig] = None,
-        data_store: Optional[DataStore] = None,
-    ):
-        """
-        Initialize the GoogleOpenBuildingsMapper.
-
-        Args:
-            n_workers: Number of workers for parallel processing
-            config: Optional configuration for file paths
-        """
-        self.config = config or GoogleOpenBuildingsConfig()
-        self.handler = GoogleOpenBuildingsDownloader(data_store=data_store)
-
-    def load_data(
-        self, tiles: pd.DataFrame, data_type: Literal["polygons", "points"]
-    ) -> pd.DataFrame:
-        """
-        Load building data from tiles, downloading if necessary.
-
-        Args:
-            tiles: DataFrame containing tile information
-            data_type: Type of data to load ('polygons' or 'points')
-
-        Returns:
-            DataFrame containing building data
-        """
-        all_data = []
-
-        for _, tile in tiles.iterrows():
-            file_path = str(self.config.get_tile_path(tile.tile_id, data_type))
-
-            if not self.handler.data_store.file_exists(file_path):
-                downloaded_path = self.handler._download_tile(tile, data_type)
-                if downloaded_path is None:
-                    continue
-
-                file_path = downloaded_path
-
-            df = read_dataset(self.handler.data_store, file_path)
-
-            # If data type is polygons, convert WKT strings to geometry objects
-            if data_type == "polygons":
-                df["geometry"] = df["geometry"].apply(wkt.loads)
-                df = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
-
-            all_data.append(df)
-
-        if not all_data:
-            return pd.DataFrame()
-
-        # Concatenate all tile data
-        result = pd.concat(all_data, ignore_index=True)
-
-        # If polygons, ensure result is GeoDataFrame
-        if data_type == "polygons":
-            result = gpd.GeoDataFrame(result, geometry="geometry", crs="EPSG:4326")
-
-        return result
-
-    def map_nearest_building(
-        self,
-        df_points: Union[pd.DataFrame, gpd.GeoDataFrame],
-        max_distance: Optional[float] = None,
-    ):
-        """
-        Map each point to its nearest building.
-
-        Args:
-            df_points: DataFrame or GeoDataFrame containing points
-            max_distance: Maximum distance in meters to consider (optional)
-
-        Returns:
-            GeoDataFrame with nearest building information
-        """
-        if isinstance(df_points, pd.DataFrame):
-            gdf_points = convert_to_geodataframe(df_points)
-
-        intersection_tiles = self.handler._get_intersecting_tiles(gdf_points)
-
-        if intersection_tiles.empty:
-            return df_points
-
-        df_buildings = self.load_data(tiles=intersection_tiles, data_type="points")
-
-        tree = cKDTree(df_buildings[["latitude", "longitude"]])
-
-        _, idx = tree.query(df_points[["latitude", "longitude"]], k=1)
-
-        df_nearest_buildings = df_buildings.iloc[idx]
-
-        dist = calculate_distance(
-            lat1=df_points.latitude,
-            lon1=df_points.longitude,
-            lat2=df_nearest_buildings.latitude,
-            lon2=df_nearest_buildings.longitude,
-        )
-
-        df_points["nearest_building_full_plus_code"] = (
-            df_nearest_buildings.full_plus_code.to_numpy()
-        )
-        df_points["nearest_building_distance"] = dist
-
-        # Filter by max distance if specified
-        if max_distance is not None:
-            df_points = df_points[
-                df_points["nearest_building_distance"] <= max_distance
-            ]
-
-        return df_points

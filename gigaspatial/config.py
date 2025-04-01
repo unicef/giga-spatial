@@ -41,6 +41,11 @@ class Config(BaseSettings):
         description="Root directory for final/gold tier data",
         alias="GOLD_DIR",
     )
+    VIEWS_DATA_DIR: Path = Field(
+        default=Path("views"),
+        description="Root directory for views data",
+        alias="VIEWS_DIR",
+    )
     CACHE_DIR: Path = Field(
         default=Path("cache"),
         description="Directory for temporary/cache files",
@@ -61,6 +66,7 @@ class Config(BaseSettings):
             "srtm": "srtm",
             "worldpop": "worldpop",
             "ghsl": "ghsl",
+            "poi": "poi",
         },
         description="Mapping of data types to directory names",
     )
@@ -85,7 +91,7 @@ class Config(BaseSettings):
     def get_path(
         self,
         data_type: str,
-        tier: Literal["bronze", "silver", "gold"],
+        tier: Literal["bronze", "silver", "gold", "views"],
         version: Optional[str] = None,
     ) -> Path:
         """Dynamic path construction based on data type and tier."""
@@ -151,10 +157,10 @@ class Config(BaseSettings):
 
 
 @lru_cache()
-def get_config() -> Config:
+def get_default_config() -> Config:
     """Returns a singleton instance of Config."""
     return Config()
 
 
 # Singleton instance
-config = get_config()
+config = get_default_config()

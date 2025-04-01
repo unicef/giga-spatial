@@ -23,7 +23,7 @@ class LocalDataStore(DataStore):
 
     def write_file(self, path: str, data: Union[bytes, str]) -> None:
         full_path = self._resolve_path(path)
-        self.makedirs(str(full_path.parent), exist_ok=True)
+        self.mkdir(str(full_path.parent), exist_ok=True)
 
         if isinstance(data, str):
             mode = "w"
@@ -54,7 +54,7 @@ class LocalDataStore(DataStore):
 
     def open(self, path: str, mode: str = "r") -> IO:
         full_path = self._resolve_path(path)
-        self.makedirs(str(full_path.parent), exist_ok=True)
+        self.mkdir(str(full_path.parent), exist_ok=True)
         return open(full_path, mode)
 
     def is_file(self, path: str) -> bool:
@@ -73,7 +73,7 @@ class LocalDataStore(DataStore):
         if full_path.is_dir():
             os.rmdir(full_path)
 
-    def makedirs(self, path: str, exist_ok: bool = False) -> None:
+    def mkdir(self, path: str, exist_ok: bool = False) -> None:
         full_path = self._resolve_path(path)
         full_path.mkdir(parents=True, exist_ok=exist_ok)
 

@@ -4,12 +4,9 @@ import functools
 import multiprocessing
 from typing import List, Optional, Union, Literal
 import geopandas as gpd
-import pandas as pd
 import numpy as np
-from scipy.spatial import cKDTree
 from shapely.strtree import STRtree
 from pydantic.dataclasses import dataclass
-from shapely import wkt
 from shapely.geometry import Polygon, MultiPolygon
 from enum import Enum
 import pycountry
@@ -19,7 +16,6 @@ import zipfile
 import tempfile
 import shutil
 from pydantic import (
-    BaseModel,
     HttpUrl,
     Field,
     model_validator,
@@ -31,9 +27,8 @@ import os
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.handlers.boundaries import AdminBoundaries
-from gigaspatial.config import config
+from gigaspatial.config import config as global_config
 
 
 class CoordSystem(int, Enum):
@@ -56,7 +51,7 @@ class GHSLDataConfig:
     TILES_URL: str = "https://ghsl.jrc.ec.europa.eu/download/GHSL_data_{}_shapefile.zip"
 
     # user config
-    base_path: Path = Field(default=config.get_path("ghsl", "bronze"))
+    base_path: Path = Field(default=global_config.get_path("ghsl", "bronze"))
     coord_system: CoordSystem = CoordSystem.WGS84
     release: str = "R2023A"
 
@@ -71,7 +66,7 @@ class GHSLDataConfig:
     year: int = 2020
     resolution: int = 100
 
-    logger: Optional[logging.Logger] = config.get_logger(__name__)
+    logger: logging.Logger = global_config.get_logger(__name__)
     n_workers: int = 4
 
     def _load_tiles(self):
@@ -161,6 +156,10 @@ class GHSLDataConfig:
 
         return self
 
+    @property
+    def crs(self) -> str:
+        return "EPSG:4326" if self.coord_system == CoordSystem.WGS84 else "ESRI:54009"
+
     def _get_product_info(self) -> dict:
         """Generate and return common product information used in multiple methods."""
         resolution_str = (
@@ -195,6 +194,68 @@ class GHSLDataConfig:
         ]
 
         return "/".join(path_segments)
+
+    def get_country_tiles(
+        self,
+        country: str,
+        data_store: Optional[DataStore] = None,
+        country_geom_path: Optional[Union[Path, str]] = None,
+    ) -> List:
+
+        def _load_country_geometry(
+            country: str,
+            data_store: Optional[DataStore] = None,
+            country_geom_path: Optional[Union[Path, str]] = None,
+        ) -> Union[Polygon, MultiPolygon]:
+            """Load country boundary geometry from DataStore or GADM."""
+
+            gdf_admin0 = (
+                AdminBoundaries.create(
+                    country_code=pycountry.countries.lookup(country).alpha_3,
+                    admin_level=0,
+                    data_store=data_store,
+                    path=country_geom_path,
+                )
+                .to_geodataframe()
+                .to_crs(self.tiles_gdf.crs)
+            )
+
+            return gdf_admin0.geometry.iloc[0]
+
+        country_geom = _load_country_geometry(country, data_store, country_geom_path)
+
+        s = STRtree(self.tiles_gdf.geometry)
+        result = s.query(country_geom, predicate="intersects")
+
+        intersection_tiles = self.tiles_gdf.iloc[result].reset_index(drop=True)
+
+        return [tile for tile in intersection_tiles.tile_id]
+
+    def get_intersecting_tiles(
+        self, geometry: Union[Polygon, MultiPolygon, gpd.GeoDataFrame], crs=4326
+    ) -> List[str]:
+        """
+        Find all GHSL tiles that intersect with the provided geometry.
+
+        Args:
+            geometry: A geometry or GeoDataFrame to check for intersection with GHSL tiles
+            crs: Coordinate reference system of the given geometry
+
+        Returns:
+            List of URLs for GHSL dataset tiles that intersect with the geometry
+        """
+
+        if isinstance(geometry, gpd.GeoDataFrame):
+            search_geom = geometry.geometry.unary_union
+        else:
+            search_geom = geometry
+
+        s = STRtree(self.tiles_gdf.geometry.to_crs(crs))
+        result = s.query(search_geom, predicate="intersects")
+
+        intersection_tiles = self.tiles_gdf.iloc[result].reset_index(drop=True)
+
+        return [tile for tile in intersection_tiles.tile_id]
 
     def get_tile_path(self, tile_id=None) -> str:
         """Construct and return the path for the configured dataset."""
@@ -242,69 +303,12 @@ class GHSLDataDownloader:
             data_store: Optional data storage interface. If not provided, uses LocalDataStore.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or config.get_logger(__name__)
+        self.logger = logger or global_config.get_logger(__name__)
         self.data_store = data_store or LocalDataStore()
         self.config = (
             config if isinstance(config, GHSLDataConfig) else GHSLDataConfig(**config)
         )
         self.config.logger = self.logger
-
-    def _get_country_tiles(
-        self,
-        country: str,
-        data_store: Optional[DataStore] = None,
-        country_geom_path: Optional[Union[Path, str]] = None,
-    ) -> List:
-
-        def _load_country_geometry(
-            country: str,
-            data_store: Optional[DataStore] = None,
-            country_geom_path: Optional[Union[Path, str]] = None,
-        ) -> Union[Polygon, MultiPolygon]:
-            """Load country boundary geometry from DataStore or GADM."""
-
-            gdf_admin0 = AdminBoundaries.create(
-                country_code=pycountry.countries.lookup(country).alpha_3,
-                admin_level=0,
-                data_store=data_store,
-                path=country_geom_path,
-            ).to_geodataframe()
-
-            return gdf_admin0.geometry.iloc[0]
-
-        country_geom = _load_country_geometry(country, data_store, country_geom_path)
-
-        s = STRtree(self.config.tiles_gdf.geometry)
-        result = s.query(country_geom, predicate="intersects")
-
-        intersection_tiles = self.config.tiles_gdf.iloc[result].reset_index(drop=True)
-
-        return [tile for tile in intersection_tiles.tile_id]
-
-    def _get_intersecting_tiles(
-        self, geometry: Union[Polygon, MultiPolygon, gpd.GeoDataFrame]
-    ) -> List[str]:
-        """
-        Find all GHSL tiles that intersect with the provided geometry.
-
-        Args:
-            geometry: A geometry or GeoDataFrame to check for intersection with GHSL tiles
-
-        Returns:
-            List of URLs for GHSL dataset tiles that intersect with the geometry
-        """
-
-        if isinstance(geometry, gpd.GeoDataFrame):
-            search_geom = geometry.geometry.unary_union
-        else:
-            search_geom = geometry
-
-        s = STRtree(self.config.tiles_gdf.geometry)
-        result = s.query(search_geom, predicate="intersects")
-
-        intersection_tiles = self.config.tiles_gdf.iloc[result].reset_index(drop=True)
-
-        return [tile for tile in intersection_tiles.tile_id]
 
     def _download_tile(self, tile_id: str) -> str:
         """
@@ -423,7 +427,7 @@ class GHSLDataDownloader:
         """
 
         # Get intersecting tiles
-        country_tiles = self._get_country_tiles(
+        country_tiles = self.config.get_country_tiles(
             country=country, data_store=data_store, country_geom_path=country_geom_path
         )
 
@@ -460,7 +464,7 @@ class GHSLDataDownloader:
             List of paths to downloaded files
         """
         # Get intersecting tiles
-        int_tiles = self._get_intersecting_tiles(points_gdf)
+        int_tiles = self.config.get_intersecting_tiles(points_gdf, points_gdf.crs)
 
         if not int_tiles:
             self.logger.warning(f"There is no matching data for the points")
