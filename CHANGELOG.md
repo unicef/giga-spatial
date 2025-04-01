@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.0] - 2025-04-01
+## Added
+- **POI View Generators**: Introduced a new module, generators, containing a base class for POI view generation.
+- **Expanded POI Support**: Added new classes for generating POI views from:
+	- **Google Open Buildings**
+	- **Microsoft Global Buildings**
+	- **GHSL Settlement Model**
+	- **GHSL Built Surface**
+- **New Reader**: Added read_gzipped_json_or_csv to handle compressed JSON/CSV files.
+
+## Changed
+- **ADLSDataStore Enhancements**: Updated methods to match LocalDataStore for improved consistency.
+- **Geo Processing Updates**:
+	- Improved convert_to_dataframe for more efficient data conversion.
+	- Enhanced annotate_with_admin_regions to improve spatial joins.
+- **New TifProcessor Methods**:
+	- sample_by_polygons for polygon-based raster sampling.
+	- sample_multiple_tifs_by_coordinates & sample_multiple_tifs_by_polygons to manage multi-raster sampling.
+- **Fixed Global Config Handling**: Resolved issues with handling configurations inside classes.
+
 ## [v0.3.2] - 2025-03-21
 ### Added
 - Added a method to efficiently assign unique IDs to features.
