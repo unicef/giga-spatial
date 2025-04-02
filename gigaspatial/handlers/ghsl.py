@@ -250,7 +250,13 @@ class GHSLDataConfig:
         else:
             search_geom = geometry
 
-        s = STRtree(self.tiles_gdf.geometry.to_crs(crs))
+        search_geom = (
+            gpd.GeoDataFrame(geometry=[search_geom], crs=crs)
+            .to_crs(self.tiles_gdf.crs)
+            .geometry.iloc[0]
+        )
+
+        s = STRtree(self.tiles_gdf.geometry)
         result = s.query(search_geom, predicate="intersects")
 
         intersection_tiles = self.tiles_gdf.iloc[result].reset_index(drop=True)
