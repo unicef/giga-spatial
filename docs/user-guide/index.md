@@ -1,58 +1,33 @@
 # User Guide
 
-Welcome to the GigaSpatial User Guide. This guide provides comprehensive documentation on how to use GigaSpatial effectively for your spatial data analysis needs.
-
-## Overview
-
-GigaSpatial is designed to make spatial data analysis and processing both powerful and accessible. Whether you're working with small datasets or processing terabytes of geographic information, GigaSpatial provides the tools you need.
-
-## Guide Structure
-
-- **Basic Usage**: Learn the fundamentals of GigaSpatial, including data loading, basic operations, and visualization
-- **Advanced Features**: Explore powerful features for complex spatial analysis and large-scale data processing
-- **Best Practices**: Discover recommended patterns and practices for efficient and maintainable code
-
-## Key Concepts
-
-### Data Models
-
-GigaSpatial uses efficient data models optimized for spatial operations:
-
-- **Vector Data**: Points, lines, and polygons
-- **Raster Data**: Grid-based spatial data
-- **Metadata**: Spatial reference systems and attributes
-
-### Processing Pipeline
-
-A typical GigaSpatial workflow consists of:
-
-1. Data Loading
-2. Preprocessing
-3. Analysis
-4. Visualization
-5. Export
-
-### Performance Considerations
-
-GigaSpatial is built with performance in mind:
-
-- Efficient memory usage for large datasets
-- Parallel processing capabilities
-- Optimized spatial algorithms
-- Caching mechanisms for repeated operations
+Welcome to the User Guide for the `gigaspatial` package. This guide provides detailed documentation on how to use the package for various geospatial data tasks.
 
 ## Getting Started
 
-If you're new to GigaSpatial, we recommend starting with:
+If you’re new to `gigaspatial`, start with the [Quick Start Guide](../getting-started/quickstart.md) to learn the basics.
 
-1. [Installation Guide](../getting-started/installation.md)
-2. [Quick Start Tutorial](../getting-started/quickstart.md)
-3. [Basic Usage Guide](basic-usage.md)
+---
 
-## Need Help?
+## Core Concepts
 
-If you need assistance:
+### 1. **Configuration**
+Learn how to configure the package, including setting paths, API keys, and other settings.
 
-- Check our [Examples](../examples/index.md) section
-- Visit our [GitHub repository](https://github.com/unicef/giga-spatial)
-- Read through our [API Reference](../api/index.md) 
+- [Configuration Overview](configuration.md)
+- [Using Environment Variables](configuration.md#using-environment-variables)
+- [Setting Paths and Keys Manually](configuration.md#setting-paths-and-keys-manually)
+
+---
+
+## Additional Resources
+
+- [Examples](../examples/): Real-world examples and use cases.
+- [API Reference](../api/): Detailed documentation of all classes and functions.
+- [Changelog](../changelog.md): Information about the latest updates and changes.
+- [Contributing](../contributing.md): Guidelines for contributing to the project.
+
+---
+
+## Support
+
+If you encounter any issues or have questions, feel free to [open an issue](https://github.com/unicef/giga-spatial/issues) or [join our Discord community](https://discord.com/invite/NStBwE7kyv).

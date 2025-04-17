@@ -43,6 +43,7 @@ theme:
     - content.code.annotate
 
 repo_name: giga-spatial
+site_url: https://unicef.github.io/giga-spatial
 repo_url: https://github.com/unicef/giga-spatial
 edit_uri: edit/main/docs/
 
@@ -59,14 +60,16 @@ nav:
     #- Best Practices: user-guide/best-practices.md
   - API Reference:
     - Overview: api/index.md
+    - Handlers: api/handlers.md
+    - Processing: api/processing.md
+    - Core: api/core.md
+    - Generators: api/generators.md
+    - Grid: api/grid.md
     #- Core Functions: api/core.md
     #- Utilities: api/utils.md
     #- Data Types: api/data-types.md
   - Examples:
     - Overview: examples/index.md
-    - Basic Examples: examples/basic.md
-    - Advanced Examples: examples/advanced.md
-    - Use Cases: examples/use-cases.md
   - Contributing:
     - How to Contribute: contributing.md
     #- Development Setup: contributing/development-setup.md
@@ -122,6 +125,10 @@ plugins:
       default_handler: python
       handlers:
         python:
+          options:
+            show_submodules: true
+          filters:
+              - "!^_" 
           rendering:
             show_source: true
             show_category_heading: true

@@ -261,13 +261,21 @@ class OSMLocationFetcher:
 
         # Process nodes and relations
         with ThreadPoolExecutor() as executor:
-            processed_nodes_relations = list(
-                executor.map(self._process_node_relation, nodes_relations)
-            )
+            processed_nodes_relations = [
+                item
+                for sublist in executor.map(
+                    self._process_node_relation, nodes_relations
+                )
+                for item in sublist
+            ]
 
         # Process ways
         with ThreadPoolExecutor() as executor:
-            processed_ways = list(executor.map(self._process_way, ways))
+            processed_ways = [
+                item
+                for sublist in executor.map(self._process_way, ways)
+                for item in sublist
+            ]
 
         # Combine all processed elements
         all_elements = processed_nodes_relations + processed_ways

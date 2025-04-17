@@ -35,11 +35,11 @@ class GigaEntity(BaseGigaEntity):
     longitude: float = Field(
         ..., ge=-180, le=180, description="Longitude coordinate of the entity"
     )
-    admin1: str = Field(
-        ..., max_length=100, description="Primary administrative division"
+    admin1: Optional[str] = Field(
+        "Unknown", max_length=100, description="Primary administrative division"
     )
-    admin1_id_giga: str = Field(
-        ...,
+    admin1_id_giga: Optional[str] = Field(
+        None,
         max_length=50,
         description="Unique identifier for the primary administrative division",
     )

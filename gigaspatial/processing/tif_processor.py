@@ -127,6 +127,9 @@ class TifProcessor:
 
         return self._tabular
 
+    def to_dataframe(self) -> pd.DataFrame:
+        return self.tabular
+
     def get_zoned_geodataframe(self) -> gpd.GeoDataFrame:
         """
         Convert the processed TIF data into a GeoDataFrame, where each row represents a pixel zone.

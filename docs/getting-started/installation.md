@@ -1,53 +1,81 @@
 # Installation Guide
 
+This guide will walk you through the steps to install the `gigaspatial` package on your system. The package is compatible with Python 3.7 and above.
+
 ## Prerequisites
 
-Before installing GigaSpatial, ensure you have the following prerequisites:
-
-- Python 3.10 or higher
-
-## Installation Methods
-
-Since GigaSpatial is currently in development, you'll need to install it directly from the repository:
+Before installing `gigaspatial`, ensure you have Python installed on your system. You can check your Python version by running:
 
 ```bash
-# Clone the repository
-git clone https://github.com/unicef/giga-spatial
-cd giga-spatial
+python --version
+```
 
-# Create and activate a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+If Python is not installed, you can download it from the [official Python website](https://www.python.org/downloads/).
+
+## Installing via pip
+
+You can install the `gigaspatial` package directly from the source using `pip`. Follow these steps:
+
+1. **Clone the Repository** (if you haven't already):
+   ```bash
+   git clone https://github.com/unicef/giga-spatial.git
+   cd giga-spatial
+   ```
+
+2. **Install the Package**:
+   Run the following command in your terminal to install the package:
+   ```bash
+   pip install .
+   ```
+
+   This command will install `gigaspatial` along with its dependencies.
+
+## Installing in Development Mode
+
+If you plan to contribute to the package or modify the source code, you can install it in development mode. This allows you to make changes to the code without reinstalling the package. To install in development mode, run:
+
+```bash
+pip install -e .
+```
+
+## Installing Dependencies
+
+The package dependencies are automatically installed when you install `gigaspatial`. However, if you need to install them manually, you can use:
+
+```bash
 pip install -r requirements.txt
 ```
 
+## Verifying the Installation
 
-## Dependencies
+After installation, you can verify that the package is installed correctly by running:
 
-GigaSpatial requires the following main dependencies:
-
-- numpy
-- pandas
-- geopandas
-- rasterio
-- shapely
-- pyproj
-
-These dependencies will be automatically installed when you install GigaSpatial using pip.
-
-## Verifying Installation
-
-To verify that GigaSpatial is installed correctly, you can run:
-
-```python
-import gigaspatial
+```bash
+python -c "import gigaspatial; print(gigaspatial.__version__)"
 ```
+
+This should print the version of the installed package.
 
 ## Troubleshooting
 
-If you encounter any issues during installation:
+If you encounter any issues during installation, consider the following:
 
-1. Ensure your Python version is compatible
-2. Update pip to the latest version: `pip install --upgrade pip`
-3. Check our [GitHub Issues](https://github.com/unicef/giga-spatial/issues) for known problems
-4. If the problem persists, please [open a new issue](https://github.com/unicef/giga-spatial/issues/new) 
+- **Ensure `pip` is up-to-date**:
+  ```bash
+  pip install --upgrade pip
+  ```
+
+- **Check for conflicting dependencies**: If you have other Python packages installed that might conflict with `gigaspatial`, consider using a virtual environment.
+
+- **Use a Virtual Environment**: To avoid conflicts with other Python packages, you can create a virtual environment:
+  ```bash
+  python -m venv venv
+  source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+  pip install .
+  ```
+
+---
+
+### Next Steps
+
+Once the installation is complete, you can proceed to the [Quick Start Guide](quickstart.md) to begin using the `gigaspatial` package.

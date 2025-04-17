@@ -15,7 +15,7 @@ GigaSpatial is a powerful Python package designed for spatial data analysis and 
 - [Installation Guide](getting-started/installation.md)
 - [Quick Start Tutorial](getting-started/quickstart.md)
 - [API Reference](api/index.md)
-- [Example Gallery](examples/basic.md)
+- [Example Gallery](examples/)
 
 ## Getting Help
 

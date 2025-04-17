@@ -1,60 +1,60 @@
 # API Reference
 
-Welcome to the GigaSpatial API reference documentation. This section provides detailed information about all public modules, classes, and functions in GigaSpatial.
+Welcome to the API reference for the `gigaspatial` package. This documentation provides detailed information about the modules, classes, and functions available in the package.
 
-## API Structure
+## Modules
 
-GigaSpatial's API is organized into several main components:
+The `gigaspatial` package is organized into several modules, each serving a specific purpose:
 
-### Core Module
+### 1. **Handlers**
+The `handlers` module contains classes for downloading and processing geospatial data from various sources, such as OpenStreetMap (OSM) and the Global Human Settlement Layer (GHSL).
 
-### Handlers Module
+- **OSMLocationFetcher**: Fetches and processes location data from OpenStreetMap.
+- **GHSLDataDownloader**: Downloads and processes data from the Global Human Settlement Layer.
 
-### Processing Module
+[Learn more about the Handlers module](handlers.md)
 
-### Grid Module
+### 2. **Processing**
+The `processing` module provides tools for processing geospatial data, such as GeoTIFF files.
 
-### Utils Module
+- **TifProcessor**: Processes GeoTIFF files and extracts relevant data.
 
-## Using the API
+[Learn more about the Processing module](processing.md)
 
-### Installation
+### 3. **Core**
+The `core` module contains essential utilities and base classes used throughout the package.
 
-Since GigaSpatial is currently in development, you'll need to install it directly from the repository:
+- **DataStore**: Handles the storage and retrieval of geospatial data in various formats.
+- **Config**: Manages configuration settings, such as paths and API keys.
 
-```bash
-# Clone the repository
-git clone https://github.com/unicef/giga-spatial
-cd giga-spatial
+[Learn more about the Core module](core.md)
 
-# Create and activate a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+### 4. **Generators**
+The `generators` module includes tools for generating geospatial data, such as grids and synthetic datasets.
 
-pip install -r requirements.txt
-```
+[Learn more about the Generators module](generators.md)
 
-### Import Convention
+### 5. **Grid**
+The `grid` module provides utilities for working with geospatial grids, such as creating and manipulating grid-based data.
 
-Once installed, you can import GigaSpatial components.
+[Learn more about the Grid module](grid.md)
 
-## Version Compatibility
+---
 
-- API stability is guaranteed for all releases following semantic versioning
-- Breaking changes are only introduced in major version updates
-- Deprecation warnings are issued at least one minor version before removal
+## Getting Started
 
-## Contributing
+To get started with the `gigaspatial` package, follow the [Quick Start Guide](../getting-started/quickstart.md).
 
-If you'd like to contribute to the GigaSpatial:
+---
 
-1. Read our [Contributing Guide](../contributing.md)
-2. Submit a pull request with your changes
+## Additional Resources
 
-## Need Help?
+- [Examples](../examples/): Real-world examples and use cases.
+- [Changelog](../changelog.md): Information about the latest updates and changes.
+- [Contributing](../contributing.md): Guidelines for contributing to the project.
 
-If you need assistance with the GigaSpatial:
+---
 
-- Check the examples in each module's documentation
-- Look at the [Examples](../examples/index.md) section
-- Create an issue on our [GitHub repository](https://github.com/unicef/giga-spatial)
+## Support
+
+If you encounter any issues or have questions, feel free to [open an issue](https://github.com/unicef/giga-spatial/issues) or [join our Discord community](https://discord.com/invite/NStBwE7kyv).

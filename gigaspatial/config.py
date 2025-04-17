@@ -88,6 +88,22 @@ class Config(BaseSettings):
 
         return logger
 
+    def set_path(
+        self,
+        tier: Literal["bronze", "silver", "gold", "views"],
+        path: Union[str, Path],
+    ) -> None:
+        """Dynamically set the base path for a given tier."""
+        if tier not in ["bronze", "silver", "gold", "views"]:
+            raise ValueError(
+                f"Invalid tier: {tier}. Must be one of 'bronze', 'silver', 'gold', or 'views'."
+            )
+
+        if isinstance(path, str):
+            path = Path(path)
+
+        setattr(self, f"{tier.upper()}_DATA_DIR", path)
+
     def get_path(
         self,
         data_type: str,
@@ -95,6 +111,11 @@ class Config(BaseSettings):
         version: Optional[str] = None,
     ) -> Path:
         """Dynamic path construction based on data type and tier."""
+        if tier not in ["bronze", "silver", "gold", "views"]:
+            raise ValueError(
+                f"Invalid tier: {tier}. Must be one of 'bronze', 'silver', 'gold', or 'views'."
+            )
+
         base_dir = getattr(self, f"{tier.upper()}_DATA_DIR")
         type_dir = self.DATA_TYPES[data_type]
         if version:

@@ -9,7 +9,52 @@
 Giga is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice. 
 Giga maps schools’ Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity. 
 
----  
+---
+
+## About GigaSpatial
+
+**GigaSpatial** is a Python package developed as part of the Giga Applied Science Team to handle geospatial data efficiently. It provides tools for downloading, processing, and analyzing geospatial data, enabling users to work with datasets such as OpenStreetMap (OSM) and the Global Human Settlement Layer (GHSL). The package is designed to support Giga's mission by providing robust geospatial capabilities for mapping and analyzing school connectivity.
+
+### Key Features
+- **Data Downloading**: Download geospatial data from various sources.
+- **Data Processing**: Process and transform geospatial data, such as GeoTIFF files and vector data.
+- **View Generators**: Enrich the spatial context and map data into grid or POI (Point of Interest) locations.
+- **Grid System**: Create and manipulate grid-based geospatial data for analysis and modeling.
+- **Data Storage**: Store and retrieve geospatial data in various formats.
+- **Configuration Management**: Easily configure paths, API keys, and other settings using environment variables or manual setup.
+
+---
+
+## Supported Datasets
+
+The `gigaspatial` package supports data from the following providers:
+
+<div align="center">
+    <img src="https://github.com/unicef/giga-spatial/blob/main/docs/assets/datasets.png" alt="Dataset Providers" style="width: 70%; height: auto;"/>
+</div>
+
+---
+
+### View Generators
+
+The **view generators** in GigaSpatial are designed to enrich the spatial context of school locations and map data into grid or POI locations. This enables users to analyze and visualize geospatial data in meaningful ways.
+
+### Key Capabilities
+1. **Spatial Context Enrichment**:
+   - Automatic attribution of geospatial variables to school locations.
+   - Contextual layers for environmental, infrastructural, and socioeconomic factors.
+   - Multi-resolution data availability for different analytical needs.
+
+2. **Mapping to Grid or POI Locations**:
+   - Map geospatial data to grid cells for scalable analysis.
+   - Map data to POI locations for detailed, location-specific insights.
+
+---
+
+## Why Use GigaSpatial?
+- **Efficient Geospatial Handling**: Streamline the process of downloading, processing, and analyzing geospatial data.
+- **Scalable Analysis**: Map data to grid cells or POI locations for both scalable and detailed insights.
+- **Open Source**: Contribute to and benefit from a collaborative, transparent, and innovative geospatial toolset.
 
 ## Why Open Source?  
 
@@ -43,6 +88,8 @@ At Giga, we're committed to maintaining an environment that's respectful, inclus
 
 ## Stay Connected  
 
-To learn more about Giga and our mission, visit our official website: [Giga.Global](https://giga.global)  
+To learn more about Giga and our mission, visit our official website: [Giga.Global](https://giga.global)
+
+## Join Us
 
 Join us in creating an open-source future for education! 🌍  

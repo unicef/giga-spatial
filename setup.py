@@ -10,7 +10,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="gigaspatial",
-    version="0.3.1",
+    version="0.4.1",
     author="Utku Can Ozturk",
     author_email="utkucanozturk@gmail.com",
     description="A package for spatial data download & processing",

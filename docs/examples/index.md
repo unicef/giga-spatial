@@ -1,91 +1,52 @@
-# Examples Gallery
+# Examples
 
-Welcome to the GigaSpatial Examples Gallery. This section provides a collection of practical examples and tutorials to help you understand how to use GigaSpatial effectively.
+Welcome to the examples section of the `gigaspatial` package. Here, you’ll find practical examples that demonstrate how to use the package for various geospatial data tasks.
+
+## Getting Started
+
+If you’re new to `gigaspatial`, start with the [Quick Start Guide](../getting-started/quickstart.md) to learn the basics.
+
+---
 
 ## Example Categories
 
-### Basic Examples
+### 1. **Data Downloading**
+Learn how to download geospatial data from various sources.
 
-The [Basic Examples](basic.md) section covers fundamental operations:
+- [Downloading GHSL Data](downloading/ghsl.md)
+- [Fetching OSM Data](downloading/osm.md)
 
-- Downloading, loading and saving spatial data
-- Basic geometric operations
-- Common data transformations
+### 2. **Data Processing**
+Explore examples of processing geospatial data, such as GeoTIFF files.
 
-### Advanced Examples
+- [Processing GeoTIFF Files](processing/tif.md)
 
-The Advanced Examples section demonstrates more complex use cases:
+### 3. **Data Storage** *(In Progress)*
+Discover how to store and retrieve geospatial data in different formats.
 
-- Complex spatial analysis
-- Performance optimization
-- Custom processing pipelines
-- Advanced visualization techniques
+- [Saving Data to GeoJSON](storage/geojson.md) *(Coming Soon)*
+- [Storing Data in a Database](storage/database.md) *(Coming Soon)*
 
-### Use Cases
+### 4. **Data Visualization** *(In Progress)*
+Learn how to visualize geospatial data using popular libraries.
 
-The Use Cases section shows real-world applications:
+- [Plotting Data with Matplotlib](visualization/matplotlib.md) *(Coming Soon)*
+- [Creating Interactive Maps with Folium](visualization/folium.md) *(Coming Soon)*
 
-- Infrastructure mapping
-- Demographic studies
+### 5. **Advanced Use Cases** *(In Progress)*
+Explore advanced examples that combine multiple functionalities.
 
-## Interactive Examples
+- [Building a Geospatial Pipeline](advanced/pipeline.md) *(Coming Soon)*
+- [Integrating with External APIs](advanced/api_integration.md) *(Coming Soon)*
 
-All examples are provided as both markdown documentation and Jupyter notebooks. You can:
-
-1. Read through the examples online
-2. Download and run the notebooks locally
-3. Modify the code to suit your needs
-
-## Running the Examples
-
-To run these examples locally, follow these steps:
-
-```bash
-# Clone the repository
-git clone https://github.com/unicef/giga-spatial
-cd giga-spatial
-
-# Create and activate a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows, use: venv\Scripts\activate
-
-# Install Jupyter if not already installed
-pip install jupyter
-
-# Launch Jupyter notebook
-jupyter notebook examples/
-```
-
-### Dependencies
-
-The examples require additional dependencies that are specified in the `[examples]` extra. These include:
-
-- `jupyter`: For running the notebook examples
-- `geopandas`: For working with geospatial data
-- `rasterio`: For raster data processing
-
-You can install specific example dependencies based on your needs:
-
-```bash
-# For basic examples only
-pip install -e ".[examples-basic]"
-
-# For all examples including advanced ones
-pip install -e ".[examples-full]"
-```
+---
 
 ## Contributing Examples
 
-We welcome contributions to our example gallery! To contribute:
+If you’d like to contribute your own examples, please follow the [Contributing Guidelines](../contributing.md).
 
-1. Follow our [Contributing Guide](../contributing.md)
-2. Use our example template
-3. Submit a pull request
+---
 
-## Need Help?
+## Feedback
 
-If you need assistance with the examples:
-
-- Check our [User Guide](../user-guide/index.md)
-- Visit our [API Reference](../api/index.md)
-- Create an issue on our [GitHub repository](https://github.com/unicef/giga-spatial) 
+If you have suggestions for additional examples or encounter any issues, feel free to [open an issue](https://github.com/unicef/giga-spatial/issues) or [join our Discord community](https://discord.com/invite/NStBwE7kyv).
