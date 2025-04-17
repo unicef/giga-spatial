@@ -2,8 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.1] - 2025-04-17
+### Added
+- **Documentation**:
+	- Added **API Reference** documentation for all modules, classes, and functions.
+	- Added a **Configuration Guide** to explain how to set up paths, API keys, and other.
+- **TifProcessor**: added new to_dataframe method.
+- **config**: added set_path method for dynamic path management.
+
+### Changed
+- **Documentation**:
+	- Restructured the `docs/` directory to improve organization and navigation.
+	- Updated the `index.md` for the **User Guide** to provide a clear overview of available documentation.
+	- Updated **Examples** for downloading, processing, and storing geospatial data - more to come.
+- **README**:
+	- Updated the README with a clear description of the package’s purpose and key features.
+	- Added a section on **View Generators** to explain spatial context enrichment and mapping to grid or POI locations.
+	- Included a **Supported Datasets** section with an image of dataset provider logos.
+
+### Fixed
+- Handled errors when processing nodes, relations, and ways in **OSMLocationFetcher**.
+- Made `admin1` and `admin1_id_giga` optional in GigaEntity instances for countries with no admin level 1 divisions.
+
 ## [v0.4.0] - 2025-04-01
-## Added
+### Added
 - **POI View Generators**: Introduced a new module, generators, containing a base class for POI view generation.
 - **Expanded POI Support**: Added new classes for generating POI views from:
 	- **Google Open Buildings**
@@ -12,7 +34,7 @@ All notable changes to this project will be documented in this file.
 	- **GHSL Built Surface**
 - **New Reader**: Added read_gzipped_json_or_csv to handle compressed JSON/CSV files.
 
-## Changed
+### Changed
 - **ADLSDataStore Enhancements**: Updated methods to match LocalDataStore for improved consistency.
 - **Geo Processing Updates**:
 	- Improved convert_to_dataframe for more efficient data conversion.
@@ -34,12 +56,12 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.1] - 2025-03-20
 
-## Added
+### Added
 - Enhanced AdminBoundaries handler with improved error handling for cases where administrative level data is unavailable for a country.
 - Added pyproject.toml and setup.py, enabling pip install support for the package.
 - Introduced a new method annotate_with_admin_regions in geo.py to perform spatial joins between input points and administrative boundaries (levels 1 and 2), handling conflicts where points intersect multiple admin regions.
 
-## Removed
+### Removed
 - Removed the utils module containing logger.py and integrated LOG_FORMAT and get_logger into config.py for a more streamlined logging approach.
 
 ## [0.3.0] - 2025-03-18  
