@@ -192,7 +192,7 @@ class TifProcessor:
 
     def sample_by_polygons(
         self, polygon_list: List[Union[Polygon, MultiPolygon]], stat: str = "mean"
-    ) -> gpd.GeoDataFrame:
+    ) -> np.ndarray:
         """
         Sample raster values within each polygon of a GeoDataFrame.
 
@@ -200,10 +200,8 @@ class TifProcessor:
             polygon_list: List of polygon geometries (can include MultiPolygons).
             stat (str): Aggregation statistic to compute within each polygon.
                         Options: "mean", "median", "sum", "min", "max".
-
         Returns:
-            GeoDataFrame: A copy of the input GeoDataFrame with an added column
-                        containing sampled raster values.
+            A NumPy array of sampled values
         """
         self.logger.info("Sampling raster values within polygons...")
 
@@ -455,7 +453,7 @@ def sample_multiple_tifs_by_polygons(
     tif_processors: List[TifProcessor],
     polygon_list: List[Union[Polygon, MultiPolygon]],
     stat: str = "mean",
-):
+) -> np.ndarray:
     """
     Sample raster values from multiple TIFF files for polygons in a list and join the results.
 

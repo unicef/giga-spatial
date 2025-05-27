@@ -3,11 +3,10 @@ import pandas as pd
 import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import base
-from typing import Literal, List, Tuple, Optional
+from typing import Literal, List, Tuple, Optional, Union, Dict
 import re
 
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.handlers.boundaries import AdminBoundaries
 from gigaspatial.config import config
 
 LOGGER = config.get_logger(__name__)
@@ -388,6 +387,79 @@ def add_spatial_jitter(
         raise RuntimeError(f"Error during jittering operation: {str(e)}")
 
 
+def get_centroids(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Calculate the centroids of a (Multi)Polygon GeoDataFrame.
+
+    Parameters:
+    ----------
+    gdf : geopandas.GeoDataFrame
+        GeoDataFrame containing (Multi)Polygon geometries.
+
+    Returns:
+    -------
+    geopandas.GeoDataFrame
+        A new GeoDataFrame with Point geometries representing the centroids.
+
+    Raises:
+    ------
+    ValueError
+        If the input GeoDataFrame does not contain (Multi)Polygon geometries.
+    """
+    # Validate input geometries
+    if not all(gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])):
+        raise ValueError(
+            "Input GeoDataFrame must contain only Polygon or MultiPolygon geometries."
+        )
+
+    # Calculate centroids
+    centroids = gdf.copy()
+    centroids["geometry"] = centroids.geometry.centroid
+
+    return centroids
+
+
+def add_area_in_meters(
+    gdf: gpd.GeoDataFrame, area_column_name: str = "area_in_meters"
+) -> gpd.GeoDataFrame:
+    """
+    Calculate the area of (Multi)Polygon geometries in square meters and add it as a new column.
+
+    Parameters:
+    ----------
+    gdf : geopandas.GeoDataFrame
+        GeoDataFrame containing (Multi)Polygon geometries.
+    area_column_name : str, optional
+        Name of the new column to store the area values. Default is "area_m2".
+
+    Returns:
+    -------
+    geopandas.GeoDataFrame
+        The input GeoDataFrame with an additional column for the area in square meters.
+
+    Raises:
+    ------
+    ValueError
+        If the input GeoDataFrame does not contain (Multi)Polygon geometries.
+    """
+    # Validate input geometries
+    if not all(gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])):
+        raise ValueError(
+            "Input GeoDataFrame must contain only Polygon or MultiPolygon geometries."
+        )
+
+    # Create a copy of the GeoDataFrame to avoid modifying the original
+    gdf_with_area = gdf.copy()
+
+    # Calculate the UTM CRS for accurate area calculation
+    utm_crs = gdf_with_area.estimate_utm_crs()
+
+    # Transform to UTM CRS and calculate the area in square meters
+    gdf_with_area[area_column_name] = gdf_with_area.to_crs(utm_crs).geometry.area
+
+    return gdf_with_area
+
+
 def simplify_geometries(
     gdf: gpd.GeoDataFrame,
     tolerance: float = 0.01,
@@ -573,54 +645,6 @@ def overlay_aggregate_polygon_data(
     return result
 
 
-def count_points_within_polygons(base_gdf, count_gdf, base_gdf_key):
-    """
-    Counts the number of points from `count_gdf` that fall within each polygon in `base_gdf`.
-
-    Parameters:
-    ----------
-    base_gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing polygon geometries to count points within.
-    count_gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing point geometries to be counted.
-    base_gdf_key : str
-        Column name in `base_gdf` to use as the key for grouping and merging.
-
-    Returns:
-    -------
-    geopandas.GeoDataFrame
-        The `base_gdf` with an additional column containing the count of points within each polygon.
-
-    Raises:
-    ------
-    ValueError
-        If `base_gdf_key` is missing in `base_gdf`.
-    """
-    # Validate inputs
-    if base_gdf_key not in base_gdf.columns:
-        raise ValueError(f"Key column '{base_gdf_key}' not found in `base_gdf`.")
-
-    # Ensure clean index for the join
-    count_gdf = count_gdf.reset_index()
-
-    # Spatial join: Find points intersecting polygons
-    joined_gdf = gpd.sjoin(
-        base_gdf, count_gdf[["geometry"]], how="left", predicate="intersects"
-    )
-
-    # Count points grouped by the base_gdf_key
-    point_counts = joined_gdf.groupby(base_gdf_key)["index_right"].count()
-    point_counts.name = "point_count"
-
-    # Merge point counts back to the base GeoDataFrame
-    result_gdf = base_gdf.merge(point_counts, on=base_gdf_key, how="left")
-
-    # Fill NaN counts with 0 for polygons with no points
-    result_gdf["point_count"] = result_gdf["point_count"].fillna(0).astype(int)
-
-    return result_gdf
-
-
 def map_points_within_polygons(base_points_gdf, polygon_gdf):
     """
     Maps whether each point in `base_points_gdf` is within any polygon in `polygon_gdf`.
@@ -676,6 +700,169 @@ def calculate_distance(lat1, lon1, lat2, lon2, R=6371e3):
     return distance
 
 
+def aggregate_points_to_zones(
+    points: Union[pd.DataFrame, gpd.GeoDataFrame],
+    zones: gpd.GeoDataFrame,
+    value_columns: Optional[Union[str, List[str]]] = None,
+    aggregation: Union[str, Dict[str, str]] = "count",
+    point_zone_predicate: str = "within",
+    zone_id_column: str = "zone_id",
+    output_suffix: str = "",
+    drop_geometry: bool = False,
+) -> gpd.GeoDataFrame:
+    """
+    Aggregate point data to zones with flexible aggregation methods.
+
+    Args:
+        points (Union[pd.DataFrame, gpd.GeoDataFrame]): Point data to aggregate
+        zones (gpd.GeoDataFrame): Zones to aggregate points to
+        value_columns (Optional[Union[str, List[str]]]): Column(s) containing values to aggregate
+            If None, only counts will be performed.
+        aggregation (Union[str, Dict[str, str]]): Aggregation method(s) to use:
+            - Single string: Use same method for all columns ("count", "mean", "sum", "min", "max")
+            - Dict: Map column names to aggregation methods
+        point_zone_predicate (str): Spatial predicate for point-to-zone relationship
+            Options: "within", "intersects", "contains"
+        zone_id_column (str): Column in zones containing zone identifiers
+        output_suffix (str): Suffix to add to output column names
+        drop_geometry (bool): Whether to drop the geometry column from output
+
+    Returns:
+        gpd.GeoDataFrame: Zones with aggregated point values
+
+    Example:
+        >>> poi_counts = aggregate_points_to_zones(pois, zones, aggregation="count")
+        >>> poi_value_mean = aggregate_points_to_zones(
+        ...     pois, zones, value_columns="score", aggregation="mean"
+        ... )
+        >>> poi_multiple = aggregate_points_to_zones(
+        ...     pois, zones,
+        ...     value_columns=["score", "visits"],
+        ...     aggregation={"score": "mean", "visits": "sum"}
+        ... )
+    """
+    # Input validation
+    if not isinstance(zones, gpd.GeoDataFrame):
+        raise TypeError("zones must be a GeoDataFrame")
+
+    if zone_id_column not in zones.columns:
+        raise ValueError(f"Zone ID column '{zone_id_column}' not found in zones")
+
+    # Convert points to GeoDataFrame if necessary
+    if not isinstance(points, gpd.GeoDataFrame):
+        points_gdf = convert_to_geodataframe(points)
+    else:
+        points_gdf = points.copy()
+
+    # Ensure CRS match
+    if points_gdf.crs != zones.crs:
+        points_gdf = points_gdf.to_crs(zones.crs)
+
+    # Handle value columns
+    if value_columns is not None:
+        if isinstance(value_columns, str):
+            value_columns = [value_columns]
+
+        # Validate that all value columns exist
+        missing_cols = [col for col in value_columns if col not in points_gdf.columns]
+        if missing_cols:
+            raise ValueError(f"Value columns not found in points data: {missing_cols}")
+
+    # Handle aggregation method
+    agg_funcs = {}
+
+    if isinstance(aggregation, str):
+        if aggregation == "count":
+            # Special case for count (doesn't need value columns)
+            agg_funcs["__count"] = "count"
+        elif value_columns is not None:
+            # Apply the same aggregation to all value columns
+            agg_funcs = {col: aggregation for col in value_columns}
+        else:
+            raise ValueError(
+                "Value columns must be specified for aggregation methods other than 'count'"
+            )
+    elif isinstance(aggregation, dict):
+        # Validate dictionary keys
+        if value_columns is None:
+            raise ValueError(
+                "Value columns must be specified when using a dictionary of aggregation methods"
+            )
+
+        missing_aggs = [col for col in value_columns if col not in aggregation]
+        extra_aggs = [col for col in aggregation if col not in value_columns]
+
+        if missing_aggs:
+            raise ValueError(f"Missing aggregation methods for columns: {missing_aggs}")
+        if extra_aggs:
+            raise ValueError(
+                f"Aggregation methods specified for non-existent columns: {extra_aggs}"
+            )
+
+        agg_funcs = aggregation
+    else:
+        raise TypeError("aggregation must be a string or dictionary")
+
+    # Create a copy of the zones
+    result = zones.copy()
+
+    # Spatial join
+    joined = gpd.sjoin(points_gdf, zones, how="inner", predicate=point_zone_predicate)
+
+    # Perform aggregation
+    if "geometry" in joined.columns and not all(
+        value == "count" for value in agg_funcs.values()
+    ):
+        # Drop geometry for non-count aggregations to avoid errors
+        joined = joined.drop(columns=["geometry"])
+
+    if "__count" in agg_funcs:
+        # Count points per zone
+        counts = (
+            joined.groupby(zone_id_column)
+            .size()
+            .reset_index(name=f"point_count{output_suffix}")
+        )
+        result = result.merge(counts, on=zone_id_column, how="left")
+        result[f"point_count{output_suffix}"] = (
+            result[f"point_count{output_suffix}"].fillna(0).astype(int)
+        )
+    else:
+        # Aggregate values
+        aggregated = joined.groupby(zone_id_column).agg(agg_funcs).reset_index()
+
+        # Rename columns to include aggregation method
+        if len(value_columns) > 0:
+            # Handle MultiIndex columns from pandas aggregation
+            if isinstance(aggregated.columns, pd.MultiIndex):
+                aggregated.columns = [
+                    (
+                        f"{col[0]}_{col[1]}{output_suffix}"
+                        if col[0] != zone_id_column
+                        else zone_id_column
+                    )
+                    for col in aggregated.columns
+                ]
+
+            # Merge back to zones
+            result = result.merge(aggregated, on=zone_id_column, how="left")
+
+            # Fill NaN values with zeros
+            for col in result.columns:
+                if (
+                    col != zone_id_column
+                    and col != "geometry"
+                    and pd.api.types.is_numeric_dtype(result[col])
+                ):
+                    result[col] = result[col].fillna(0)
+
+    if drop_geometry:
+        result = result.drop(columns=["geometry"])
+        return result
+
+    return result
+
+
 def annotate_with_admin_regions(
     gdf: gpd.GeoDataFrame,
     country_code: str,
@@ -696,6 +883,7 @@ def annotate_with_admin_regions(
     Returns:
         GeoDataFrame with added administrative region columns
     """
+    from gigaspatial.handlers.boundaries import AdminBoundaries
 
     if not isinstance(gdf, gpd.GeoDataFrame):
         raise TypeError("gdf must be a GeoDataFrame")
@@ -789,3 +977,204 @@ def annotate_with_admin_regions(
     gdf_w_admins = gdf_w_admins.drop(columns="index_right").reset_index(drop=True)
 
     return gdf_w_admins
+
+
+def aggregate_polygons_to_zones(
+    polygons: Union[pd.DataFrame, gpd.GeoDataFrame],
+    zones: gpd.GeoDataFrame,
+    value_columns: Union[str, List[str]],
+    aggregation: Union[str, Dict[str, str]] = "sum",
+    area_weighted: bool = True,
+    zone_id_column: str = "zone_id",
+    output_suffix: str = "",
+    drop_geometry: bool = False,
+) -> gpd.GeoDataFrame:
+    """
+    Aggregate polygon data to zones with area-weighted values.
+
+    This function maps polygon data to zones, weighting values by the
+    fractional area of overlap between polygons and zones.
+
+    Args:
+        polygons (Union[pd.DataFrame, gpd.GeoDataFrame]): Polygon data to aggregate
+        zones (gpd.GeoDataFrame): Zones to aggregate polygons to
+        value_columns (Union[str, List[str]]): Column(s) containing values to aggregate
+        aggregation (Union[str, Dict[str, str]]): Aggregation method(s) to use:
+            - Single string: Use same method for all columns ("sum", "mean", "max", etc.)
+            - Dict: Map column names to aggregation methods
+        area_weighted (bool): Whether to weight values by fractional area overlap
+            If False, values are not weighted before aggregation
+        zone_id_column (str): Column in zones containing zone identifiers
+        output_suffix (str): Suffix to add to output column names
+        drop_geometry (bool): Whether to drop the geometry column from output
+
+    Returns:
+        gpd.GeoDataFrame: Zones with aggregated polygon values
+
+    Example:
+        >>> landuse_stats = aggregate_polygons_to_zones(
+        ...     landuse_polygons,
+        ...     grid_zones,
+        ...     value_columns=["area", "population"],
+        ...     aggregation="sum"
+        ... )
+    """
+    # Input validation
+    if not isinstance(zones, gpd.GeoDataFrame):
+        raise TypeError("zones must be a GeoDataFrame")
+
+    if zone_id_column not in zones.columns:
+        raise ValueError(f"Zone ID column '{zone_id_column}' not found in zones")
+
+    # Convert polygons to GeoDataFrame if necessary
+    if not isinstance(polygons, gpd.GeoDataFrame):
+        try:
+            polygons_gdf = convert_to_geodataframe(polygons)
+        except:
+            raise TypeError("polygons must be a GeoDataFrame or convertible to one")
+    else:
+        polygons_gdf = polygons.copy()
+
+    # Validate geometry types
+    non_polygon_geoms = [
+        geom_type
+        for geom_type in polygons_gdf.geometry.geom_type.unique()
+        if geom_type not in ["Polygon", "MultiPolygon"]
+    ]
+    if non_polygon_geoms:
+        raise ValueError(
+            f"Input contains non-polygon geometries: {non_polygon_geoms}. "
+            "Use aggregate_points_to_zones for point data."
+        )
+
+    # Process value columns
+    if isinstance(value_columns, str):
+        value_columns = [value_columns]
+
+    # Validate that all value columns exist
+    missing_cols = [col for col in value_columns if col not in polygons_gdf.columns]
+    if missing_cols:
+        raise ValueError(f"Value columns not found in polygons data: {missing_cols}")
+
+    # Ensure CRS match
+    if polygons_gdf.crs != zones.crs:
+        polygons_gdf = polygons_gdf.to_crs(zones.crs)
+
+    # Handle aggregation method
+    if isinstance(aggregation, str):
+        agg_funcs = {col: aggregation for col in value_columns}
+    elif isinstance(aggregation, dict):
+        # Validate dictionary keys
+        missing_aggs = [col for col in value_columns if col not in aggregation]
+        extra_aggs = [col for col in aggregation if col not in value_columns]
+
+        if missing_aggs:
+            raise ValueError(f"Missing aggregation methods for columns: {missing_aggs}")
+        if extra_aggs:
+            raise ValueError(
+                f"Aggregation methods specified for non-existent columns: {extra_aggs}"
+            )
+
+        agg_funcs = aggregation
+    else:
+        raise TypeError("aggregation must be a string or dictionary")
+
+    # Create a copy of the zones
+    result = zones.copy()
+
+    if area_weighted:
+        # Use area-weighted aggregation with polygon overlay
+        try:
+            # Compute UTM CRS for accurate area calculations
+            overlay_utm_crs = polygons_gdf.estimate_utm_crs()
+
+            # Prepare polygons for overlay
+            polygons_utm = polygons_gdf.to_crs(overlay_utm_crs)
+            polygons_utm["orig_area"] = polygons_utm.area
+
+            # Keep only necessary columns
+            overlay_cols = value_columns + ["geometry", "orig_area"]
+            overlay_gdf = polygons_utm[overlay_cols].copy()
+
+            # Prepare zones for overlay
+            zones_utm = zones.to_crs(overlay_utm_crs)
+
+            # Perform the spatial overlay
+            gdf_overlayed = gpd.overlay(
+                overlay_gdf, zones_utm[[zone_id_column, "geometry"]], how="intersection"
+            )
+
+            # Calculate fractional areas
+            gdf_overlayed["intersection_area"] = gdf_overlayed.area
+            gdf_overlayed["area_fraction"] = (
+                gdf_overlayed["intersection_area"] / gdf_overlayed["orig_area"]
+            )
+
+            # Apply area weighting to value columns
+            for col in value_columns:
+                gdf_overlayed[col] = gdf_overlayed[col] * gdf_overlayed["area_fraction"]
+
+            # Aggregate by zone ID
+            aggregated = gdf_overlayed.groupby(zone_id_column)[value_columns].agg(
+                agg_funcs
+            )
+
+            # Handle column naming for multi-level index
+            if isinstance(aggregated.columns, pd.MultiIndex):
+                aggregated.columns = [
+                    f"{col[0]}_{col[1]}{output_suffix}" for col in aggregated.columns
+                ]
+
+            # Reset index
+            aggregated = aggregated.reset_index()
+
+            # Merge aggregated values back to the zones
+            result = result.merge(aggregated, on=zone_id_column, how="left")
+
+            # Fill NaN values with zeros
+            for col in result.columns:
+                if (
+                    col != zone_id_column
+                    and col != "geometry"
+                    and pd.api.types.is_numeric_dtype(result[col])
+                ):
+                    result[col] = result[col].fillna(0)
+
+        except Exception as e:
+            raise RuntimeError(f"Error during area-weighted aggregation: {e}")
+
+    else:
+        # Non-weighted aggregation - simpler approach
+        # Perform spatial join
+        joined = gpd.sjoin(polygons_gdf, zones, how="inner", predicate="intersects")
+
+        # Remove geometry column for aggregation
+        if "geometry" in joined.columns:
+            joined = joined.drop(columns=["geometry"])
+
+        # Group by zone ID and aggregate
+        aggregated = joined.groupby(zone_id_column)[value_columns].agg(agg_funcs)
+
+        # Handle column naming for multi-level index
+        if isinstance(aggregated.columns, pd.MultiIndex):
+            aggregated.columns = [
+                f"{col[0]}_{col[1]}{output_suffix}" for col in aggregated.columns
+            ]
+
+        # Reset index and merge back to zones
+        aggregated = aggregated.reset_index()
+        result = result.merge(aggregated, on=zone_id_column, how="left")
+
+        # Fill NaN values with zeros
+        for col in result.columns:
+            if (
+                col != zone_id_column
+                and col != "geometry"
+                and pd.api.types.is_numeric_dtype(result[col])
+            ):
+                result[col] = result[col].fillna(0)
+
+    if drop_geometry:
+        result = result.drop(columns=["geometry"])
+
+    return result

@@ -1,0 +1,1 @@
+from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator

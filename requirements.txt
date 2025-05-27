@@ -14,3 +14,5 @@ Shapely==2.0.7
 tqdm==4.65.0
 OWSLib==0.32.1
 pydantic-settings>=2.7.1
+hdx-python-api>=6.3.8
+bs4==0.0.2

@@ -52,6 +52,17 @@ class LocalDataStore(DataStore):
             rel_root = str(Path(root).relative_to(self.base_path))
             yield rel_root, dirs, files
 
+    def list_directories(self, path: str) -> List[str]:
+        full_path = self._resolve_path(path)
+
+        if not full_path.exists():
+            return []
+
+        if not full_path.is_dir():
+            return []
+
+        return [d.name for d in full_path.iterdir() if d.is_dir()]
+
     def open(self, path: str, mode: str = "r") -> IO:
         full_path = self._resolve_path(path)
         self.mkdir(str(full_path.parent), exist_ok=True)

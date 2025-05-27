@@ -17,7 +17,7 @@ from gigaspatial.core.io.data_store import DataStore
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class OvertureAmenityFetcher:
     """
-    A class to fetch and process amenity locations from OpenStreetMap using the Overpass API.
+    A class to fetch and process amenity locations from Overture.
     """
 
     # constants

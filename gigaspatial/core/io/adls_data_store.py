@@ -198,6 +198,30 @@ class ADLSDataStore(DataStore):
             dirpath, filename = os.path.split(blob)
             yield (dirpath, [], [filename])
 
+    def list_directories(self, path: str) -> list:
+        """List only directory names (not files) from a given path in ADLS."""
+        search_path = path.rstrip("/") + "/" if path else ""
+
+        blob_items = self.container_client.list_blobs(name_starts_with=search_path)
+
+        directories = set()
+
+        for blob_item in blob_items:
+            # Get the relative path from the search path
+            relative_path = blob_item.name[len(search_path) :]
+
+            # Skip if it's empty (shouldn't happen but just in case)
+            if not relative_path:
+                continue
+
+            # If there's a "/" in the relative path, it means there's a subdirectory
+            if "/" in relative_path:
+                # Get the first directory name
+                dir_name = relative_path.split("/")[0]
+                directories.add(dir_name)
+
+        return sorted(list(directories))
+
     @contextlib.contextmanager
     def open(self, path: str, mode: str = "r"):
         """

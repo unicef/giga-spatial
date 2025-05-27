@@ -234,3 +234,39 @@ class GoogleOpenBuildingsDownloader:
 
         # Filter out None values (failed downloads)
         return [path for path in file_paths if path is not None]
+
+    def download_by_geometry(
+        self,
+        geometry: Union[Polygon, MultiPolygon, gpd.GeoDataFrame],
+        data_type: Literal["polygons", "points"] = "polygons",
+    ) -> List[str]:
+        """
+        Download Google Open Buildings data for a given geometry.
+
+        Args:
+            geometry: Shapely Polygon/MultiPolygon or GeoDataFrame with geometries
+            data_type: Type of data to download ('polygons' or 'points')
+
+        Returns:
+            List of paths to downloaded files
+        """
+        # Get intersecting tiles
+        gdf_tiles = self._get_intersecting_tiles(geometry)
+
+        if gdf_tiles.empty:
+            self.logger.warning("There is no matching data for the given geometry")
+            return []
+
+        # Download tiles in parallel
+        with multiprocessing.Pool(self.config.n_workers) as pool:
+            download_func = functools.partial(self._download_tile, data_type=data_type)
+            file_paths = list(
+                tqdm(
+                    pool.imap(download_func, [row for _, row in gdf_tiles.iterrows()]),
+                    total=len(gdf_tiles),
+                    desc=f"Downloading {data_type} for geometry",
+                )
+            )
+
+        # Filter out None values (failed downloads)
+        return [path for path in file_paths if path is not None]

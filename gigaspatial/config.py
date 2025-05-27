@@ -25,6 +25,9 @@ class Config(BaseSettings):
     MAXAR_USERNAME: str = Field(default="", alias="MAXAR_USERNAME")
     MAXAR_PASSWORD: str = Field(default="", alias="MAXAR_PASSWORD")
     MAXAR_CONNECTION_STRING: str = Field(default="", alias="MAXAR_CONNECTION_STRING")
+    OPENCELLID_ACCESS_TOKEN: str = Field(default="", alias="OPENCELLID_ACCESS_TOKEN")
+    GEOREPO_API_KEY: str = Field(default="", alias="GEOREPO_API_KEY")
+    GEOREPO_USER_EMAIL: str = Field(default="", alias="GEOREPO_USER_EMAIL")
 
     BRONZE_DATA_DIR: Path = Field(
         default=Path("bronze"),
@@ -66,7 +69,10 @@ class Config(BaseSettings):
             "srtm": "srtm",
             "worldpop": "worldpop",
             "ghsl": "ghsl",
+            "opencellid": "opencellid",
+            "hdx": "hdx",
             "poi": "poi",
+            "zonal": "zonal",
         },
         description="Mapping of data types to directory names",
     )

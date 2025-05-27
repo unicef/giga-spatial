@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.0b1] - 2025-05-27
+
+### Added
+- **New Handlers**:
+  - `hdx.py`: Handler for downloading and managing Humanitarian Data Exchange datasets.
+  - `rwi.py`: Handler for the Relative Wealth Index dataset.
+  - `opencellid.py`: Handler for OpenCellID tower locations.
+  - `unicef_georepo.py`: Integration with UNICEF’s GeoRepo asset repository.
+- **Zonal Generators**:
+  - Introduced the `generators/zonal/` module to support spatial aggregations of various data types (points, polygons, rasters)
+    to zonal geometries such as grid tiles or catchment areas.
+- **New Geo-Processing Methods**:
+  - Added methods to compute centroids of (Multi)Polygon geometries.
+  - Added methods to calculate area of (Multi)Polygon geometries in square meters.
+
+### Changed
+- **Refactored**:
+  - `config.py`: Added support for new environment variables (OpenCellID and UNICEF GeoRepo keys).
+  - `geo.py`: Enhanced spatial join functions for improved performance and clarity.
+  - `handlers/`: 
+    - Minor robustness improvements in `google_open_buildings` and `microsoft_global_buildings`.
+    - Added a new class method in `boundaries` for initializing admin boundaries from UNICEF GeoRepo.
+  - `core/io/`: 
+    - Added `list_directories` method to both ADLS and local storage backends.
+- **Documentation & Project Structure**:
+  - Updated `.env_sample` and `.gitignore` to align with new environment variables and data handling practices.
+
+### Dependencies
+- Updated `requirements.txt` and `setup.py` to reflect new dependencies and ensure compatibility.
+
+### Notes
+- This is a **pre-release** (`v0.5.0b1`) and is intended for testing and feedback.
+- Some new modules, especially in `handlers` and `generators`, are experimental and may be refined in upcoming releases.
+
 ## [v0.4.1] - 2025-04-17
 ### Added
 - **Documentation**:

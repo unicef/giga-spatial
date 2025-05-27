@@ -11,7 +11,6 @@ from typing import List, Union, Iterable, Optional, Tuple
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.boundaries import AdminBoundaries
 
 
 class MercatorTiles(BaseModel):
@@ -136,14 +135,16 @@ class MercatorTiles(BaseModel):
             }
         )
 
-    def to_geodataframe(self) -> gpd.GeoDataFrame:
-        """Convert to GeoPandas GeoDataFrame."""
-        geoms = [
+    def to_geoms(self) -> List[box]:
+        return [
             box(*mercantile.bounds(mercantile.quadkey_to_tile(q)))
             for q in self.quadkeys
         ]
+
+    def to_geodataframe(self) -> gpd.GeoDataFrame:
+        """Convert to GeoPandas GeoDataFrame."""
         return gpd.GeoDataFrame(
-            {"quadkey": self.quadkeys, "geometry": geoms}, crs="EPSG:4326"
+            {"quadkey": self.quadkeys, "geometry": self.to_geoms()}, crs="EPSG:4326"
         )
 
     def save(self, file: Union[str, Path], format: str = "json") -> None:
@@ -221,6 +222,7 @@ class CountryMercatorTiles(MercatorTiles):
         path: Optional[Union[str, Path]] = None,
     ) -> Union[Polygon, MultiPolygon]:
         """Load country boundary geometry from DataStore or GADM."""
+        from gigaspatial.handlers.boundaries import AdminBoundaries
 
         gdf_admin0 = AdminBoundaries.create(
             country_code=country, admin_level=0, data_store=data_store, path=path

@@ -1,4 +1,6 @@
 from setuptools import setup, find_packages
+import os
+import re
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -8,9 +10,16 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
         line.strip() for line in fh if line.strip() and not line.startswith("#")
     ]
 
+
+def read_version():
+    with open(os.path.join("gigaspatial", "__init__.py")) as f:
+        content = f.read()
+    return re.search(r'__version__ = "(.*)"', content).group(1)
+
+
 setup(
     name="gigaspatial",
-    version="0.4.1",
+    version=read_version(),
     author="Utku Can Ozturk",
     author_email="utkucanozturk@gmail.com",
     description="A package for spatial data download & processing",

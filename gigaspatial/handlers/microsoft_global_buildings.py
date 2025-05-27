@@ -190,8 +190,13 @@ class MSBuildingsConfig:
         return pd.DataFrame(columns=self.df_tiles.columns)
 
     def get_tiles_for_geometry(
-        self, geometry: Union[Polygon, MultiPolygon]
+        self, geometry: Union[Polygon, MultiPolygon, gpd.GeoDataFrame]
     ) -> pd.DataFrame:
+        if isinstance(geometry, gpd.GeoDataFrame):
+            if geometry.crs != "EPSG:4326":
+                geometry = geometry.to_crs("EPSG:4326")
+            geometry = geometry.geometry.unary_union
+
         if isinstance(geometry, MultiPolygon):
             geom_mercator = MercatorTiles.from_multipolygon(
                 geometry, self.MERCATOR_ZOOM_LEVEL
@@ -317,7 +322,9 @@ class MSBuildingsDownloader:
 
         return []
 
-    def download_by_geometry(self, geometry: Union[Polygon, MultiPolygon]) -> List[str]:
+    def download_by_geometry(
+        self, geometry: Union[Polygon, MultiPolygon, gpd.GeoDataFrame]
+    ) -> List[str]:
         """
         Download Microsoft Global ML Building Footprints data for a specific geometry.
 

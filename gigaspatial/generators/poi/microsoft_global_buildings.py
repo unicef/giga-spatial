@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any, Literal
+from typing import List, Optional, Union, Any
 
 import geopandas as gpd
 import pandas as pd
@@ -12,10 +12,7 @@ from gigaspatial.processing.geo import (
     calculate_distance,
     detect_coordinate_columns,
 )
-from gigaspatial.handlers.microsoft_global_buildings import (
-    MSBuildingsConfig,
-    MSBuildingsDownloader,
-)
+from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsConfig
 from gigaspatial.generators.poi.base import PoiViewGeneratorConfig, PoiViewGenerator
 
 

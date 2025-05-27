@@ -124,7 +124,7 @@ class CountryOoklaTiles(BaseModel):
     quadkeys: List[OoklaSpeedtestTile]
 
     @staticmethod
-    def from_country(country, ookla_tile_config):
+    def from_country(country, ookla_tile_config: OoklaSpeedtestTileConfig):
         # load country zoom level 16 quadkeys
         country_tiles = CountryMercatorTiles.create(country, 16)
 

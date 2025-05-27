@@ -3,7 +3,7 @@ from typing import Optional, ClassVar, Union, Dict, List
 import geopandas as gpd
 from pathlib import Path
 from urllib.error import HTTPError
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon, shape
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.readers import read_dataset
@@ -132,6 +132,61 @@ class AdminBoundaries(BaseModel):
             return cls._create_empty_instance(None, admin_level, "internal")
 
     @classmethod
+    def from_georepo(
+        cls,
+        country_code: str = None,
+        admin_level: int = 0,
+        **kwargs,
+    ) -> "AdminBoundaries":
+        """
+        Load and create instance from GeoRepo (UNICEF) API.
+
+        Args:
+            country: Country name (if using name-based lookup)
+            iso3: ISO3 code (if using code-based lookup)
+            admin_level: Administrative level (0=country, 1=state, etc.)
+            api_key: GeoRepo API key (optional)
+            email: GeoRepo user email (optional)
+            kwargs: Extra arguments (ignored)
+
+        Returns:
+            AdminBoundaries instance
+        """
+        from gigaspatial.handlers.unicef_georepo import get_country_boundaries_by_iso3
+
+        # Fetch boundaries from GeoRepo
+        geojson = get_country_boundaries_by_iso3(country_code, admin_level=admin_level)
+
+        features = geojson.get("features", [])
+        boundaries = []
+        parent_level = admin_level - 1
+
+        for feat in features:
+            props = feat.get("properties", {})
+            geometry = feat.get("geometry")
+            shapely_geom = shape(geometry) if geometry else None
+            # For admin_level 0, no parent_id
+            parent_id = None
+            if admin_level > 0:
+                parent_id = props.get(f"adm{parent_level}_ucode")
+
+            boundary = AdminBoundary(
+                id=props.get("ucode"),
+                name=props.get("name"),
+                name_en=props.get("name_en"),
+                geometry=shapely_geom,
+                parent_id=parent_id,
+                country_code=country_code,
+            )
+            boundaries.append(boundary)
+
+        # Try to infer country_code from first boundary if not set
+        if boundaries and not boundaries[0].country_code:
+            boundaries[0].country_code = boundaries[0].id[:3]
+
+        return cls(boundaries=boundaries, level=admin_level)
+
+    @classmethod
     def create(
         cls,
         country_code: Optional[str] = None,
@@ -148,7 +203,7 @@ class AdminBoundaries(BaseModel):
                         "If data_store is provided, path or country_code must also be specified."
                     )
                 path = config.get_admin_path(
-                    country_code=country_code, admin_level=admin_level
+                    country_code=country_code.upper(), admin_level=admin_level
                 )
             return cls.from_data_store(data_store, path, admin_level, **kwargs)
         elif country_code is not None:
