@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any, Literal
 import pycountry
+import tempfile
 
 from pydantic import Field, field_validator
 
@@ -123,10 +124,22 @@ class RelativeWealthIndexDownloader(HDXDownloader):
                     resource_name = res.get("name", "Unknown")
                     self.logger.info(f"Downloading resource: {resource_name}")
 
-                    url, path = res.download(folder=str(self.config.output_dir_path))
-                    downloaded_paths.append(path)
+                    # Download to a temporary directory
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        url, local_path = res.download(folder=tmpdir)
+                        # Read the file and write to the DataStore
+                        with open(local_path, "rb") as f:
+                            data = f.read()
+                        # Compose the target path in the DataStore
+                        target_path = str(
+                            self.config.output_dir_path / Path(local_path).name
+                        )
+                        self.data_store.write_file(target_path, data)
+                        downloaded_paths.append(target_path)
 
-                    self.logger.info(f"Downloaded resource: {resource_name} to {path}")
+                    self.logger.info(
+                        f"Downloaded resource: {resource_name} to {target_path}"
+                    )
 
                 except Exception as e:
                     resource_name = res.get("name", "Unknown")

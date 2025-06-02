@@ -42,7 +42,7 @@ class OSMLocationFetcher:
                 "location_types must be a list of strings or a dictionary mapping categories to type lists"
             )
 
-        self.logger = config.get_logger(__name__)
+        self.logger = config.get_logger(self.__class__.__name__)
 
     def _build_queries(self, since_year: Optional[int] = None) -> List[str]:
         """

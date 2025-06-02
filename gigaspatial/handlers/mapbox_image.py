@@ -36,7 +36,7 @@ class MapboxImageDownloader:
         self.access_token = access_token
         self.style_id = style_id if style_id else "mapbox/satellite-v9"
         self.data_store = data_store or LocalDataStore()
-        self.logger = config.get_logger(__name__)
+        self.logger = config.get_logger(self.__class__.__name__)
 
     def _construct_url(self, bounds: Iterable[float], image_size: str) -> str:
         """Construct the Mapbox Static Images API URL"""

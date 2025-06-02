@@ -2,12 +2,14 @@ import pandas as pd
 import geopandas as gpd
 import mercantile
 from shapely.geometry import box
+from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 from shapely import MultiPolygon, Polygon, Point
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field, PrivateAttr
 from typing import List, Union, Iterable, Optional, Tuple
+import pycountry
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
@@ -22,13 +24,78 @@ class MercatorTiles(BaseModel):
         arbitrary_types_allowed = True
 
     @classmethod
-    def from_quadkeys(cls, quadkeys: List[str]) -> "MercatorTiles":
+    def from_quadkeys(cls, quadkeys: List[str]):
         """Create MercatorTiles from list of quadkeys."""
-        return MercatorTiles(zoom_level=len(quadkeys[0]), quadkeys=quadkeys)
+        return cls(zoom_level=len(quadkeys[0]), quadkeys=set(quadkeys))
+
+    @classmethod
+    def from_bounds(
+        cls, xmin: float, ymin: float, xmax: float, ymax: float, zoom_level: int
+    ):
+        """Create MercatorTiles from boundary coordinates."""
+        return cls(
+            zoom_level=zoom_level,
+            quadkeys=[
+                mercantile.quadkey(tile)
+                for tile in mercantile.tiles(xmin, ymin, xmax, ymax, zoom_level)
+            ],
+        )
+
+    @classmethod
+    def from_spatial(
+        cls,
+        source: Union[
+            BaseGeometry,
+            gpd.GeoDataFrame,
+            List[Union[Point, Tuple[float, float]]],  # points
+        ],
+        zoom_level: int,
+        predicate: str = "intersects",
+        **kwargs,
+    ):
+        if isinstance(source, gpd.GeoDataFrame):
+            if source.crs != "EPSG:4326":
+                source = source.to_crs("EPSG:4326")
+            source = source.geometry.unary_union
+
+        if isinstance(source, BaseGeometry):
+            return cls.from_geometry(
+                geometry=source, zoom_level=zoom_level, predicate=predicate, **kwargs
+            )
+        elif isinstance(source, Iterable) and all(
+            len(pt) == 2 or isinstance(pt, Point) for pt in source
+        ):
+            return cls.from_points(geometry=source, zoom_level=zoom_level, **kwargs)
+        else:
+            raise
+
+    @classmethod
+    def from_geometry(
+        cls,
+        geometry: BaseGeometry,
+        zoom_level: int,
+        predicate: str = "intersects",
+        **kwargs,
+    ):
+        """Create MercatorTiles from a polygon."""
+        tiles = list(mercantile.tiles(*geometry.bounds, zoom_level))
+        quadkeys_boxes = [
+            (mercantile.quadkey(t), box(*mercantile.bounds(t))) for t in tiles
+        ]
+        quadkeys, boxes = zip(*quadkeys_boxes) if quadkeys_boxes else ([], [])
+
+        if not boxes:
+            return MercatorTiles(zoom_level=zoom_level, quadkeys=[])
+
+        s = STRtree(boxes)
+        result = s.query(geometry, predicate=predicate)
+        return cls(
+            zoom_level=zoom_level, quadkeys=[quadkeys[i] for i in result], **kwargs
+        )
 
     @classmethod
     def from_points(
-        cls, points: List[Union[Point, Tuple[float, float]]], zoom_level: int
+        cls, points: List[Union[Point, Tuple[float, float]]], zoom_level: int, **kwargs
     ) -> "MercatorTiles":
         """Create MercatorTiles from a list of points or lat-lon pairs."""
         quadkeys = {
@@ -39,54 +106,7 @@ class MercatorTiles(BaseModel):
             )
             for p in points
         }
-        return cls(zoom_level=zoom_level, quadkeys=list(quadkeys))
-
-    @staticmethod
-    def from_bounds(
-        xmin: float, ymin: float, xmax: float, ymax: float, zoom_level: int
-    ) -> "MercatorTiles":
-        """Create MercatorTiles from boundary coordinates."""
-        return MercatorTiles(
-            zoom_level=zoom_level,
-            quadkeys=[
-                mercantile.quadkey(tile)
-                for tile in mercantile.tiles(xmin, ymin, xmax, ymax, zoom_level)
-            ],
-        )
-
-    @staticmethod
-    def from_polygon(
-        polygon: Polygon, zoom_level: int, predicate: str = "intersects"
-    ) -> "MercatorTiles":
-        """Create MercatorTiles from a polygon."""
-        tiles = list(mercantile.tiles(*polygon.bounds, zoom_level))
-        quadkeys_boxes = [
-            (mercantile.quadkey(t), box(*mercantile.bounds(t))) for t in tiles
-        ]
-        quadkeys, boxes = zip(*quadkeys_boxes) if quadkeys_boxes else ([], [])
-
-        if not boxes:
-            return MercatorTiles(zoom_level=zoom_level, quadkeys=[])
-
-        s = STRtree(boxes)
-        result = s.query(polygon, predicate=predicate)
-        return MercatorTiles(
-            zoom_level=zoom_level, quadkeys=[quadkeys[i] for i in result]
-        )
-
-    @staticmethod
-    def from_multipolygon(
-        multipolygon: MultiPolygon, zoom_level: int, predicate: str = "intersects"
-    ) -> "MercatorTiles":
-        """Create MercatorTiles from a MultiPolygon."""
-        quadkeys = {
-            quadkey
-            for geom in multipolygon.geoms
-            for quadkey in MercatorTiles.from_polygon(
-                geom, zoom_level, predicate
-            ).quadkeys
-        }
-        return MercatorTiles(zoom_level=zoom_level, quadkeys=list(quadkeys))
+        return cls(zoom_level=zoom_level, quadkeys=list(quadkeys), **kwargs)
 
     @classmethod
     def from_json(
@@ -170,7 +190,7 @@ class CountryMercatorTiles(MercatorTiles):
     It can only be instantiated through the create() classmethod.
     """
 
-    _country: str = PrivateAttr()
+    country: str = Field(..., exclude=True)
 
     def __init__(self, *args, **kwargs):
         raise TypeError(
@@ -183,49 +203,32 @@ class CountryMercatorTiles(MercatorTiles):
         cls,
         country: str,
         zoom_level: int,
+        predicate: str = "intersects",
         data_store: Optional[DataStore] = None,
         country_geom_path: Optional[Union[str, Path]] = None,
-        predicate: str = "intersects",
-    ) -> "CountryMercatorTiles":
+    ):
         """Create CountryMercatorTiles for a specific country."""
+        from gigaspatial.handlers.boundaries import AdminBoundaries
+
         instance = super().__new__(cls)
         super(CountryMercatorTiles, instance).__init__(
             zoom_level=zoom_level,
             quadkeys=[],
             data_store=data_store or LocalDataStore(),
+            country=pycountry.countries.lookup(country).alpha_3,
         )
 
-        instance._country = country
-
-        country_geom = instance._load_country_geometry(
-            country, data_store, country_geom_path
+        country_geom = (
+            AdminBoundaries.create(
+                country_code=country,
+                data_store=data_store,
+                path=country_geom_path,
+            )
+            .boundaries[0]
+            .geometry
         )
 
-        tiles = (
-            MercatorTiles.from_multipolygon
-            if isinstance(country_geom, MultiPolygon)
-            else MercatorTiles.from_polygon
-        )(country_geom, zoom_level, predicate)
+        tiles = MercatorTiles.from_geometry(country_geom, zoom_level, predicate)
 
         instance.quadkeys = tiles.quadkeys
         return instance
-
-    @property
-    def country(self) -> str:
-        """Get country identifier."""
-        return self._country
-
-    def _load_country_geometry(
-        self,
-        country,
-        data_store: Optional[DataStore] = None,
-        path: Optional[Union[str, Path]] = None,
-    ) -> Union[Polygon, MultiPolygon]:
-        """Load country boundary geometry from DataStore or GADM."""
-        from gigaspatial.handlers.boundaries import AdminBoundaries
-
-        gdf_admin0 = AdminBoundaries.create(
-            country_code=country, admin_level=0, data_store=data_store, path=path
-        ).to_geodataframe()
-
-        return gdf_admin0.geometry.iloc[0]

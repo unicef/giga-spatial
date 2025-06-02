@@ -5,6 +5,7 @@ import requests
 import logging
 import gzip
 import os
+import tempfile
 from datetime import datetime
 from typing import List, Optional, Union
 from pathlib import Path
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.config import config as global_config
 
 
@@ -26,7 +28,10 @@ class OpenCellIDConfig(BaseModel):
 
     # User configuration
     country: str = Field(...)
-    api_token: str = Field(...)
+    api_token: str = Field(
+        default=global_config.OPENCELLID_ACCESS_TOKEN,
+        description="OpenCellID API Access Token",
+    )
     base_path: Path = Field(default=global_config.get_path("opencellid", "bronze"))
     created_newer: int = Field(
         default=2003, description="Filter out cell towers added before this year"
@@ -78,10 +83,15 @@ class OpenCellIDDownloader:
             self.config = config
 
         self.data_store = data_store or LocalDataStore()
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or global_config.get_logger(self.__class__.__name__)
 
     @classmethod
-    def from_country(cls, country: str, api_token: str, **kwargs):
+    def from_country(
+        cls,
+        country: str,
+        api_token: str = global_config.OPENCELLID_ACCESS_TOKEN,
+        **kwargs,
+    ):
         """Create a downloader for a specific country"""
         config = OpenCellIDConfig(country=country, api_token=api_token, **kwargs)
         return cls(config=config)
@@ -146,13 +156,9 @@ class OpenCellIDDownloader:
     def download_and_process(self) -> str:
         """Download and process OpenCellID data for the configured country"""
 
-        # Create base directory if it doesn't exist
-        os.makedirs(self.config.base_path, exist_ok=True)
-
         try:
             links = self.get_download_links()
             self.logger.info(f"Found {len(links)} data files for {self.config.country}")
-            
 
             dfs = []
 
@@ -161,16 +167,12 @@ class OpenCellIDDownloader:
                 response = requests.get(link, stream=True)
                 response.raise_for_status()
 
-                temp_file = os.path.join(
-                    self.config.base_path,
-                    f"opencellid_{self.config.country.lower()}.csv.gz.tmp",
-                )
-
-                # Save the downloaded data to a temporary file
-                with open(temp_file, "wb") as feed_file:
+                # Use a temporary file for download
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".gz") as tmpfile:
                     for chunk in response.iter_content(chunk_size=1024):
                         if chunk:
-                            feed_file.write(chunk)
+                            tmpfile.write(chunk)
+                    temp_file = tmpfile.name
 
                 try:
                     # Read the downloaded gzipped CSV data
@@ -239,10 +241,11 @@ class OpenCellIDDownloader:
                         df_cell.groupby(["radio", "lon", "lat"]).first().reset_index()
                     )
 
-                # Save processed data
+                # Save processed data using data_store
                 output_path = str(self.config.output_file_path)
                 self.logger.info(f"Saving processed data to {output_path}")
-                df_cell.to_csv(output_path, compression="gzip", index=False)
+                with self.data_store.open(output_path, "wb") as f:
+                    df_cell.to_csv(f, compression="gzip", index=False)
 
                 return output_path
             else:
@@ -268,15 +271,15 @@ class OpenCellIDReader:
 
     def read_data(self) -> pd.DataFrame:
         """Read OpenCellID data for the specified country"""
-        file_path = self.base_path / f"opencellid_{self.country.lower()}.csv.gz"
+        file_path = str(self.base_path / f"opencellid_{self.country.lower()}.csv.gz")
 
-        if not os.path.exists(file_path):
+        if not self.data_store.file_exists(file_path):
             raise FileNotFoundError(
                 f"OpenCellID data for {self.country} not found at {file_path}. "
                 "Download the data first using OpenCellIDDownloader."
             )
 
-        return pd.read_csv(file_path, compression="gzip")
+        return read_dataset(self.data_store, file_path)
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
         """Convert OpenCellID data to a GeoDataFrame"""

@@ -77,7 +77,7 @@ class Config(BaseSettings):
         description="Mapping of data types to directory names",
     )
 
-    def get_logger(self, name, console_level=logging.INFO):
+    def get_logger(self, name="GigaSpatial", console_level=logging.INFO):
         logger = logging.getLogger(name)
         logger.setLevel(logging.INFO)
 

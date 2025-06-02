@@ -10,7 +10,6 @@ import numpy as np
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.core.io.writers import write_dataset
 from gigaspatial.config import config
 from gigaspatial.processing.geo import (
@@ -319,81 +318,6 @@ class ZonalViewGenerator(ABC, Generic[T]):
         )
 
         return sampled_values
-
-    def _load_raster_data(
-        self, raster_paths: List[Union[str, Path]]
-    ) -> List[TifProcessor]:
-        """Load raster data from file paths.
-
-        Args:
-            raster_paths (List[Union[str, Path]]): List of file paths to raster files.
-
-        Returns:
-            List[TifProcessor]: List of TifProcessor objects for accessing the raster data.
-
-        Raises:
-            RuntimeError: If any of the specified files do not exist in the data store.
-        """
-        source_data_paths = [str(raster_path) for raster_path in raster_paths]
-
-        self._check_file_exists(source_data_paths)
-
-        return [
-            TifProcessor(data_path, self.data_store, mode="single")
-            for data_path in source_data_paths
-        ]
-
-    def _load_tabular_data(
-        self, file_paths: List[Union[str, Path]], read_function: Callable = read_dataset
-    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-        """Load and concatenate tabular data from multiple files.
-
-        Args:
-            file_paths (List[Union[str, Path]]): List of file paths to load data from.
-            read_function (Callable): Function to use for reading individual files.
-                Defaults to read_dataset. Should accept (data_store, file_path) arguments.
-
-        Returns:
-            Union[pd.DataFrame, gpd.GeoDataFrame]: Concatenated data from all files.
-                Returns empty DataFrame if no data is loaded.
-
-        Raises:
-            RuntimeError: If any of the specified files do not exist in the data store.
-        """
-        source_data_paths = [str(file_path) for file_path in file_paths]
-
-        self._check_file_exists(file_paths=source_data_paths)
-
-        all_data = []
-        for file_path in source_data_paths:
-            all_data.append(read_function(self.data_store, file_path))
-
-        if not all_data:
-            return pd.DataFrame()
-
-        # Concatenate all tile data
-        result = pd.concat(all_data, ignore_index=True)
-
-        if result.empty:
-            self.logger.warning("No data was loaded from the source files")
-            return result
-
-        return result
-
-    def _check_file_exists(self, file_paths: List[Union[str, Path]]):
-        """Check that all specified files exist in the data store.
-
-        Args:
-            file_paths (List[Union[str, Path]]): List of file paths to check.
-
-        Raises:
-            RuntimeError: If any file does not exist in the data store.
-        """
-        for file_path in file_paths:
-            if not self.data_store.file_exists(str(file_path)):
-                raise RuntimeError(
-                    f"Source file does not exist in the data store: {file_path}"
-                )
 
     @lru_cache(maxsize=32)
     def _get_transformed_geometries(self, target_crs):

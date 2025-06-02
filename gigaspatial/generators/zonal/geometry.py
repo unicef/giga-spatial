@@ -1,26 +1,23 @@
 from typing import Dict, List, Optional, Union
-from shapely.geometry import Polygon, shape, MultiPolygon
-from shapely.ops import unary_union
+from shapely.geometry import Polygon, MultiPolygon
 
 import geopandas as gpd
 import pandas as pd
 
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.core.io.readers import read_gzipped_json_or_csv
 from gigaspatial.config import config
 from gigaspatial.processing.geo import (
-    convert_to_geodataframe,
     add_area_in_meters,
     get_centroids,
 )
-from gigaspatial.processing import TifProcessor
-from gigaspatial.handlers.ghsl import GHSLDataConfig
+from gigaspatial.handlers.ghsl import GHSLDataConfig, GHSLDataReader
 from gigaspatial.handlers.google_open_buildings import (
     GoogleOpenBuildingsConfig,
-    GoogleOpenBuildingsDownloader,
+    GoogleOpenBuildingsReader,
 )
 from gigaspatial.handlers.microsoft_global_buildings import (
     MSBuildingsConfig,
+    MSBuildingsReader,
 )
 from gigaspatial.generators.zonal.base import (
     ZonalViewGenerator,
@@ -252,8 +249,8 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.logger.info(
             f"Mapping {ghsl_data_config.product} data (year: {ghsl_data_config.year}, resolution: {ghsl_data_config.resolution}m)"
         )
-        tif_processors = self._load_ghsl_data(ghsl_data_config)
-        self.logger.info(f"Loaded {len(tif_processors)} GHSL tiles")
+        reader = GHSLDataReader(config=ghsl_data_config, data_store=self.data_store)
+        tif_processors = reader.load(self.zone_gdf)
 
         self.logger.info(
             f"Sampling {ghsl_data_config.product} data using '{stat}' statistic"
@@ -304,16 +301,14 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         )
 
         self.logger.info("Loading Google Buildings point data")
-        buildings_df = self._load_google_buildings(
-            google_open_buildings_config, data_type="points"
+        reader = GoogleOpenBuildingsReader(
+            config=google_open_buildings_config, data_store=self.data_store
         )
+        buildings_df = reader.load_points(self.zone_gdf)
 
-        # Check if we found any buildings
-        if isinstance(buildings_df, list) or len(buildings_df) == 0:
+        if not buildings_df or len(buildings_df) == 0:
             self.logger.warning("No Google buildings data found for the provided zones")
             return self._zone_gdf.copy()
-
-        self.logger.info(f"Loaded {len(buildings_df)} Google building points")
 
         if not use_polygons:
             self.logger.info("Aggregating building data using points with attributes")
@@ -331,9 +326,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             self.logger.info(
                 "Loading Google Buildings polygon data for more accurate mapping"
             )
-            buildings_gdf = self._load_google_buildings(
-                google_open_buildings_config, data_type="polygons"
-            )
+            buildings_gdf = reader.load_polygons(self.zone_gdf)
 
             self.logger.info(
                 "Calculating building areas with area-weighted aggregation"
@@ -385,10 +378,13 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.logger.info("Mapping Microsoft Global Buildings data")
 
         self.logger.info("Loading Microsoft Buildings polygon data")
-        buildings_gdf = self._load_ms_buildings(ms_buildings_config)
+        reader = MSBuildingsReader(
+            config=ms_buildings_config, data_store=self.data_store
+        )
+        buildings_gdf = reader.load(self.zone_gdf)
 
         # Check if we found any buildings
-        if isinstance(buildings_gdf, list) or len(buildings_gdf) == 0:
+        if not buildings_gdf or len(buildings_gdf) == 0:
             self.logger.warning(
                 "No Microsoft buildings data found for the provided zones"
             )
@@ -431,123 +427,3 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.logger.info(f"Added Microsoft building data")
 
         return self._zone_gdf.copy()
-
-    def _load_ghsl_data(self, ghsl_data_config: GHSLDataConfig) -> List[TifProcessor]:
-        """Load GHSL raster data for tiles that intersect with zones.
-
-        Args:
-            ghsl_data_config (GHSLDataConfig): Configuration specifying GHSL data parameters.
-
-        Returns:
-            List[TifProcessor]: List of TifProcessor objects for the intersecting GHSL tiles.
-        """
-        zonal_geoms = self.get_zonal_geometries()
-
-        intersection_tiles = ghsl_data_config.get_intersecting_tiles(
-            geometry=unary_union(zonal_geoms), crs=self.zone_data_crs
-        )
-
-        source_data_paths = [
-            str(ghsl_data_config.get_tile_path(tile_id=tile).with_suffix(".tif"))
-            for tile in intersection_tiles
-        ]
-
-        tif_processors = self._load_raster_data(source_data_paths)
-
-        return tif_processors
-
-    def _load_google_buildings(
-        self,
-        google_open_buildings_config: GoogleOpenBuildingsConfig = GoogleOpenBuildingsConfig(),
-        data_type: str = "points",
-    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-        """Load Google Open Buildings data for tiles that intersect with zones.
-
-        Args:
-            google_open_buildings_config (GoogleOpenBuildingsConfig): Configuration
-                for Google Open Buildings data access.
-            data_type (str): Type of data to load. Either "points" (centroids with attributes)
-                or "polygons" (actual building geometries). Defaults to "points".
-
-        Returns:
-            Union[pd.DataFrame, gpd.GeoDataFrame]: Building data for intersecting tiles.
-                Returns DataFrame for points, GeoDataFrame for polygons.
-                Returns empty list if no intersecting tiles are found.
-        """
-        handler = GoogleOpenBuildingsDownloader(
-            config=google_open_buildings_config, data_store=self.data_store
-        )
-
-        gdf = self._zone_gdf.copy()
-
-        intersection_tiles = handler._get_intersecting_tiles(gdf)
-
-        if intersection_tiles.empty:
-            self.logger.warning(
-                "There are no matching Google buildings tiles for the POI data"
-            )
-            return []
-
-        # Generate paths for each intersecting tile
-        source_data_paths = [
-            google_open_buildings_config.get_tile_path(
-                tile_id=tile, data_type=data_type
-            )
-            for tile in intersection_tiles.tile_id
-        ]
-
-        result = self._load_tabular_data(source_data_paths)
-
-        if data_type == "polygons":
-            result = convert_to_geodataframe(result)
-
-        return result
-
-    def _load_ms_buildings(
-        self,
-        ms_buildings_config: Optional[MSBuildingsConfig] = None,
-    ) -> gpd.GeoDataFrame:
-        """Load Microsoft Global Buildings data for tiles that intersect with zones.
-
-        Args:
-            ms_buildings_config (MSBuildingsConfig, optional): Configuration for
-                Microsoft Buildings data access. If None, uses default configuration.
-
-        Returns:
-            gpd.GeoDataFrame: Building polygon data for intersecting tiles.
-                Returns empty list if no intersecting tiles are found.
-        """
-
-        def read_ms_dataset(data_store: DataStore, file_path: str):
-            df = read_gzipped_json_or_csv(file_path=file_path, data_store=data_store)
-            df["geometry"] = df["geometry"].apply(shape)
-            return gpd.GeoDataFrame(df, crs=4326)
-
-        data_config = ms_buildings_config or MSBuildingsConfig(
-            data_store=self.data_store
-        )
-
-        gdf = self._zone_gdf.copy()
-
-        tiles = data_config.get_tiles_for_geometry(gdf)
-
-        if tiles.empty:
-            self.logger.warning(
-                "There are no matching Microsoft Buildings tiles for the POI data"
-            )
-            return []
-
-        # Generate paths for each intersecting tile
-        source_data_paths = [
-            data_config.get_tile_path(
-                quadkey=tile["quadkey"],
-                location=tile["country"] if tile["country"] else tile["location"],
-            )
-            for _, tile in tiles.iterrows()
-        ]
-
-        gdf_buildings = self._load_tabular_data(
-            file_paths=source_data_paths, read_function=read_ms_dataset
-        )
-
-        return gdf_buildings

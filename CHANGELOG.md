@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.0] - 2025-06-02
+
+### Changed
+
+- **Refactored data loading architecture**:
+  - Introduced **dedicated reader classes** for major datasets (Microsoft Global Buildings, Google Open Buildings, GHSL), each inheriting from a new `BaseHandlerReader`.
+  - Centralized **file existence checks** and **raster/tabular loading** methods in `BaseHandlerReader`.
+  - Improved maintainability by encapsulating dataset-specific logic inside each reader class.
+
+- **Modularized source resolution**:
+  - Each reader now supports resolving data **by country, geometry, or individual points**, improving code reuse and flexibility.
+
+- **Unified POI enrichment**:
+  - Merged all POI generators (Google Open Buildings, Microsoft Global Buildings, GHSL Built Surface, GHSL SMOD) into a single `PoiViewGenerator` class.
+  - Supports flexible inputs: list of `(lat, lon)` tuples, list of dicts, DataFrame, or GeoDataFrame.
+  - Maintains consistent internal state via `points_gdf`, updated after each mapping.
+  - Enables **chained enrichment** of POI data using multiple datasets.
+
+- **Modernized internal data access**:
+  - All data loading now uses dedicated **handler/reader classes**, improving consistency and long-term maintainability.
+
+### Fixed
+
+- **Full DataStore integration**:
+  - Fixed `OpenCellID` and `HDX` handlers to fully support the `DataStore` abstraction.
+  - All file reads, writes, and checks now use the configured `DataStore` (local or cloud).
+  - Temporary files are only used during downloads; final data is always stored and accessed via the DataStore interface.
+
+### Removed
+
+- Removed deprecated POI generator classes and the now-obsolete poi submodule. All enrichment is handled through the unified `PoiViewGenerator`.
+
+### Notes
+
+- This release finalizes the architectural refactors started in `v0.5.0`.
+- While marked stable, please report any issues or regressions from the new modular structure.
+
 ## [v0.5.0b1] - 2025-05-27
 
 ### Added

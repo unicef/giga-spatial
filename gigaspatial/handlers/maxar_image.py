@@ -119,7 +119,7 @@ class MaxarImageDownloader:
             password=self.config.password,
         )
         self.data_store = data_store or LocalDataStore()
-        self.logger = global_config.get_logger(__name__)
+        self.logger = global_config.get_logger(self.__class__.__name__)
 
     def _download_single_image(self, bbox, output_path: Union[Path, str], size) -> bool:
         """Download a single image from bbox and pixel size"""

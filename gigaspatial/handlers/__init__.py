@@ -1,12 +1,14 @@
 from gigaspatial.handlers.boundaries import AdminBoundaries
-from gigaspatial.handlers.ghsl import GHSLDataConfig, GHSLDataDownloader
+from gigaspatial.handlers.ghsl import GHSLDataConfig, GHSLDataDownloader, GHSLDataReader
 from gigaspatial.handlers.google_open_buildings import (
     GoogleOpenBuildingsConfig,
     GoogleOpenBuildingsDownloader,
+    GoogleOpenBuildingsReader,
 )
 from gigaspatial.handlers.microsoft_global_buildings import (
     MSBuildingsConfig,
     MSBuildingsDownloader,
+    MSBuildingsReader,
 )
 from gigaspatial.handlers.osm import OSMLocationFetcher
 from gigaspatial.handlers.overture import OvertureAmenityFetcher

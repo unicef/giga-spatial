@@ -4,6 +4,7 @@ import geopandas as gpd
 from pathlib import Path
 from urllib.error import HTTPError
 from shapely.geometry import Polygon, MultiPolygon, shape
+import pycountry
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.readers import read_dataset
@@ -203,11 +204,14 @@ class AdminBoundaries(BaseModel):
                         "If data_store is provided, path or country_code must also be specified."
                     )
                 path = config.get_admin_path(
-                    country_code=country_code.upper(), admin_level=admin_level
+                    country_code=pycountry.countries.lookup(country_code).alpha_3,
+                    admin_level=admin_level,
                 )
             return cls.from_data_store(data_store, path, admin_level, **kwargs)
         elif country_code is not None:
-            return cls.from_gadm(country_code, admin_level, **kwargs)
+            return cls.from_gadm(
+                pycountry.countries.lookup(country_code).alpha_3, admin_level, **kwargs
+            )
         else:
             raise ValueError(
                 "Either country_code or (data_store, path) must be provided."

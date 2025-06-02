@@ -2,6 +2,7 @@ import os
 import logging
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any
+import tempfile
 
 import pandas as pd
 import geopandas as gpd
@@ -62,7 +63,7 @@ class HDXDownloader:
             self.config = config
 
         self.data_store = data_store or LocalDataStore()
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or global_config.get_logger(self.__class__.__name__)
         try:
             Configuration.read()
             self._hdx_configured = True
@@ -133,8 +134,7 @@ class HDXDownloader:
             raise
 
     def download_dataset(self) -> List[str]:
-        """Download and save all resources from the HDX dataset"""
-
+        """Download and save all resources from the HDX dataset into the data_store."""
         try:
             dataset = self.get_dataset()
             resources = self.get_dataset_resources(dataset)
@@ -155,10 +155,22 @@ class HDXDownloader:
                     resource_name = res.get("name", "Unknown")
                     self.logger.info(f"Downloading resource: {resource_name}")
 
-                    url, path = res.download(folder=str(self.config.output_dir_path))
-                    downloaded_paths.append(path)
+                    # Download to a temporary directory
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        url, local_path = res.download(folder=tmpdir)
+                        # Read the file and write to the DataStore
+                        with open(local_path, "rb") as f:
+                            data = f.read()
+                        # Compose the target path in the DataStore
+                        target_path = str(
+                            self.config.output_dir_path / Path(local_path).name
+                        )
+                        self.data_store.write_file(target_path, data)
+                        downloaded_paths.append(target_path)
 
-                    self.logger.info(f"Downloaded resource: {resource_name} to {path}")
+                    self.logger.info(
+                        f"Downloaded resource: {resource_name} to {target_path}"
+                    )
                 except Exception as e:
                     self.logger.error(
                         f"Error downloading resource {res.get('name', 'Unknown')}: {str(e)}"
@@ -186,37 +198,37 @@ class HDXReader:
         self.dataset_path = self.base_path / self.dataset_name
 
     def list_resources(self) -> List[str]:
-        """List all resources in the dataset directory"""
-        if not os.path.exists(self.dataset_path):
+        """List all resources in the dataset directory using the data_store."""
+        # Check if the dataset directory exists in the data_store
+        if not (
+            self.data_store.is_dir(str(self.dataset_path))
+            or self.data_store.file_exists(str(self.dataset_path))
+        ):
             raise FileNotFoundError(
                 f"HDX dataset '{self.dataset_name}' not found at {self.dataset_path}. "
                 "Download the data first using HDXDownloader."
             )
-
-        return [
-            f
-            for f in os.listdir(self.dataset_path)
-            if os.path.isfile(os.path.join(self.dataset_path, f))
-        ]
+        # List files using the data_store
+        return self.data_store.list_files(str(self.dataset_path))
 
     def read_resource(
         self, resource_file: str
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-        """Read a specific resource file from the dataset"""
-        file_path = os.path.join(self.dataset_path, resource_file)
+        """Read a specific resource file from the dataset using the data_store."""
+        file_path = str(self.dataset_path / resource_file)
 
-        if not os.path.exists(file_path):
+        if not self.data_store.file_exists(file_path):
             raise FileNotFoundError(
                 f"Resource file {resource_file} not found in dataset {self.dataset_name}"
             )
 
         try:
-            return read_dataset(self.data_store, str(file_path))
+            return read_dataset(self.data_store, file_path)
         except Exception as e:
             raise ValueError(f"Could not read file {file_path}: {str(e)}")
 
     def read_all_resources(self) -> Dict[str, Union[pd.DataFrame, gpd.GeoDataFrame]]:
-        """Read all resources in the dataset directory"""
+        """Read all resources in the dataset directory using the data_store."""
         resources = self.list_resources()
         result = {}
 

@@ -28,7 +28,7 @@ class TifProcessor:
     def __post_init__(self):
         """Validate inputs and set up logging."""
         self.data_store = self.data_store or LocalDataStore()
-        self.logger = config.get_logger(__name__)
+        self.logger = config.get_logger(self.__class__.__name__)
         self._cache = {}
 
         if not self.data_store.file_exists(self.dataset_path):

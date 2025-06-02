@@ -44,7 +44,7 @@ class OvertureAmenityFetcher:
             raise ValueError(f"Invalid country code provided: {self.country}")
 
         self.base_url = self.base_url.format(release=self.release)
-        self.logger = config.get_logger(__name__)
+        self.logger = config.get_logger(self.__class__.__name__)
 
         self.connection = self._set_connection()
 

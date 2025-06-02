@@ -211,7 +211,7 @@ class WorldPopDownloader:
             data_store: Optional data storage interface. If not provided, uses LocalDataStore.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or global_config.get_logger(__name__)
+        self.logger = logger or global_config.get_logger(self.__class__.__name__)
         self.data_store = data_store or LocalDataStore()
         self.config = (
             config if isinstance(config, WorldPopConfig) else WorldPopConfig(**config)

@@ -9,7 +9,7 @@ import re
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.config import config
 
-LOGGER = config.get_logger(__name__)
+LOGGER = config.get_logger("GigaSpatialProcessing")
 
 
 def detect_coordinate_columns(
