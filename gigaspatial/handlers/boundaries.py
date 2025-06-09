@@ -46,7 +46,7 @@ class AdminBoundaries(BaseModel):
         description="Administrative level (e.g., 0=country, 1=state, etc.)",
     )
 
-    logger: ClassVar = config.get_logger(__name__)
+    logger: ClassVar = config.get_logger("AdminBoundaries")
 
     _schema_config: ClassVar[Dict[str, Dict[str, str]]] = {
         "gadm": {
@@ -74,7 +74,9 @@ class AdminBoundaries(BaseModel):
     ) -> "AdminBoundaries":
         """Load and create instance from GADM data."""
         url = f"https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_{country_code}_{admin_level}.json"
-
+        cls.logger.info(
+            f"Loading GADM data for country: {country_code}, admin level: {admin_level} from URL: {url}"
+        )
         try:
             gdf = gpd.read_file(url)
 
@@ -89,13 +91,14 @@ class AdminBoundaries(BaseModel):
             boundaries = [
                 AdminBoundary(**row_dict) for row_dict in gdf.to_dict("records")
             ]
+            cls.logger.info(f"Created {len(boundaries)} AdminBoundary objects.")
             return cls(
                 boundaries=boundaries, level=admin_level, country_code=country_code
             )
 
         except (ValueError, HTTPError, FileNotFoundError) as e:
             cls.logger.warning(
-                f"No data found for {country_code} at admin level {admin_level}: {str(e)}"
+                f"Error loading GADM data for {country_code} at admin level {admin_level}: {str(e)}"
             )
             return cls._create_empty_instance(country_code, admin_level, "gadm")
 
@@ -108,10 +111,14 @@ class AdminBoundaries(BaseModel):
         **kwargs,
     ) -> "AdminBoundaries":
         """Load and create instance from internal data store."""
+        cls.logger.info(
+            f"Loading data from data store at path: {path}, admin level: {admin_level}"
+        )
         try:
             gdf = read_dataset(data_store, str(path), **kwargs)
 
             if gdf.empty:
+                cls.logger.warning(f"No data found at {path}.")
                 return cls._create_empty_instance(None, admin_level, "internal")
 
             gdf = cls._map_fields(gdf, "internal", admin_level)
@@ -124,6 +131,7 @@ class AdminBoundaries(BaseModel):
             boundaries = [
                 AdminBoundary(**row_dict) for row_dict in gdf.to_dict("records")
             ]
+            cls.logger.info(f"Created {len(boundaries)} AdminBoundary objects.")
             return cls(boundaries=boundaries, level=admin_level)
 
         except (FileNotFoundError, KeyError) as e:
@@ -153,6 +161,9 @@ class AdminBoundaries(BaseModel):
         Returns:
             AdminBoundaries instance
         """
+        cls.logger.info(
+            f"Loading data from UNICEF GeoRepo for country: {country_code}, admin level: {admin_level}"
+        )
         from gigaspatial.handlers.unicef_georepo import get_country_boundaries_by_iso3
 
         # Fetch boundaries from GeoRepo
@@ -181,6 +192,10 @@ class AdminBoundaries(BaseModel):
             )
             boundaries.append(boundary)
 
+        cls.logger.info(
+            f"Created {len(boundaries)} AdminBoundary objects from GeoRepo data."
+        )
+
         # Try to infer country_code from first boundary if not set
         if boundaries and not boundaries[0].country_code:
             boundaries[0].country_code = boundaries[0].id[:3]
@@ -197,6 +212,10 @@ class AdminBoundaries(BaseModel):
         **kwargs,
     ) -> "AdminBoundaries":
         """Factory method to create AdminBoundaries instance from either GADM or data store."""
+        cls.logger.info(
+            f"Creating AdminBoundaries instance. Country: {country_code}, admin level: {admin_level}, data_store provided: {data_store is not None}, path provided: {path is not None}"
+        )
+        iso3_code = pycountry.countries.lookup(country_code).alpha_3
         if data_store is not None:
             if path is None:
                 if country_code is None:
@@ -204,14 +223,26 @@ class AdminBoundaries(BaseModel):
                         "If data_store is provided, path or country_code must also be specified."
                     )
                 path = config.get_admin_path(
-                    country_code=pycountry.countries.lookup(country_code).alpha_3,
+                    country_code=iso3_code,
                     admin_level=admin_level,
                 )
             return cls.from_data_store(data_store, path, admin_level, **kwargs)
         elif country_code is not None:
-            return cls.from_gadm(
-                pycountry.countries.lookup(country_code).alpha_3, admin_level, **kwargs
-            )
+            from gigaspatial.handlers.unicef_georepo import GeoRepoClient
+
+            client = GeoRepoClient()
+
+            if client.check_connection():
+                cls.logger.info("GeoRepo connection successful.")
+                return cls.from_georepo(
+                    iso3_code,
+                    admin_level=admin_level,
+                )
+            else:
+                cls.logger.warning(
+                    "GeoRepo connection check failed. Falling back to GADM."
+                )
+                return cls.from_gadm(iso3_code, admin_level, **kwargs)
         else:
             raise ValueError(
                 "Either country_code or (data_store, path) must be provided."

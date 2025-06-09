@@ -8,17 +8,19 @@ from shapely import MultiPolygon, Polygon, Point
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field, PrivateAttr
-from typing import List, Union, Iterable, Optional, Tuple
+from typing import List, Union, Iterable, Optional, Tuple, ClassVar
 import pycountry
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.config import config
 
 
 class MercatorTiles(BaseModel):
     zoom_level: int = Field(..., ge=0, le=20)
     quadkeys: List[str] = Field(default_factory=list)
     data_store: DataStore = Field(default_factory=LocalDataStore, exclude=True)
+    logger: ClassVar = config.get_logger("MercatorTiles")
 
     class Config:
         arbitrary_types_allowed = True
@@ -26,6 +28,9 @@ class MercatorTiles(BaseModel):
     @classmethod
     def from_quadkeys(cls, quadkeys: List[str]):
         """Create MercatorTiles from list of quadkeys."""
+        if not quadkeys:
+            cls.logger.warning("No quadkeys provided to from_quadkeys.")
+            return cls(zoom_level=0, quadkeys=[])
         return cls(zoom_level=len(quadkeys[0]), quadkeys=set(quadkeys))
 
     @classmethod
@@ -33,6 +38,9 @@ class MercatorTiles(BaseModel):
         cls, xmin: float, ymin: float, xmax: float, ymax: float, zoom_level: int
     ):
         """Create MercatorTiles from boundary coordinates."""
+        cls.logger.info(
+            f"Creating MercatorTiles from bounds: ({xmin}, {ymin}, {xmax}, {ymax}) at zoom level: {zoom_level}"
+        )
         return cls(
             zoom_level=zoom_level,
             quadkeys=[
@@ -53,6 +61,9 @@ class MercatorTiles(BaseModel):
         predicate: str = "intersects",
         **kwargs,
     ):
+        cls.logger.info(
+            f"Creating MercatorTiles from spatial source (type: {type(source)}) at zoom level: {zoom_level} with predicate: {predicate}"
+        )
         if isinstance(source, gpd.GeoDataFrame):
             if source.crs != "EPSG:4326":
                 source = source.to_crs("EPSG:4326")
@@ -78,6 +89,9 @@ class MercatorTiles(BaseModel):
         **kwargs,
     ):
         """Create MercatorTiles from a polygon."""
+        cls.logger.info(
+            f"Creating MercatorTiles from geometry (bounds: {geometry.bounds}) at zoom level: {zoom_level} with predicate: {predicate}"
+        )
         tiles = list(mercantile.tiles(*geometry.bounds, zoom_level))
         quadkeys_boxes = [
             (mercantile.quadkey(t), box(*mercantile.bounds(t))) for t in tiles
@@ -85,19 +99,27 @@ class MercatorTiles(BaseModel):
         quadkeys, boxes = zip(*quadkeys_boxes) if quadkeys_boxes else ([], [])
 
         if not boxes:
+            cls.logger.warning(
+                "No boxes generated from geometry bounds. Returning empty MercatorTiles."
+            )
             return MercatorTiles(zoom_level=zoom_level, quadkeys=[])
 
         s = STRtree(boxes)
-        result = s.query(geometry, predicate=predicate)
-        return cls(
-            zoom_level=zoom_level, quadkeys=[quadkeys[i] for i in result], **kwargs
+        result_indices = s.query(geometry, predicate=predicate)
+        filtered_quadkeys = [quadkeys[i] for i in result_indices]
+        cls.logger.info(
+            f"Filtered down to {len(filtered_quadkeys)} quadkeys using spatial predicate."
         )
+        return cls(zoom_level=zoom_level, quadkeys=filtered_quadkeys, **kwargs)
 
     @classmethod
     def from_points(
         cls, points: List[Union[Point, Tuple[float, float]]], zoom_level: int, **kwargs
     ) -> "MercatorTiles":
         """Create MercatorTiles from a list of points or lat-lon pairs."""
+        cls.logger.info(
+            f"Creating MercatorTiles from {len(points)} points at zoom level: {zoom_level}"
+        )
         quadkeys = {
             (
                 mercantile.quadkey(mercantile.tile(p.x, p.y, zoom_level))
@@ -106,6 +128,7 @@ class MercatorTiles(BaseModel):
             )
             for p in points
         }
+        cls.logger.info(f"Generated {len(quadkeys)} unique quadkeys from points.")
         return cls(zoom_level=zoom_level, quadkeys=list(quadkeys), **kwargs)
 
     @classmethod
@@ -113,6 +136,9 @@ class MercatorTiles(BaseModel):
         cls, data_store: DataStore, file: Union[str, Path], **kwargs
     ) -> "MercatorTiles":
         """Load MercatorTiles from a JSON file."""
+        cls.logger.info(
+            f"Loading MercatorTiles from JSON file: {file} using data store: {type(data_store).__name__}"
+        )
         with data_store.open(str(file), "r") as f:
             data = json.load(f)
             if isinstance(data, list):  # If file contains only quadkeys
@@ -125,17 +151,38 @@ class MercatorTiles(BaseModel):
                 data.update(kwargs)
             instance = cls(**data)
             instance.data_store = data_store
+            cls.logger.info(
+                f"Successfully loaded {len(instance.quadkeys)} quadkeys from JSON file."
+            )
             return instance
 
     def filter_quadkeys(self, quadkeys: Iterable[str]) -> "MercatorTiles":
         """Filter quadkeys by a given set of quadkeys."""
+        original_count = len(self.quadkeys)
+        incoming_count = len(
+            list(quadkeys)
+        )  # Convert to list to get length if it's an iterator
+
+        self.logger.info(
+            f"Filtering {original_count} quadkeys with an incoming set of {incoming_count} quadkeys."
+        )
+        filtered_quadkeys = list(set(self.quadkeys) & set(quadkeys))
+        self.logger.info(f"Resulting in {len(filtered_quadkeys)} filtered quadkeys.")
         return MercatorTiles(
             zoom_level=self.zoom_level,
-            quadkeys=list(set(self.quadkeys) & set(quadkeys)),
+            quadkeys=filtered_quadkeys,
         )
 
     def to_dataframe(self) -> pd.DataFrame:
         """Convert to pandas DataFrame with quadkey and centroid coordinates."""
+        self.logger.info(
+            f"Converting {len(self.quadkeys)} quadkeys to pandas DataFrame."
+        )
+        if not self.quadkeys:
+            self.logger.warning(
+                "No quadkeys to convert to DataFrame. Returning empty DataFrame."
+            )
+            return pd.DataFrame(columns=["quadkey", "latitude", "longitude"])
         tiles_data = [mercantile.quadkey_to_tile(q) for q in self.quadkeys]
         bounds_data = [mercantile.bounds(tile) for tile in tiles_data]
 
@@ -147,6 +194,8 @@ class MercatorTiles(BaseModel):
             for bounds in bounds_data
         ]
 
+        self.logger.info(f"Successfully converted to DataFrame.")
+
         return pd.DataFrame(
             {
                 "quadkey": self.quadkeys,
@@ -156,6 +205,9 @@ class MercatorTiles(BaseModel):
         )
 
     def to_geoms(self) -> List[box]:
+        self.logger.info(
+            f"Converting {len(self.quadkeys)} quadkeys to shapely box geometries."
+        )
         return [
             box(*mercantile.bounds(mercantile.quadkey_to_tile(q)))
             for q in self.quadkeys

@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.0] - 2025-06-09
+
+### Added
+
+#### POI View Generator
+- **`map_zonal_stats`**: New method for enriched spatial mapping with support for:
+  - Raster point sampling (value at POI location)
+  - Raster zonal statistics (with buffer zone)
+  - Polygon aggregation (with optional area-weighted averaging)
+- **Auto-generated POI IDs** in `_init_points_gdf` for consistent point tracking.
+- **Support for area-weighted aggregation** for polygon-based statistics.
+
+#### BaseHandler Orchestration Layer
+- New abstract `BaseHandler` class providing unified lifecycle orchestration for config, downloader, and reader.
+- High-level interface methods:
+  - `ensure_data_available()`
+  - `load_data()`
+  - `download_and_load()`
+  - `get_available_data_info()`
+- Integrated factory pattern for safe and standardized component creation.
+- Built-in context manager support for resource cleanup.
+- Fully backwards compatible with existing handler architecture.
+
+#### Handlers Updated to Use BaseHandler
+- `GoogleOpenBuildingsHandler`
+- `MicrosoftBuildingsHandler`
+- `GHSLDataHandler`
+  - All now inherit from `BaseHandler`, supporting standardized behavior and cleaner APIs.
+
+---
+
+### Changed
+
+#### POI View Generator
+- `map_built_s` and `map_smod` now internally use the new `map_zonal_stats` method.
+- `tif_processors` renamed to `data` to support both raster and polygon inputs.
+- Removed parameters:
+  - `id_column` (now handled internally)
+  - `area_column` (now automatically calculated)
+
+#### Internals and Usability
+- Improved error handling with clearer validation messages.
+- Enhanced logging for better visibility during enrichment.
+- More consistent use of coordinate column naming.
+- Refined type hints and parameter documentation across key methods.
+
+---
+
+### Notes
+
+- Removed legacy POI generator classes and redundant `poi.py` file.
+- Simplified imports and removed unused handler dependencies.
+- All POI generator methods now include updated docstrings, parameter explanations, and usage examples.
+- Added docs on the new `BaseHandler` interface and handler refactors.
+
 ## [v0.5.0] - 2025-06-02
 
 ### Changed

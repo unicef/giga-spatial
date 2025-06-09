@@ -2,6 +2,7 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, Union, Literal, Dict, Any
+import io
 from functools import lru_cache
 import logging
 
@@ -28,6 +29,9 @@ class Config(BaseSettings):
     OPENCELLID_ACCESS_TOKEN: str = Field(default="", alias="OPENCELLID_ACCESS_TOKEN")
     GEOREPO_API_KEY: str = Field(default="", alias="GEOREPO_API_KEY")
     GEOREPO_USER_EMAIL: str = Field(default="", alias="GEOREPO_USER_EMAIL")
+    GIGA_SCHOOL_LOCATION_API_KEY: str = Field(
+        default="", alias="GIGA_SCHOOL_LOCATION_API_KEY"
+    )
 
     BRONZE_DATA_DIR: Path = Field(
         default=Path("bronze"),
@@ -93,6 +97,9 @@ class Config(BaseSettings):
             logger.addHandler(console_handler)
 
         return logger
+
+    def get_tqdm_logger_stream(self, logger: logging.Logger, level=logging.INFO):
+        return TqdmToLogger(logger, level=level)
 
     def set_path(
         self,
@@ -181,6 +188,32 @@ class Config(BaseSettings):
                     field_value.mkdir(parents=True, exist_ok=True)
                 else:
                     raise FileNotFoundError(f"Directory does not exist: {field_value}")
+
+
+class TqdmToLogger(io.StringIO):
+    """
+    File-like object to redirect tqdm output to a logger.
+    """
+
+    def __init__(self, logger, level=logging.INFO):
+        super().__init__()
+        self.logger = logger
+        self.level = level
+        self.buf = ""  # To store partial writes
+
+    def write(self, buf):
+        # tqdm often writes partial lines, and then a full line with \r
+        # We accumulate buffer and only log when a full line (or significant update) is received
+        self.buf += buf
+        if "\r" in buf or "\n" in buf:  # Heuristic for a "full" update
+            self.logger.log(self.level, self.buf.strip("\r\n"))
+            self.buf = ""  # Reset buffer after logging
+
+    def flush(self):
+        # Ensure any remaining buffer is logged on flush
+        if self.buf:
+            self.logger.log(self.level, self.buf.strip("\r\n"))
+            self.buf = ""
 
 
 @lru_cache()

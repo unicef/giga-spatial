@@ -17,30 +17,30 @@ import logging
 import geopandas as gpd
 
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.grid.mercator_tiles import (
     MercatorTiles,
     CountryMercatorTiles,
 )
-from gigaspatial.handlers.base_reader import BaseHandlerReader
+from gigaspatial.handlers.base import (
+    BaseHandlerReader,
+    BaseHandlerConfig,
+    BaseHandlerDownloader,
+    BaseHandler,
+)
 from gigaspatial.config import config as global_config
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
-class MSBuildingsConfig:
+class MSBuildingsConfig(BaseHandlerConfig):
     """Configuration for Microsoft Global Buildings dataset files."""
-
-    data_store: DataStore = field(
-        default_factory=LocalDataStore
-    )  # instance of DataStore for accessing data storage
-    BASE_PATH: Path = global_config.get_path("microsoft_global_buildings", "bronze")
 
     TILE_URLS: str = (
         "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
     )
     MERCATOR_ZOOM_LEVEL: int = 9
+    base_path: Path = global_config.get_path("microsoft_global_buildings", "bronze")
 
-    LOCATION_MAPPING_FILE: Path = BASE_PATH / "location_mapping.json"
+    LOCATION_MAPPING_FILE: Path = base_path / "location_mapping.json"
     SIMILARITY_SCORE: float = 0.8
     DEFAULT_MAPPING: Dict[str, str] = field(
         default_factory=lambda: {
@@ -73,13 +73,9 @@ class MSBuildingsConfig:
     )
     CUSTOM_MAPPING: Optional[Dict[str, str]] = None
 
-    n_workers: int = 4  # number of workers for parallel processing
-    logger: logging.Logger = None  # global_config.get_logger(__name__)
-
     def __post_init__(self):
         """Initialize the configuration, load tile URLs, and set up location mapping."""
-
-        self.logger = global_config.get_logger(self.__class__.__name__)
+        super().__post_init__()
         self._load_tile_urls()
         self.upload_date = self.df_tiles.upload_date[0]
         self._setup_location_mapping()
@@ -186,19 +182,67 @@ class MSBuildingsConfig:
 
         return location_mapping
 
-    def get_intersecting_tiles(
+    def get_relevant_data_units_by_geometry(
+        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    ) -> pd.DataFrame:
+        """
+        Return intersecting tiles for a given geometry or GeoDataFrame.
+        """
+        return self._get_relevant_tiles(geometry)
+
+    def get_relevant_data_units_by_points(
+        self, points: Iterable[Union[Point, tuple]], **kwargs
+    ) -> pd.DataFrame:
+        """
+        Return intersecting tiles for a list of points.
+        """
+        return self._get_relevant_tiles(points)
+
+    def get_relevant_data_units_by_country(
+        self, country: str, **kwargs
+    ) -> pd.DataFrame:
+        """
+        Return intersecting tiles for a given country.
+        """
+        return self._get_relevant_tiles(country)
+
+    def get_data_unit_path(self, unit: Union[pd.Series, dict], **kwargs) -> Path:
+
+        tile_location = unit["country"] if unit["country"] else unit["location"]
+
+        return (
+            self.base_path
+            / tile_location
+            / self.upload_date
+            / f'{unit["quadkey"]}.csv.gz'
+        )
+
+    def get_data_unit_paths(
+        self, units: Union[pd.DataFrame, Iterable[dict]], **kwargs
+    ) -> List:
+        if isinstance(units, pd.DataFrame):
+            return [self.get_data_unit_path(row) for _, row in units.iterrows()]
+        return super().get_data_unit_paths(units)
+
+    def _get_relevant_tiles(
         self,
         source: Union[
-            BaseGeometry,
+            str,  # country
+            BaseGeometry,  # shapely geoms
             gpd.GeoDataFrame,
-            List[Union[Point, Tuple[float, float]]],  # points]
+            Iterable[Union[Point, Tuple[float, float]]],  # points
         ],
     ) -> pd.DataFrame:
         """
-        Get the DataFrame of Microsoft Buildings tiles that intersect with a given spatial geometry.
+        Get the DataFrame of Microsoft Buildings tiles that intersect with a given source spatial geometry.
+
+        In case country given, this method first tries to find tiles directly mapped to the given country.
+        If no directly mapped tiles are found and the country is not in the location
+        mapping, it attempts to find overlapping tiles by creating Mercator tiles
+        for the country and filtering the dataset's tiles.
 
         Args:
-            source: A Shapely geometry, a GeoDataFrame, or a list of Point
+            source: A country code/name, a Shapely geometry, a GeoDataFrame, or a list of Point
                     objects or (lat, lon) tuples representing the area of interest.
                     The coordinates are assumed to be in EPSG:4326.
 
@@ -207,77 +251,42 @@ class MSBuildingsConfig:
             spatially intersect with the `source`. Returns an empty DataFrame
             if no intersecting tiles are found.
         """
-        source_tiles = MercatorTiles.from_spatial(
-            source=source, zoom_level=self.MERCATOR_ZOOM_LEVEL
-        ).filter_quadkeys(self.df_tiles.quadkey)
+        if isinstance(source, str):
+            try:
+                country_code = pycountry.countries.lookup(source).alpha_3
+            except:
+                raise ValueError("Invalid`country` value!")
 
-        if source_tiles:
-            return self.df_tiles[self.df_tiles.quadkey.isin(source_tiles.quadkeys)]
+            mask = self.df_tiles["country"] == country_code
 
-        return pd.DataFrame(columns=self.df_tiles.columns)
+            if any(mask):
+                return self.df_tiles.loc[
+                    mask, ["quadkey", "url", "country", "location"]
+                ].to_dict("records")
 
-    def get_tiles_for_country(self, country: str) -> pd.DataFrame:
-        """
-        Get the DataFrame of Microsoft Buildings tiles associated with a specific country code.
-
-        This method first tries to find tiles directly mapped to the given country code.
-        If no directly mapped tiles are found and the country is not in the location
-        mapping, it attempts to find overlapping tiles by creating Mercator tiles
-        for the country and filtering the dataset's tiles.
-
-        Args:
-            country: The country code or name.
-
-        Returns:
-            A pandas DataFrame containing the rows of tiles associated with the
-            `country_code`. Returns an empty DataFrame if no tiles are found.
-        """
-        try:
-            country_code = pycountry.countries.lookup(country).alpha_3
-        except:
-            raise ValueError("Invalid`country` value!")
-
-        country_tiles = self.df_tiles[self.df_tiles["country"] == country_code]
-
-        if not country_tiles.empty:
-            return country_tiles
-
-        self.logger.warning(
-            f"The country code '{country_code}' is not directly in the location mapping. "
-            "Manually checking for overlapping locations with the country boundary."
-        )
-
-        country_tiles = CountryMercatorTiles.create(
-            country_code, self.MERCATOR_ZOOM_LEVEL
-        ).filter_quadkeys(self.df_tiles.quadkey)
-
-        if country_tiles:
-            filtered_tiles = self.df_tiles[
-                self.df_tiles.country.isnull()
-                & self.df_tiles.quadkey.isin(country_tiles.quadkeys)
-            ]
-            return filtered_tiles
-
-        return pd.DataFrame(columns=self.df_tiles.columns)
-
-    def get_tile_path(self, quadkey: str, location: str) -> Path:
-        """Construct the local file path for a downloaded Microsoft Buildings tile."""
-        return self.BASE_PATH / location / self.upload_date / f"{quadkey}.csv.gz"
-
-    def get_tile_paths(self, tiles: pd.DataFrame) -> List:
-        if tiles.empty:
-            return []
-
-        return [
-            self.get_tile_path(
-                quadkey=tile["quadkey"],
-                location=tile["country"] if tile["country"] else tile["location"],
+            self.logger.warning(
+                f"The country code '{country_code}' is not directly in the location mapping. "
+                "Manually checking for overlapping locations with the country boundary."
             )
-            for _, tile in tiles.iterrows()
-        ]
+
+            source_tiles = CountryMercatorTiles.create(
+                country_code, self.MERCATOR_ZOOM_LEVEL
+            )
+        else:
+            source_tiles = MercatorTiles.from_spatial(
+                source=source, zoom_level=self.MERCATOR_ZOOM_LEVEL
+            )
+
+        filtered_tiles = source_tiles.filter_quadkeys(self.df_tiles.quadkey)
+
+        mask = self.df_tiles.quadkey.isin(filtered_tiles.quadkeys)
+
+        return self.df_tiles.loc[
+            mask, ["quadkey", "url", "country", "location"]
+        ].to_dict("records")
 
 
-class MSBuildingsDownloader:
+class MSBuildingsDownloader(BaseHandlerDownloader):
     """A class to handle downloads of Microsoft's Global ML Building Footprints dataset."""
 
     def __init__(
@@ -298,37 +307,25 @@ class MSBuildingsDownloader:
             logger: Optional custom logger instance. If None, a default logger
                     named after the module is created and used.
         """
-        self.logger = logger or global_config.get_logger(self.__class__.__name__)
-        self.data_store = data_store or LocalDataStore()
-        self.config = config or MSBuildingsConfig(
-            data_store=self.data_store, logger=self.logger
-        )
+        config = config or MSBuildingsConfig()
+        super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def _download_tile(
+    def download_data_unit(
         self,
         tile_info: Union[pd.Series, dict],
+        **kwargs,
     ) -> Optional[str]:
         """Download data file for a single tile."""
 
-        # Modify URL based on data type if needed
         tile_url = tile_info["url"]
 
         try:
             response = requests.get(tile_url, stream=True)
             response.raise_for_status()
 
-            file_path = str(
-                self.config.get_tile_path(
-                    quadkey=tile_info["quadkey"],
-                    location=(
-                        tile_info["country"]
-                        if tile_info["country"]
-                        else tile_info["location"]
-                    ),
-                )
-            )
+            file_path = str(self.config.get_data_unit_path(tile_info))
 
-            with self.config.data_store.open(file_path, "wb") as file:
+            with self.data_store.open(file_path, "wb") as file:
                 for chunk in response.iter_content(chunk_size=8192):
                     file.write(chunk)
 
@@ -342,19 +339,33 @@ class MSBuildingsDownloader:
                 f"Failed to download tile {tile_info['quadkey']}: {str(e)}"
             )
             return None
+        except Exception as e:
+            self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
+            return None
 
-    def _download_tiles(self, tiles: pd.DataFrame):
-        """Download data file for multiple tiles."""
+    def download_data_units(
+        self,
+        tiles: Union[pd.DataFrame, List[dict]],
+        **kwargs,
+    ) -> List[str]:
+        """Download data files for multiple tiles."""
 
-        if tiles.empty:
+        if len(tiles) == 0:
             self.logger.warning(f"There is no matching data")
             return []
 
         with multiprocessing.Pool(self.config.n_workers) as pool:
-            download_func = functools.partial(self._download_tile)
+            download_func = functools.partial(self.download_data_unit)
             file_paths = list(
                 tqdm(
-                    pool.imap(download_func, [row for _, row in tiles.iterrows()]),
+                    pool.imap(
+                        download_func,
+                        (
+                            [row for _, row in tiles.iterrows()]
+                            if isinstance(tiles, pd.DataFrame)
+                            else tiles
+                        ),
+                    ),
                     total=len(tiles),
                     desc=f"Downloading polygons data",
                 )
@@ -362,7 +373,7 @@ class MSBuildingsDownloader:
 
         return [path for path in file_paths if path is not None]
 
-    def download_data(
+    def download(
         self,
         source: Union[
             str,  # country
@@ -370,7 +381,8 @@ class MSBuildingsDownloader:
             BaseGeometry,  # shapely geoms
             gpd.GeoDataFrame,
         ],
-    ):
+        **kwargs,
+    ) -> List[str]:
         """
         Download Microsoft Global ML Building Footprints data for a specified geographic region.
 
@@ -385,22 +397,23 @@ class MSBuildingsDownloader:
                       - A list of (latitude, longitude) tuples or Shapely Point objects.
                       - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
                       - A GeoDataFrame with a geometry column in EPSG:4326.
+            **kwargs: Additional parameters passed to data unit resolution methods
 
         Returns:
             A list of local file paths for the successfully downloaded tiles.
-            Entries will be None for tiles that failed to download.
+            Returns an empty list if no data is found for the region or if
+            all downloads fail.
         """
-        if isinstance(source, str):
-            return self.download_by_country(country_code=source)
-        elif isinstance(source, (BaseGeometry, Iterable)):
-            source_tiles = self.config.get_intersecting_tiles(source)
-            return self._download_tiles(source_tiles)
 
-        raise ValueError(
-            f"Data downloads supported for Country, Geometry, GeoDataFrame or iterable object of Points got {source.__class__}"
-        )
+        tiles = self.config.get_relevant_data_units(source, **kwargs)
+        return self.download_data_units(tiles, **kwargs)
 
-    def download_by_country(self, country: str) -> List[str]:
+    def download_by_country(
+        self,
+        country: str,
+        data_store: Optional[DataStore] = None,
+        country_geom_path: Optional[Union[str, Path]] = None,
+    ) -> List[str]:
         """
         Download Microsoft Global ML Building Footprints data for a specific country.
 
@@ -409,15 +422,21 @@ class MSBuildingsDownloader:
 
         Args:
             country: The country code (e.g., 'USA', 'GBR') or name.
+            data_store: Optional instance of a `DataStore` to be used by
+                `AdminBoundaries` for loading country boundaries. If None,
+                `AdminBoundaries` will use its default data loading.
+            country_geom_path: Optional path to a GeoJSON file containing the
+                country boundary. If provided, this boundary is used
+                instead of the default from `AdminBoundaries`.
 
         Returns:
             A list of local file paths for the successfully downloaded tiles.
-            Entries will be None for tiles that failed to download.
+            Returns an empty list if no data is found for the country or if
+            all downloads fail.
         """
-
-        country_tiles = self.config.get_tiles_for_country(country)
-
-        return self._download_tiles(country_tiles)
+        return self.download(
+            source=country, data_store=data_store, path=country_geom_path
+        )
 
 
 class MSBuildingsReader(BaseHandlerReader):
@@ -429,35 +448,10 @@ class MSBuildingsReader(BaseHandlerReader):
         self,
         config: Optional[MSBuildingsConfig] = None,
         data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
     ):
-        super().__init__(data_store=data_store)
-        self.config = config or MSBuildingsConfig(data_store=self.data_store)
-
-    def _post_load_hook(self, data, **kwargs) -> gpd.GeoDataFrame:
-        """Post-processing after loading data files."""
-        if data.empty:
-            self.logger.warning("No data was loaded from the source files")
-            return data
-
-        self.logger.info(
-            f"Post-load processing complete. {len(data)} valid building records."
-        )
-        return data
-
-    def resolve_by_country(self, country: str, **kwargs) -> List[Union[str, Path]]:
-        tiles = self.config.get_tiles_for_country(country)
-        return self.config.get_tile_paths(tiles)
-
-    def resolve_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> List[Union[str, Path]]:
-        tiles = self.config.get_intersecting_tiles(geometry)
-        return self.config.get_tile_paths(tiles)
-
-    def resolve_by_points(
-        self, points: List[Union[Point, Tuple[float, float]]], **kwargs
-    ) -> List[Union[str, Path]]:
-        return self.resolve_by_geometry(points, **kwargs)
+        config = config or MSBuildingsConfig()
+        super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], **kwargs
@@ -481,3 +475,74 @@ class MSBuildingsReader(BaseHandlerReader):
             file_paths=source_data_path, read_function=read_ms_dataset
         )
         return result
+
+
+class MSBuildingsHandler(BaseHandler):
+    """
+    Handler for Microsoft Global Buildings dataset.
+
+    This class provides a unified interface for downloading and loading Microsoft Global Buildings data.
+    It manages the lifecycle of configuration, downloading, and reading components.
+    """
+
+    def create_config(
+        self, data_store: DataStore, logger: logging.Logger, **kwargs
+    ) -> MSBuildingsConfig:
+        """
+        Create and return a MSBuildingsConfig instance.
+
+        Args:
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional configuration parameters
+
+        Returns:
+            Configured MSBuildingsConfig instance
+        """
+        return MSBuildingsConfig(data_store=data_store, logger=logger, **kwargs)
+
+    def create_downloader(
+        self,
+        config: MSBuildingsConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> MSBuildingsDownloader:
+        """
+        Create and return a MSBuildingsDownloader instance.
+
+        Args:
+            config: The configuration object
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional downloader parameters
+
+        Returns:
+            Configured MSBuildingsDownloader instance
+        """
+        return MSBuildingsDownloader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )
+
+    def create_reader(
+        self,
+        config: MSBuildingsConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> MSBuildingsReader:
+        """
+        Create and return a MSBuildingsReader instance.
+
+        Args:
+            config: The configuration object
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional reader parameters
+
+        Returns:
+            Configured MSBuildingsReader instance
+        """
+        return MSBuildingsReader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )

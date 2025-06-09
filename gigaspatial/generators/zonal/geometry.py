@@ -3,22 +3,17 @@ from shapely.geometry import Polygon, MultiPolygon
 
 import geopandas as gpd
 import pandas as pd
+import logging
 
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.config import config
+from gigaspatial.config import config as global_config
 from gigaspatial.processing.geo import (
     add_area_in_meters,
     get_centroids,
 )
-from gigaspatial.handlers.ghsl import GHSLDataConfig, GHSLDataReader
-from gigaspatial.handlers.google_open_buildings import (
-    GoogleOpenBuildingsConfig,
-    GoogleOpenBuildingsReader,
-)
-from gigaspatial.handlers.microsoft_global_buildings import (
-    MSBuildingsConfig,
-    MSBuildingsReader,
-)
+from gigaspatial.handlers.ghsl import GHSLDataHandler
+from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
+from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
 from gigaspatial.generators.zonal.base import (
     ZonalViewGenerator,
     ZonalViewGeneratorConfig,
@@ -44,7 +39,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         zone_data_crs (str): Coordinate reference system of the zone data.
         _zone_gdf (gpd.GeoDataFrame): Cached GeoDataFrame representation of zones.
         data_store (DataStore): For accessing input data.
-        generator_config (ZonalViewGeneratorConfig): Configuration for view generation.
+        config (ZonalViewGeneratorConfig): Configuration for view generation.
         logger: Logger instance for this class.
     """
 
@@ -53,8 +48,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         zone_data: Union[Dict[T, Polygon], gpd.GeoDataFrame],
         zone_id_column: str = "zone_id",
         zone_data_crs: str = "EPSG:4326",
-        generator_config: Optional[ZonalViewGeneratorConfig] = None,
+        config: Optional[ZonalViewGeneratorConfig] = None,
         data_store: Optional[DataStore] = None,
+        logger: logging.Logger = None,
     ):
         """Initialize with zone geometries and identifiers.
 
@@ -66,7 +62,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 Only used if zone_data is a GeoDataFrame. Defaults to "zone_id".
             zone_data_crs (str): Coordinate reference system of the zone data.
                 Defaults to "EPSG:4326" (WGS84).
-            generator_config (ZonalViewGeneratorConfig, optional): Generator configuration.
+            config (ZonalViewGeneratorConfig, optional): Generator configuration.
                 If None, uses default configuration.
             data_store (DataStore, optional): Data store for accessing input data.
                 If None, uses LocalDataStore.
@@ -77,7 +73,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             ValueError: If zone_id_column is not found in GeoDataFrame, or if the provided
                 CRS doesn't match the GeoDataFrame's CRS.
         """
-        super().__init__(generator_config=generator_config, data_store=data_store)
+        super().__init__(config=config, data_store=data_store, logger=logger)
 
         self.zone_id_column = zone_id_column
         self.zone_data_crs = zone_data_crs
@@ -157,15 +153,11 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
 
     def map_built_s(
         self,
-        ghsl_data_config: GHSLDataConfig = GHSLDataConfig(
-            product="GHS_BUILT_S",
-            year=2020,
-            resolution=100,
-            coord_system=4326,
-            base_path=config.get_path("ghsl", "silver"),
-        ),
+        year=2020,
+        resolution=100,
         stat: str = "sum",
         name_prefix: str = "built_surface_m2_",
+        **kwargs,
     ) -> gpd.GeoDataFrame:
         """Map GHSL Built-up Surface data to zones.
 
@@ -183,21 +175,25 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             gpd.GeoDataFrame: Updated GeoDataFrame with zones and built surface metrics.
                 Adds a column named "{name_prefix}{stat}" containing the aggregated values.
         """
+        handler = GHSLDataHandler(
+            product="GHS_BUILT_S",
+            year=year,
+            resolution=resolution,
+            data_store=self.data_store,
+            **kwargs,
+        )
+
         return self.map_ghsl(
-            ghsl_data_config=ghsl_data_config, stat=stat, name_prefix=name_prefix
+            handler=handler, stat=stat, name_prefix=name_prefix, **kwargs
         )
 
     def map_smod(
         self,
-        ghsl_data_config: GHSLDataConfig = GHSLDataConfig(
-            product="GHS_SMOD",
-            year=2020,
-            resolution=1000,
-            coord_system=54009,
-            base_path=config.get_path("ghsl", "silver"),
-        ),
+        year=2020,
+        resolution=100,
         stat: str = "median",
         name_prefix: str = "smod_class_",
+        **kwargs,
     ) -> gpd.GeoDataFrame:
         """Map GHSL Settlement Model data to zones.
 
@@ -215,15 +211,25 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             gpd.GeoDataFrame: Updated GeoDataFrame with zones and settlement classification.
                 Adds a column named "{name_prefix}{stat}" containing the aggregated values.
         """
+        handler = GHSLDataHandler(
+            product="GHS_SMOD",
+            year=year,
+            resolution=resolution,
+            data_store=self.data_store,
+            coord_system=54009,
+            **kwargs,
+        )
+
         return self.map_ghsl(
-            ghsl_data_config=ghsl_data_config, stat=stat, name_prefix=name_prefix
+            handler=handler, stat=stat, name_prefix=name_prefix, **kwargs
         )
 
     def map_ghsl(
         self,
-        ghsl_data_config: GHSLDataConfig,
+        handler: GHSLDataHandler,
         stat: str,
         name_prefix: Optional[str] = None,
+        **kwargs,
     ) -> gpd.GeoDataFrame:
         """Map Global Human Settlement Layer data to zones.
 
@@ -246,19 +252,21 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             The method automatically determines which GHSL tiles intersect with the zones
             and loads only the necessary data for efficient processing.
         """
+        handler = handler or GHSLDataHandler(data_store=self.data_store, **kwargs)
         self.logger.info(
-            f"Mapping {ghsl_data_config.product} data (year: {ghsl_data_config.year}, resolution: {ghsl_data_config.resolution}m)"
+            f"Mapping {handler.config.product} data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
         )
-        reader = GHSLDataReader(config=ghsl_data_config, data_store=self.data_store)
-        tif_processors = reader.load(self.zone_gdf)
+        tif_processors = handler.load_data(
+            self.zone_gdf, ensure_available=self.config.ensure_available
+        )
 
         self.logger.info(
-            f"Sampling {ghsl_data_config.product} data using '{stat}' statistic"
+            f"Sampling {handler.config.product} data using '{stat}' statistic"
         )
         sampled_values = self.map_rasters(tif_processors=tif_processors, stat=stat)
 
         name_prefix = (
-            name_prefix if name_prefix else ghsl_data_config.product.lower() + "_"
+            name_prefix if name_prefix else handler.config.product.lower() + "_"
         )
         column_name = f"{name_prefix}{stat}"
         self._zone_gdf[column_name] = sampled_values
@@ -269,7 +277,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
 
     def map_google_buildings(
         self,
-        google_open_buildings_config: GoogleOpenBuildingsConfig = GoogleOpenBuildingsConfig(),
+        handler: Optional[GoogleOpenBuildingsHandler] = None,
         use_polygons: bool = False,
     ) -> gpd.GeoDataFrame:
         """Map Google Open Buildings data to zones.
@@ -301,12 +309,12 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         )
 
         self.logger.info("Loading Google Buildings point data")
-        reader = GoogleOpenBuildingsReader(
-            config=google_open_buildings_config, data_store=self.data_store
+        handler = handler or GoogleOpenBuildingsHandler(data_store=self.data_store)
+        buildings_df = handler.load_points(
+            self.zone_gdf, ensure_available=self.config.ensure_available
         )
-        buildings_df = reader.load_points(self.zone_gdf)
 
-        if not buildings_df or len(buildings_df) == 0:
+        if buildings_df.empty:
             self.logger.warning("No Google buildings data found for the provided zones")
             return self._zone_gdf.copy()
 
@@ -326,7 +334,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             self.logger.info(
                 "Loading Google Buildings polygon data for more accurate mapping"
             )
-            buildings_gdf = reader.load_polygons(self.zone_gdf)
+            buildings_gdf = handler.load_polygons(
+                self.zone_gdf, self.config.ensure_available
+            )
 
             self.logger.info(
                 "Calculating building areas with area-weighted aggregation"
@@ -347,7 +357,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
 
     def map_ms_buildings(
         self,
-        ms_buildings_config: Optional[MSBuildingsConfig] = None,
+        handler: Optional[MSBuildingsHandler] = None,
         use_polygons: bool = False,
     ) -> gpd.GeoDataFrame:
         """Map Microsoft Global Buildings data to zones.
@@ -378,13 +388,13 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.logger.info("Mapping Microsoft Global Buildings data")
 
         self.logger.info("Loading Microsoft Buildings polygon data")
-        reader = MSBuildingsReader(
-            config=ms_buildings_config, data_store=self.data_store
+        handler = MSBuildingsHandler(data_store=self.data_store)
+        buildings_gdf = handler.load_data(
+            self.zone_gdf, ensure_available=self.config.ensure_available
         )
-        buildings_gdf = reader.load(self.zone_gdf)
 
         # Check if we found any buildings
-        if not buildings_gdf or len(buildings_gdf) == 0:
+        if buildings_gdf.empty:
             self.logger.warning(
                 "No Microsoft buildings data found for the provided zones"
             )

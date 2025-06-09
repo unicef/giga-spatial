@@ -36,6 +36,7 @@ class GeoRepoClient:
         self.base_url = "https://georepo.unicef.org/api/v1"
         self.api_key = api_key or config.GEOREPO_API_KEY
         self.email = email or config.GEOREPO_USER_EMAIL
+        self.logger = config.get_logger(self.__class__.__name__)
 
         if not self.api_key:
             raise ValueError(
@@ -53,6 +54,35 @@ class GeoRepoClient:
             "GeoRepo-User-Key": self.email,
         }
 
+    def _make_request(self, method, endpoint, params=None, data=None):
+        """Internal method to handle making HTTP requests."""
+        try:
+            response = requests.request(
+                method, endpoint, headers=self.headers, params=params, json=data
+            )
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            raise requests.exceptions.HTTPError(f"API request failed: {e}")
+
+    def check_connection(self):
+        """
+        Checks if the API connection is valid by making a simple request.
+
+        Returns:
+            bool: True if the connection is valid, False otherwise.
+        """
+        endpoint = f"{self.base_url}/search/module/list/"
+        try:
+            self._make_request("GET", endpoint)
+            return True
+        except requests.exceptions.HTTPError as e:
+            return False
+        except requests.exceptions.RequestException as e:
+            raise requests.exceptions.RequestException(
+                f"Connection check encountered a network error: {e}"
+            )
+
     def list_modules(self):
         """
         List all available modules in GeoRepo.
@@ -68,8 +98,7 @@ class GeoRepoClient:
             requests.HTTPError: If the API request fails.
         """
         endpoint = f"{self.base_url}/search/module/list/"
-        response = requests.get(endpoint, headers=self.headers)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint)
         return response.json()
 
     def list_datasets_by_module(self, module_uuid):
@@ -90,8 +119,7 @@ class GeoRepoClient:
             requests.HTTPError: If the API request fails or module_uuid is invalid.
         """
         endpoint = f"{self.base_url}/search/module/{module_uuid}/dataset/list/"
-        response = requests.get(endpoint, headers=self.headers)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint)
         return response.json()
 
     def get_dataset_details(self, dataset_uuid):
@@ -114,8 +142,7 @@ class GeoRepoClient:
             requests.HTTPError: If the API request fails or dataset_uuid is invalid.
         """
         endpoint = f"{self.base_url}/search/dataset/{dataset_uuid}/"
-        response = requests.get(endpoint, headers=self.headers)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint)
         return response.json()
 
     def list_views_by_dataset(self, dataset_uuid, page=1, page_size=50):
@@ -140,8 +167,7 @@ class GeoRepoClient:
         """
         endpoint = f"{self.base_url}/search/dataset/{dataset_uuid}/view/list/"
         params = {"page": page, "page_size": page_size}
-        response = requests.get(endpoint, headers=self.headers, params=params)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint, params=params)
         return response.json()
 
     def list_entities_by_admin_level(
@@ -188,8 +214,7 @@ class GeoRepoClient:
             f"{self.base_url}/search/view/{view_uuid}/entity/level/{admin_level}/"
         )
         params = {"page": page, "page_size": page_size, "geom": geom, "format": format}
-        response = requests.get(endpoint, headers=self.headers, params=params)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint, params=params)
 
         metadata = {
             "page": int(response.headers.get("page", 1)),
@@ -225,8 +250,7 @@ class GeoRepoClient:
         """
         endpoint = f"{self.base_url}/search/entity/ucode/{ucode}/"
         params = {"geom": geom, "format": format}
-        response = requests.get(endpoint, headers=self.headers, params=params)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint, params=params)
         return response.json()
 
     def list_entity_children(
@@ -260,8 +284,7 @@ class GeoRepoClient:
             f"{self.base_url}/search/view/{view_uuid}/entity/{entity_ucode}/children/"
         )
         params = {"geom": geom, "format": format}
-        response = requests.get(endpoint, headers=self.headers, params=params)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint, params=params)
         return response.json()
 
     def search_entities_by_name(self, view_uuid, name, page=1, page_size=50):
@@ -286,8 +309,7 @@ class GeoRepoClient:
         """
         endpoint = f"{self.base_url}/search/view/{view_uuid}/entity/{name}/"
         params = {"page": page, "page_size": page_size}
-        response = requests.get(endpoint, headers=self.headers, params=params)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint, params=params)
         return response.json()
 
     def get_admin_boundaries(
@@ -333,8 +355,7 @@ class GeoRepoClient:
             "page_size": 100,
         }
 
-        response = requests.get(endpoint, headers=self.headers, params=params)
-        response.raise_for_status()
+        response = self._make_request("GET", endpoint, params=params)
         return response.json()
 
     def get_vector_tiles_url(self, view_info):
@@ -406,8 +427,7 @@ class GeoRepoClient:
 
         while True:
             params["page"] = page
-            response = requests.get(endpoint, headers=self.headers, params=params)
-            response.raise_for_status()
+            response = self._make_request("GET", endpoint, params=params)
             data = response.json()
 
             countries = data.get("results", [])
@@ -462,7 +482,9 @@ def find_admin_boundaries_module():
     raise ValueError("Admin Boundaries module not found")
 
 
-def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_level=None):
+def get_country_boundaries_by_iso3(
+    iso3_code, client: GeoRepoClient = None, admin_level=None
+):
     """
     Get administrative boundaries for a specific country using its ISO3 code.
 
@@ -512,14 +534,14 @@ def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_
     """
     client = client or GeoRepoClient()
 
-    print("Finding Admin Boundaries module...")
+    client.logger.info("Finding Admin Boundaries module...")
     modules = client.list_modules()
     admin_module_uuid = None
 
     for module in modules.get("results", []):
         if "Admin Boundaries" in module["name"]:
             admin_module_uuid = module["uuid"]
-            print(
+            client.logger.info(
                 f"Found Admin Boundaries module: {module['name']} ({admin_module_uuid})"
             )
             break
@@ -527,46 +549,50 @@ def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_
     if not admin_module_uuid:
         raise ValueError("Admin Boundaries module not found")
 
-    print(f"Finding datasets in the Admin Boundaries module...")
+    client.logger.info(f"Finding datasets in the Admin Boundaries module...")
     datasets = client.list_datasets_by_module(admin_module_uuid)
     global_dataset_uuid = None
 
     for dataset in datasets.get("results", []):
         if any(keyword in dataset["name"].lower() for keyword in ["global"]):
             global_dataset_uuid = dataset["uuid"]
-            print(f"Found global dataset: {dataset['name']} ({global_dataset_uuid})")
+            client.logger.info(
+                f"Found global dataset: {dataset['name']} ({global_dataset_uuid})"
+            )
             break
 
     if not global_dataset_uuid:
         if datasets.get("results"):
             global_dataset_uuid = datasets["results"][0]["uuid"]
-            print(
+            client.logger.info(
                 f"Using first available dataset: {datasets['results'][0]['name']} ({global_dataset_uuid})"
             )
         else:
             raise ValueError("No datasets found in the Admin Boundaries module")
 
-    print(f"Finding views in the dataset...")
+    client.logger.info(f"Finding views in the dataset...")
     views = client.list_views_by_dataset(global_dataset_uuid)
     latest_view_uuid = None
 
     for view in views.get("results", []):
         if "tags" in view and "latest" in view["tags"]:
             latest_view_uuid = view["uuid"]
-            print(f"Found latest view: {view['name']} ({latest_view_uuid})")
+            client.logger.info(
+                f"Found latest view: {view['name']} ({latest_view_uuid})"
+            )
             break
 
     if not latest_view_uuid:
         if views.get("results"):
             latest_view_uuid = views["results"][0]["uuid"]
-            print(
+            client.logger.info(
                 f"Using first available view: {views['results'][0]['name']} ({latest_view_uuid})"
             )
         else:
             raise ValueError("No views found in the dataset")
 
     # Search for the country by ISO3 code
-    print(f"Searching for country with ISO3 code: {iso3_code}...")
+    client.logger.info(f"Searching for country with ISO3 code: {iso3_code}...")
     country_entity = client.find_country_by_iso3(latest_view_uuid, iso3_code)
 
     if not country_entity:
@@ -574,10 +600,10 @@ def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_
 
     country_ucode = country_entity["ucode"]
     country_name = country_entity["name"]
-    print(f"Found country: {country_name} (Ucode: {country_ucode})")
+    client.logger.info(f"Found country: {country_name} (Ucode: {country_ucode})")
 
     # Search for country-specific view
-    print(f"Checking for country-specific view...")
+    client.logger.info(f"Checking for country-specific view...")
     country_view_uuid = None
     all_views = []
 
@@ -596,16 +622,18 @@ def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_
             "tags", []
         ):
             country_view_uuid = view["uuid"]
-            print(f"Found country-specific view: {view['name']} ({country_view_uuid})")
+            client.logger.info(
+                f"Found country-specific view: {view['name']} ({country_view_uuid})"
+            )
             break
 
     # Get boundaries based on admin level
     if country_view_uuid:
-        print(country_view_uuid)
+        client.logger.info(country_view_uuid)
         # If we found a view specific to this country, use it
-        print(f"Getting admin boundaries from country-specific view...")
+        client.logger.info(f"Getting admin boundaries from country-specific view...")
         if admin_level is not None:
-            print(f"Fetching admin level {admin_level} boundaries...")
+            client.logger.info(f"Fetching admin level {admin_level} boundaries...")
 
             # Handle pagination for large datasets
             all_features = []
@@ -655,11 +683,11 @@ def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_
                 if isinstance(level_info.get("level"), int):
                     max_level = max(max_level, level_info["level"])
 
-            print(f"Dataset has admin levels from 0 to {max_level}")
+            client.logger.info(f"Dataset has admin levels from 0 to {max_level}")
 
             # Fetch each admin level
             for level in range(max_level + 1):
-                print(f"Fetching admin level {level}...")
+                client.logger.info(f"Fetching admin level {level}...")
                 try:
                     level_data, meta = client.list_entities_by_admin_level(
                         country_view_uuid, level, geom="full_geom", format="geojson"
@@ -689,10 +717,10 @@ def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_
                             page += 1
 
                 except Exception as e:
-                    print(f"Error fetching admin level {level}: {e}")
+                    client.logger.warning(f"Error fetching admin level {level}: {e}")
     else:
         # Use the global view with filtering
-        print(f"Using global view and filtering by country...")
+        client.logger.info(f"Using global view and filtering by country...")
 
         # Function to recursively get all descendants
         def get_all_children(
@@ -742,7 +770,7 @@ def get_country_boundaries_by_iso3(iso3_code, client: GeoRepoClient=None, admin_
 
                 return features
             except Exception as e:
-                print(f"Error getting children for {parent_ucode}: {e}")
+                client.logger.warning(f"Error getting children for {parent_ucode}: {e}")
                 return []
 
         # Start with the country boundaries

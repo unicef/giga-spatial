@@ -1,14 +1,21 @@
 from gigaspatial.handlers.boundaries import AdminBoundaries
-from gigaspatial.handlers.ghsl import GHSLDataConfig, GHSLDataDownloader, GHSLDataReader
+from gigaspatial.handlers.ghsl import (
+    GHSLDataConfig,
+    GHSLDataDownloader,
+    GHSLDataReader,
+    GHSLDataHandler,
+)
 from gigaspatial.handlers.google_open_buildings import (
     GoogleOpenBuildingsConfig,
     GoogleOpenBuildingsDownloader,
     GoogleOpenBuildingsReader,
+    GoogleOpenBuildingsHandler,
 )
 from gigaspatial.handlers.microsoft_global_buildings import (
     MSBuildingsConfig,
     MSBuildingsDownloader,
     MSBuildingsReader,
+    MSBuildingsHandler,
 )
 from gigaspatial.handlers.osm import OSMLocationFetcher
 from gigaspatial.handlers.overture import OvertureAmenityFetcher
@@ -30,3 +37,4 @@ from gigaspatial.handlers.unicef_georepo import (
     GeoRepoClient,
     get_country_boundaries_by_iso3,
 )
+from gigaspatial.handlers.giga import GigaSchoolLocationFetcher

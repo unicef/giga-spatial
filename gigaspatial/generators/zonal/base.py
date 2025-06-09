@@ -11,7 +11,7 @@ import numpy as np
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.writers import write_dataset
-from gigaspatial.config import config
+from gigaspatial.config import config as global_config
 from gigaspatial.processing.geo import (
     convert_to_geodataframe,
     aggregate_polygons_to_zones,
@@ -22,6 +22,7 @@ from gigaspatial.processing.tif_processor import (
     sample_multiple_tifs_by_polygons,
 )
 from functools import lru_cache
+import logging
 
 
 class ZonalViewGeneratorConfig(BaseModel):
@@ -31,12 +32,11 @@ class ZonalViewGeneratorConfig(BaseModel):
         base_path (Path): Base directory path for storing zonal views. Defaults to
             configured zonal views path.
         output_format (str): Default output format for saved views. Defaults to "parquet".
-        n_workers (int): Number of worker processes for parallel operations. Defaults to 4.
     """
 
-    base_path: Path = Field(default=config.get_path("zonal", "views"))
+    base_path: Path = Field(default=global_config.get_path("zonal", "views"))
     output_format: str = "parquet"
-    n_workers: int = 4
+    ensure_available: bool = True
 
 
 T = TypeVar("T")  # For zone type
@@ -62,8 +62,9 @@ class ZonalViewGenerator(ABC, Generic[T]):
 
     def __init__(
         self,
-        generator_config: Optional[ZonalViewGeneratorConfig] = None,
+        config: Optional[ZonalViewGeneratorConfig] = None,
         data_store: Optional[DataStore] = None,
+        logger: logging.Logger = None,
     ):
         """Initialize the ZonalViewGenerator.
 
@@ -73,9 +74,9 @@ class ZonalViewGenerator(ABC, Generic[T]):
             data_store (DataStore, optional): The data store for accessing input data.
                 If None, uses LocalDataStore.
         """
-        self.generator_config = generator_config or ZonalViewGeneratorConfig()
+        self.config = config or ZonalViewGeneratorConfig()
         self.data_store = data_store or LocalDataStore()
-        self.logger = config.get_logger(self.__class__.__name__)
+        self.logger = logger or global_config.get_logger(self.__class__.__name__)
 
     @abstractmethod
     def get_zonal_geometries(self) -> List[Polygon]:
@@ -355,8 +356,8 @@ class ZonalViewGenerator(ABC, Generic[T]):
             The output directory is determined by the generator_config.base_path setting.
             The file extension is automatically added based on the output format.
         """
-        format_to_use = output_format or self.generator_config.output_format
-        output_path = self.generator_config.base_path / f"{name}.{format_to_use}"
+        format_to_use = output_format or self.config.output_format
+        output_path = self.config.base_path / f"{name}.{format_to_use}"
 
         self.logger.info(f"Saving zonal view to {output_path}")
         write_dataset(

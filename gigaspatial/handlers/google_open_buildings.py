@@ -12,70 +12,104 @@ from tqdm import tqdm
 import logging
 
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.boundaries import AdminBoundaries
-from gigaspatial.handlers.base_reader import BaseHandlerReader
+from gigaspatial.handlers.base import (
+    BaseHandlerReader,
+    BaseHandlerConfig,
+    BaseHandlerDownloader,
+    BaseHandler,
+)
 from gigaspatial.config import config as global_config
 
 
 @dataclass
-class GoogleOpenBuildingsConfig:
-    """Configuration for Google Open Buildings dataset files."""
+class GoogleOpenBuildingsConfig(BaseHandlerConfig):
+    """
+    Configuration for Google Open Buildings dataset files.
+    Implements the BaseHandlerConfig interface for data unit resolution.
+    """
 
-    TILES_URL = "https://openbuildings-public-dot-gweb-research.uw.r.appspot.com/public/tiles.geojson"
-
+    TILES_URL: str = (
+        "https://openbuildings-public-dot-gweb-research.uw.r.appspot.com/public/tiles.geojson"
+    )
     base_path: Path = global_config.get_path("google_open_buildings", "bronze")
     data_types: tuple = ("polygons", "points")
-    n_workers: int = 4  # number of workers for parallel processing
 
     def __post_init__(self):
+        super().__post_init__()
         self._load_s2_tiles()
 
     def _load_s2_tiles(self):
         """Load S2 tiles from GeoJSON file."""
         response = requests.get(self.TILES_URL)
         response.raise_for_status()
-
-        # Convert to GeoDataFrame
         self.tiles_gdf = gpd.GeoDataFrame.from_features(
             response.json()["features"], crs="EPSG:4326"
         )
 
-    def get_intersecting_tiles(
+    def get_relevant_data_units_by_geometry(
+        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    ) -> List[dict]:
+        """
+        Return intersecting tiles for a given geometry or GeoDataFrame.
+        """
+        return self._get_relevant_tiles(geometry)
+
+    def get_relevant_data_units_by_points(
+        self, points: Iterable[Union[Point, tuple]], **kwargs
+    ) -> List[dict]:
+        """
+        Return intersecting tiles for a list of points.
+        """
+        return self._get_relevant_tiles(points)
+
+    def get_data_unit_path(
+        self,
+        unit: Union[pd.Series, dict, str],
+        data_type: str = "polygons",
+        **kwargs,
+    ) -> Path:
+        """
+        Given a tile row or tile_id, return the corresponding file path.
+        """
+        tile_id = (
+            unit["tile_id"]
+            if isinstance(unit, pd.Series) or isinstance(unit, dict)
+            else unit
+        )
+        return self.base_path / f"{data_type}_s2_level_4_{tile_id}_buildings.csv.gz"
+
+    def get_data_unit_paths(
+        self,
+        units: Union[pd.DataFrame, Iterable[Union[dict, str]]],
+        data_type: str = "polygons",
+        **kwargs,
+    ) -> list:
+        """
+        Given data unit identifiers, return the corresponding file paths.
+        """
+        if isinstance(units, pd.DataFrame):
+            return [
+                self.get_data_unit_path(row, data_type=data_type, **kwargs)
+                for _, row in units.iterrows()
+            ]
+        return super().get_data_unit_paths(units, data_type=data_type)
+
+    def _get_relevant_tiles(
         self,
         source: Union[
             BaseGeometry,
             gpd.GeoDataFrame,
-            List[Union[Point, tuple]],
+            Iterable[Union[Point, tuple]],
         ],
-    ) -> pd.DataFrame:
+    ) -> List[dict]:
         """
         Identify and return the S2 tiles that spatially intersect with the given geometry.
-
-        The input geometry can be a Shapely geometry object, a GeoDataFrame,
-        or a list of Point objects or (lon, lat) tuples. The method ensures
-        the input geometry is in EPSG:4326 for the spatial intersection.
-
-        Args:
-            source: A Shapely geometry, a GeoDataFrame, or a list of Point
-                      objects or (lat, lon) tuples representing the area of interest.
-
-        Returns:
-            A pandas DataFrame containing the 'tile_id', 'tile_url', and
-            'size_mb' for the intersecting tiles.
-
-        Raises:
-            ValueError: If the input `source` is not one of the supported types.
         """
-
         if isinstance(source, gpd.GeoDataFrame):
             if source.crs != "EPSG:4326":
                 source = source.to_crs("EPSG:4326")
             search_geom = source.geometry.unary_union
-        elif isinstance(
-            source,
-            BaseGeometry,
-        ):
+        elif isinstance(source, BaseGeometry):
             search_geom = source
         elif isinstance(source, Iterable) and all(
             len(pt) == 2 or isinstance(pt, Point) for pt in source
@@ -88,68 +122,15 @@ class GoogleOpenBuildingsConfig:
             raise ValueError(
                 f"Expected Geometry, GeoDataFrame or iterable object of Points got {source.__class__}"
             )
-
-        # Find intersecting tiles
         mask = (
             tile_geom.intersects(search_geom) for tile_geom in self.tiles_gdf.geometry
         )
-
-        return self.tiles_gdf.loc[mask, ["tile_id", "tile_url", "size_mb"]]
-
-    def get_download_size_estimate(
-        self,
-        geometry: Union[BaseGeometry, gpd.GeoDataFrame, List[Union[Point, tuple]]],
-    ) -> float:
-        """
-        Estimate the total download size of the tiles intersecting a given geometry.
-
-        This method takes a geographic area (as a Shapely geometry,
-        GeoDataFrame, or list of points/tuples), finds the corresponding
-        S2 tiles, and sums up their reported sizes.
-
-        Args:
-            geometry: A Shapely geometry, a GeoDataFrame, or a list of Point
-                      objects or (lat, lon) tuples representing the area of interest.
-
-        Returns:
-            The estimated total download size in megabytes (MB) for the
-            intersecting tiles.
-        """
-        gdf_tiles = self.get_intersecting_tiles(geometry)
-
-        return gdf_tiles["size_mb"].sum()
-
-    def get_tile_path(
-        self, tile_id: str, data_type: Literal["polygons", "points"]
-    ) -> Path:
-        """
-        Construct the full path for a tile file.
-
-        Args:
-            tile_id: S2 tile identifier
-            data_type: Type of building data ('polygons' or 'points')
-
-        Returns:
-            Full path to the tile file
-        """
-        if data_type not in self.data_types:
-            raise ValueError(f"data_type must be one of {self.data_types}")
-
-        return self.base_path / f"{data_type}_s2_level_4_{tile_id}_buildings.csv.gz"
-
-    def get_tile_paths(
-        self, tiles: pd.DataFrame, data_type: Literal["polygons", "points"]
-    ) -> List:
-        if tiles.empty:
-            return []
-
-        return [
-            self.get_tile_path(tile_id=tile, data_type=data_type)
-            for tile in tiles.tile_id
-        ]
+        return self.tiles_gdf.loc[mask, ["tile_id", "tile_url", "size_mb"]].to_dict(
+            "records"
+        )
 
 
-class GoogleOpenBuildingsDownloader:
+class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
     """A class to handle downloads of Google's Open Buildings dataset."""
 
     def __init__(
@@ -169,14 +150,13 @@ class GoogleOpenBuildingsDownloader:
             logger: Optional custom logger instance. If None, a default logger
                     named after the module is created and used.
         """
-        self.data_store = data_store or LocalDataStore()
-        self.config = config or GoogleOpenBuildingsConfig()
-        self.logger = logger or global_config.get_logger(self.__class__.__name__)
+        config = config or GoogleOpenBuildingsConfig()
+        super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def _download_tile(
+    def download_data_unit(
         self,
         tile_info: Union[pd.Series, dict],
-        data_type: Literal["polygons", "points"],
+        data_type: Literal["polygons", "points"] = "polygons",
     ) -> Optional[str]:
         """Download data file for a single tile."""
 
@@ -188,7 +168,11 @@ class GoogleOpenBuildingsDownloader:
             response = requests.get(tile_url, stream=True)
             response.raise_for_status()
 
-            file_path = str(self.config.get_tile_path(tile_info["tile_id"], data_type))
+            file_path = str(
+                self.config.get_data_unit_path(
+                    tile_info["tile_id"], data_type=data_type
+                )
+            )
 
             with self.data_store.open(file_path, "wb") as file:
                 for chunk in response.iter_content(chunk_size=8192):
@@ -208,18 +192,31 @@ class GoogleOpenBuildingsDownloader:
             self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
             return None
 
-    def _download_tiles(self, tiles: gpd.GeoDataFrame, data_type="polygons"):
-        """Download data file for multiple tiles."""
+    def download_data_units(
+        self,
+        tiles: Union[pd.DataFrame, List[dict]],
+        data_type: Literal["polygons", "points"] = "polygons",
+    ) -> List[str]:
+        """Download data files for multiple tiles."""
 
-        if tiles.empty:
-            self.logger.warning(f"There is no matching data for the region")
+        if len(tiles) == 0:
+            self.logger.warning(f"There is no matching data")
             return []
 
         with multiprocessing.Pool(self.config.n_workers) as pool:
-            download_func = functools.partial(self._download_tile, data_type=data_type)
+            download_func = functools.partial(
+                self.download_data_unit, data_type=data_type
+            )
             file_paths = list(
                 tqdm(
-                    pool.imap(download_func, [row for _, row in tiles.iterrows()]),
+                    pool.imap(
+                        download_func,
+                        (
+                            [row for _, row in tiles.iterrows()]
+                            if isinstance(tiles, pd.DataFrame)
+                            else tiles
+                        ),
+                    ),
                     total=len(tiles),
                     desc=f"Downloading {data_type} data",
                 )
@@ -227,17 +224,17 @@ class GoogleOpenBuildingsDownloader:
 
         return [path for path in file_paths if path is not None]
 
-    def download_data(
+    def download(
         self,
         source: Union[
-            str,  # country code
+            str,  # country
             List[Union[Tuple[float, float], Point]],  # points
             BaseGeometry,  # shapely geoms
             gpd.GeoDataFrame,
         ],
         data_type: Literal["polygons", "points"] = "polygons",
         **kwargs,
-    ):
+    ) -> List[str]:
         """Download Google Open Buildings data for a specified geographic region.
 
         The region can be defined by a country code/name, a list of points,
@@ -263,23 +260,9 @@ class GoogleOpenBuildingsDownloader:
             Returns an empty list if no data is found for the region or if
             all downloads fail.
         """
-        if isinstance(source, str):
-            region = (
-                AdminBoundaries.create(country_code=source, **kwargs)
-                .boundaries[0]
-                .geometry
-            )
-        elif isinstance(source, (BaseGeometry, Iterable)):
-            region = source
-        else:
-            raise ValueError(
-                f"Data downloads supported for Country, Geometry, GeoDataFrame or iterable object of Points got {region.__class__}"
-            )
 
-        # Get intersecting tiles
-        gdf_tiles = self.config.get_intersecting_tiles(region)
-
-        return self._download_tiles(gdf_tiles, data_type)
+        tiles = self.config.get_relevant_data_units(source, **kwargs)
+        return self.download_data_units(tiles, data_type)
 
     def download_by_country(
         self,
@@ -309,8 +292,7 @@ class GoogleOpenBuildingsDownloader:
             A list of local file paths for the successfully downloaded tiles
             for the specified country.
         """
-
-        return self.download_data(
+        return self.download(
             source=country,
             data_type=data_type,
             data_store=data_store,
@@ -327,39 +309,10 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
         self,
         config: Optional[GoogleOpenBuildingsConfig] = None,
         data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
     ):
-        super().__init__(data_store=data_store)
-        self.config = config or GoogleOpenBuildingsConfig()
-
-    def _post_load_hook(self, data, **kwargs) -> gpd.GeoDataFrame:
-        """Post-processing after loading data files."""
-        if data.empty:
-            self.logger.warning("No data was loaded from the source files")
-            return data
-
-        self.logger.info(
-            f"Post-load processing complete. {len(data)} valid building records."
-        )
-        return data
-
-    def resolve_by_country(self, country: str, **kwargs) -> List[Union[str, Path]]:
-        area = (
-            AdminBoundaries.create(country_code=country, **kwargs)
-            .boundaries[0]
-            .geometry
-        )
-        return self.resolve_by_geometry(geometry=area, **kwargs)
-
-    def resolve_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> List[Union[str, Path]]:
-        tiles = self.config.get_intersecting_tiles(geometry)
-        return self.config.get_tile_paths(tiles, **kwargs)
-
-    def resolve_by_points(
-        self, points: List[Union[Point, Tuple[float, float]]], **kwargs
-    ) -> List[Union[str, Path]]:
-        return self.resolve_by_geometry(points, **kwargs)
+        config = config or GoogleOpenBuildingsConfig()
+        super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], **kwargs
@@ -371,15 +324,149 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
         Returns:
             GeoDataFrame containing building data
         """
-
         result = self._load_tabular_data(file_paths=source_data_path)
         return result
 
-    def load(self, source, data_type="polygons"):
-        return super().load(source=source, data_type=data_type)
+    def load(self, source, data_type="polygons", **kwargs):
+        return super().load(source=source, data_type=data_type, **kwargs)
 
-    def load_points(self, source):
-        return self.load(source=source, data_type="points")
+    def load_points(self, source, **kwargs):
+        """This is a convenience method to load points data"""
+        return self.load(source=source, data_type="points", **kwargs)
 
-    def load_polygons(self, source):
-        return self.load(source=source, data_type="polygons")
+    def load_polygons(self, source, **kwargs):
+        """This is a convenience method to load polygons data"""
+        return self.load(source=source, data_type="polygons", **kwargs)
+
+
+class GoogleOpenBuildingsHandler(BaseHandler):
+    """
+    Handler for Google Open Buildings dataset.
+
+    This class provides a unified interface for downloading and loading Google Open Buildings data.
+    It manages the lifecycle of configuration, downloading, and reading components.
+    """
+
+    def create_config(
+        self, data_store: DataStore, logger: logging.Logger, **kwargs
+    ) -> GoogleOpenBuildingsConfig:
+        """
+        Create and return a GoogleOpenBuildingsConfig instance.
+
+        Args:
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional configuration parameters
+
+        Returns:
+            Configured GoogleOpenBuildingsConfig instance
+        """
+        return GoogleOpenBuildingsConfig(data_store=data_store, logger=logger, **kwargs)
+
+    def create_downloader(
+        self,
+        config: GoogleOpenBuildingsConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> GoogleOpenBuildingsDownloader:
+        """
+        Create and return a GoogleOpenBuildingsDownloader instance.
+
+        Args:
+            config: The configuration object
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional downloader parameters
+
+        Returns:
+            Configured GoogleOpenBuildingsDownloader instance
+        """
+        return GoogleOpenBuildingsDownloader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )
+
+    def create_reader(
+        self,
+        config: GoogleOpenBuildingsConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> GoogleOpenBuildingsReader:
+        """
+        Create and return a GoogleOpenBuildingsReader instance.
+
+        Args:
+            config: The configuration object
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional reader parameters
+
+        Returns:
+            Configured GoogleOpenBuildingsReader instance
+        """
+        return GoogleOpenBuildingsReader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )
+
+    def load_points(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[tuple, Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+            Path,  # path
+            List[Union[str, Path]],  # list of paths
+        ],
+        ensure_available: bool = True,
+        **kwargs,
+    ) -> gpd.GeoDataFrame:
+        """
+        Load point data from Google Open Buildings dataset.
+
+        Args:
+            source: The data source specification
+            ensure_available: If True, ensure data is downloaded before loading
+            **kwargs: Additional parameters passed to load methods
+
+        Returns:
+            GeoDataFrame containing building point data
+        """
+        return self.load_data(
+            source=source,
+            ensure_available=ensure_available,
+            data_type="points",
+            **kwargs,
+        )
+
+    def load_polygons(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[tuple, Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+            Path,  # path
+            List[Union[str, Path]],  # list of paths
+        ],
+        ensure_available: bool = True,
+        **kwargs,
+    ) -> gpd.GeoDataFrame:
+        """
+        Load polygon data from Google Open Buildings dataset.
+
+        Args:
+            source: The data source specification
+            ensure_available: If True, ensure data is downloaded before loading
+            **kwargs: Additional parameters passed to load methods
+
+        Returns:
+            GeoDataFrame containing building polygon data
+        """
+        return self.load_data(
+            source=source,
+            ensure_available=ensure_available,
+            data_type="polygons",
+            **kwargs,
+        )

@@ -1,1 +1,3 @@
+from gigaspatial.generators.zonal.base import ZonalViewGeneratorConfig
 from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
+from gigaspatial.generators.poi import PoiViewGenerator, PoiViewGeneratorConfig

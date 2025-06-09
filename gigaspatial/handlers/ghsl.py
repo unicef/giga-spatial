@@ -28,7 +28,12 @@ from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.handlers.boundaries import AdminBoundaries
 from gigaspatial.processing.tif_processor import TifProcessor
-from gigaspatial.handlers.base_reader import BaseHandlerReader
+from gigaspatial.handlers.base import (
+    BaseHandlerConfig,
+    BaseHandlerDownloader,
+    BaseHandlerReader,
+    BaseHandler,
+)
 from gigaspatial.config import config as global_config
 
 
@@ -40,7 +45,7 @@ class CoordSystem(int, Enum):
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
-class GHSLDataConfig:
+class GHSLDataConfig(BaseHandlerConfig):
     # constants
     AVAILABLE_YEARS: List = Field(default=np.append(np.arange(1975, 2031, 5), 2018))
     AVAILABLE_RESOLUTIONS: List = Field(default=[10, 100, 1000])
@@ -67,8 +72,10 @@ class GHSLDataConfig:
     year: int = 2020
     resolution: int = 100
 
-    logger: logging.Logger = global_config.get_logger(__name__)
-    n_workers: int = multiprocessing.cpu_count()
+    def __post_init__(self):
+        super().__post_init__()
+        self.TILES_URL = self.TILES_URL.format(self.coord_system)
+        self._load_tiles()
 
     def _load_tiles(self):
         """Load GHSL tiles from tiles shapefile."""
@@ -151,33 +158,43 @@ class GHSLDataConfig:
                 )
                 self.coord_system = CoordSystem.Mollweide
 
-        self.TILES_URL = self.TILES_URL.format(self.coord_system)
-
-        self._load_tiles()
-
         return self
 
     @property
     def crs(self) -> str:
         return "EPSG:4326" if self.coord_system == CoordSystem.WGS84 else "ESRI:54009"
 
-    def _get_product_info(self) -> dict:
-        """Generate and return common product information used in multiple methods."""
-        resolution_str = (
-            str(self.resolution)
-            if self.coord_system == CoordSystem.Mollweide
-            else ("3ss" if self.resolution == 100 else "30ss")
-        )
-        product_folder = f"{self.product}_GLOBE_{self.release}"
-        product_name = f"{self.product}_E{self.year}_GLOBE_{self.release}_{self.coord_system}_{resolution_str}"
-        product_version = 2 if self.product == "GHS_SMOD" else 1
+    def get_relevant_data_units_by_geometry(
+        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    ) -> List[dict]:
+        """
+        Return intersecting tiles for a given geometry or GeoDataFrame.
+        """
+        return self._get_relevant_tiles(geometry)
 
-        return {
-            "resolution_str": resolution_str,
-            "product_folder": product_folder,
-            "product_name": product_name,
-            "product_version": product_version,
-        }
+    def get_relevant_data_units_by_points(
+        self, points: Iterable[Union[Point, tuple]], **kwargs
+    ) -> List[dict]:
+        """
+        Return intersecting tiles for a list of points.
+        """
+        return self._get_relevant_tiles(points)
+
+    def get_data_unit_path(self, unit: str = None, file_ext=".zip", **kwargs) -> Path:
+        """Construct and return the path for the configured dataset or dataset tile."""
+        info = self._get_product_info()
+
+        tile_path = (
+            self.base_path
+            / info["product_folder"]
+            / (
+                f"{info['product_name']}_V{info['product_version']}_0"
+                + (f"_{unit}" if unit else "")
+                + file_ext
+            )
+        )
+
+        return tile_path
 
     def compute_dataset_url(self, tile_id=None) -> str:
         """Compute the download URL for a GHSL dataset."""
@@ -196,12 +213,12 @@ class GHSLDataConfig:
 
         return "/".join(path_segments)
 
-    def get_intersecting_tiles(
+    def _get_relevant_tiles(
         self,
         source: Union[
             BaseGeometry,
             gpd.GeoDataFrame,
-            List[Union[Point, tuple]],
+            Iterable[Union[Point, tuple]],
         ],
         crs="EPSG:4326",
     ) -> list:
@@ -257,27 +274,23 @@ class GHSLDataConfig:
 
         return self.tiles_gdf.loc[mask, "tile_id"].to_list()
 
-    def get_tile_path(self, tile_id=None) -> str:
-        """Construct and return the path for the configured dataset."""
-        info = self._get_product_info()
-
-        tile_path = (
-            self.base_path
-            / info["product_folder"]
-            / (
-                f"{info['product_name']}_V{info['product_version']}_0"
-                + (f"_{tile_id}" if tile_id else "")
-                + ".zip"
-            )
+    def _get_product_info(self) -> dict:
+        """Generate and return common product information used in multiple methods."""
+        resolution_str = (
+            str(self.resolution)
+            if self.coord_system == CoordSystem.Mollweide
+            else ("3ss" if self.resolution == 100 else "30ss")
         )
+        product_folder = f"{self.product}_GLOBE_{self.release}"
+        product_name = f"{self.product}_E{self.year}_GLOBE_{self.release}_{self.coord_system}_{resolution_str}"
+        product_version = 2 if self.product == "GHS_SMOD" else 1
 
-        return tile_path
-
-    def get_tile_paths(self, tile_ids: List[str]) -> List:
-        if not tile_ids:
-            return []
-
-        return [self.get_tile_path(tile_id=tile) for tile in tile_ids]
+        return {
+            "resolution_str": resolution_str,
+            "product_folder": product_folder,
+            "product_name": product_name,
+            "product_version": product_version,
+        }
 
     def __repr__(self) -> str:
         """Return a string representation of the GHSL dataset configuration."""
@@ -292,8 +305,8 @@ class GHSLDataConfig:
         )
 
 
-class GHSLDataDownloader:
-    """A class to handle downloads of WorldPop datasets."""
+class GHSLDataDownloader(BaseHandlerDownloader):
+    """A class to handle downloads of GHSL datasets."""
 
     def __init__(
         self,
@@ -309,12 +322,197 @@ class GHSLDataDownloader:
             data_store: Optional data storage interface. If not provided, uses LocalDataStore.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        self.logger = logger or global_config.get_logger(self.__class__.__name__)
-        self.data_store = data_store or LocalDataStore()
-        self.config = (
+        config = (
             config if isinstance(config, GHSLDataConfig) else GHSLDataConfig(**config)
         )
-        self.config.logger = self.logger
+        super().__init__(config=config, data_store=data_store, logger=logger)
+
+    def download_data_unit(
+        self,
+        tile_id: str,
+        extract: bool = True,
+        file_pattern: Optional[str] = r".*\.tif$",
+        **kwargs,
+    ) -> Optional[Union[Path, List[Path]]]:
+        """
+        Downloads and optionally extracts files for a given tile.
+
+        Args:
+            tile_id: tile ID to process.
+            extract: If True and the downloaded file is a zip, extract its contents. Defaults to False.
+            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
+            **kwargs: Additional parameters passed to download methods
+
+        Returns:
+            Path to the downloaded file if extract=False,
+            List of paths to the extracted files if extract=True,
+            None on failure.
+        """
+        url = self.config.compute_dataset_url(tile_id=tile_id)
+        output_path = self.config.get_data_unit_path(tile_id)
+
+        if not extract:
+            return self._download_file(url, output_path)
+
+        extracted_files: List[Path] = []
+
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
+                downloaded_path = self._download_file(url, Path(temp_file.name))
+                if not downloaded_path:
+                    return None
+
+            with zipfile.ZipFile(str(downloaded_path), "r") as zip_ref:
+                if file_pattern:
+                    import re
+
+                    pattern = re.compile(file_pattern)
+                    files_to_extract = [
+                        f for f in zip_ref.namelist() if pattern.match(f)
+                    ]
+                else:
+                    files_to_extract = zip_ref.namelist()
+
+                for file in files_to_extract:
+                    extracted_path = output_path.parent / Path(file).name
+                    with zip_ref.open(file) as source, open(
+                        extracted_path, "wb"
+                    ) as target:
+                        shutil.copyfileobj(source, target)
+                    extracted_files.append(extracted_path)
+                    self.logger.info(f"Extracted {file} to {extracted_path}")
+
+            Path(temp_file.name).unlink()
+            return extracted_files
+
+        except Exception as e:
+            self.logger.error(f"Error downloading/extracting tile {tile_id}: {e}")
+            return None
+
+    def download_data_units(
+        self,
+        tile_ids: List[str],
+        extract: bool = True,
+        file_pattern: Optional[str] = r".*\.tif$",
+        **kwargs,
+    ) -> List[Optional[Union[Path, List[Path]]]]:
+        """
+        Downloads multiple tiles in parallel, with an option to extract them.
+
+        Args:
+            tile_ids: A list of tile IDs to download.
+            extract: If True and the downloaded files are zips, extract their contents. Defaults to False.
+            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
+            **kwargs: Additional parameters passed to download methods
+
+        Returns:
+            A list where each element corresponds to a tile ID and contains:
+            - Path to the downloaded file if extract=False.
+            - List of paths to extracted files if extract=True.
+            - None if the download or extraction failed for a tile.
+        """
+        if not tile_ids:
+            self.logger.warning("No tiles to download")
+            return []
+
+        with multiprocessing.Pool(processes=self.config.n_workers) as pool:
+            download_func = functools.partial(
+                self.download_data_unit, extract=extract, file_pattern=file_pattern
+            )
+            file_paths = list(
+                tqdm(
+                    pool.imap(download_func, tile_ids),
+                    total=len(tile_ids),
+                    desc=f"Downloading data",
+                )
+            )
+
+        return file_paths
+
+    def download(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[Tuple[float, float], Point]],  # points
+            BaseGeometry,  # shapely geoms
+            gpd.GeoDataFrame,
+        ],
+        extract: bool = True,
+        file_pattern: Optional[str] = r".*\.tif$",
+        **kwargs,
+    ) -> List[Optional[Union[Path, List[Path]]]]:
+        """
+        Download GHSL data for a specified geographic region.
+
+        The region can be defined by a country code/name, a list of points,
+        a Shapely geometry, or a GeoDataFrame. This method identifies the
+        relevant GHSL tiles intersecting the region and downloads the
+        specified type of data (polygons or points) for those tiles in parallel.
+
+        Args:
+            source: Defines the geographic area for which to download data.
+                    Can be:
+                      - A string representing a country code or name.
+                      - A list of (latitude, longitude) tuples or Shapely Point objects.
+                      - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
+                      - A GeoDataFrame with geometry column in EPSG:4326.
+            extract: If True and the downloaded files are zips, extract their contents. Defaults to False.
+            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
+            **kwargs: Additional keyword arguments. These will be passed down to
+                      `AdminBoundaries.create()` (if `source` is a country)
+                      and to `self.download_data_units()`.
+
+        Returns:
+            A list of local file paths for the successfully downloaded tiles.
+            Returns an empty list if no data is found for the region or if
+            all downloads fail.
+        """
+
+        tiles = self.config.get_relevant_data_units(source, **kwargs)
+        return self.download_data_units(
+            tiles, extract=extract, file_pattern=file_pattern, **kwargs
+        )
+
+    def download_by_country(
+        self,
+        country_code: str,
+        data_store: Optional[DataStore] = None,
+        country_geom_path: Optional[Union[str, Path]] = None,
+        extract: bool = True,
+        file_pattern: Optional[str] = r".*\.tif$",
+        **kwargs,
+    ) -> List[Optional[Union[Path, List[Path]]]]:
+        """
+        Download GHSL data for a specific country.
+
+        This is a convenience method to download data for an entire country
+        using its code or name.
+
+        Args:
+            country_code: The country code (e.g., 'USA', 'GBR') or name.
+            data_store: Optional instance of a `DataStore` to be used by
+                        `AdminBoundaries` for loading country boundaries. If None,
+                        `AdminBoundaries` will use its default data loading.
+            country_geom_path: Optional path to a GeoJSON file containing the
+                               country boundary. If provided, this boundary is used
+                               instead of the default from `AdminBoundaries`.
+            extract: If True and the downloaded files are zips, extract their contents. Defaults to False.
+            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
+            **kwargs: Additional keyword arguments that are passed to
+                      `download_data_units`. For example, `extract` to download and extract.
+
+        Returns:
+            A list of local file paths for the successfully downloaded tiles
+            for the specified country.
+        """
+        return self.download(
+            source=country_code,
+            data_store=data_store,
+            path=country_geom_path,
+            extract=extract,
+            file_pattern=file_pattern,
+            **kwargs,
+        )
 
     def _download_file(self, url: str, output_path: Path) -> Optional[Path]:
         """
@@ -355,211 +553,6 @@ class GHSLDataDownloader:
             self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
             return None
 
-    def download_tile(
-        self, tile_id: str, extract: bool = False, file_pattern: Optional[str] = None
-    ) -> Optional[List[Path]]:
-        """
-        Downloads and optionally extracts files for a given tile.
-
-        Args:
-            tile_id: tile ID to process.
-            extract: If True and the downloaded file is a zip, extract its contents. Defaults to False.
-            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-
-        Returns:
-            Path to the downloaded file if extract=False,
-            List of paths to the extracted files if extract=True,
-            None on failure.
-        """
-        url = self.config.compute_dataset_url(tile_id=tile_id)
-        output_path = self.config.get_tile_path(tile_id=tile_id)
-
-        if not extract:
-            return self._download_file(url, output_path)
-
-        extracted_files: List[Path] = []
-
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
-                downloaded_path = self._download_file(url, Path(temp_file.name))
-                if not downloaded_path:
-                    return None
-
-            with zipfile.ZipFile(str(downloaded_path), "r") as zip_ref:
-                if file_pattern:
-                    import re
-
-                    pattern = re.compile(file_pattern)
-                    files_to_extract = [
-                        f for f in zip_ref.namelist() if pattern.match(f)
-                    ]
-                else:
-                    files_to_extract = zip_ref.namelist()
-
-                for file in files_to_extract:
-                    extracted_path = output_path.parent / Path(file).name
-                    with zip_ref.open(file) as source, open(
-                        extracted_path, "wb"
-                    ) as target:
-                        shutil.copyfileobj(source, target)
-                    extracted_files.append(extracted_path)
-                    self.logger.info(f"Extracted {file} to {extracted_path}")
-
-            Path(temp_file.name).unlink()
-            return extracted_files
-
-        except Exception as e:
-            self.logger.error(f"Error downloading/extracting tile {tile_id}: {e}")
-            return None
-
-    def download_tiles(
-        self,
-        tile_ids: List[str],
-        extract: bool = False,
-        file_pattern: Optional[str] = None,
-    ) -> List[Optional[Union[Path, List[Path]]]]:
-        """
-        Downloads multiple tiles in parallel, with an option to extract them.
-
-        Args:
-            tile_ids: A list of tile IDs to download.
-            extract: If True and the downloaded files are zips, extract their contents. Defaults to False.
-            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-
-        Returns:
-            A list where each element corresponds to a tile ID and contains:
-            - Path to the downloaded file if extract=False.
-            - List of paths to extracted files if extract=True.
-            - None if the download or extraction failed for a tile.
-        """
-
-        with multiprocessing.Pool(processes=self.config.n_workers) as pool:
-            download_func = functools.partial(
-                self.download_tile, extract=extract, file_pattern=file_pattern
-            )
-            file_paths = list(
-                tqdm(
-                    pool.imap(download_func, [tile_id for tile_id in tile_ids]),
-                    total=len(tile_ids),
-                    desc=f"Downloading data",
-                )
-            )
-
-        return file_paths
-
-    def download_rasters(
-        self,
-        tile_ids: List[str],
-    ) -> Optional[List[Path]]:
-        """
-        Downloads and extracts only .tif files from a zip archive for given tiles.
-
-        Args:
-            tile_ids: A list of tile IDs to download and extract.
-
-        Returns:
-            List of paths to the extracted .tif files, or None on failure.
-        """
-        return self.download_tiles(tile_ids, extract=True, file_pattern=r".*\.tif$")
-
-    def download_data(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
-            BaseGeometry,  # shapely geoms
-            gpd.GeoDataFrame,
-        ],
-        **kwargs,
-    ):
-        """Download GHSL data for a specified geographic region.
-
-        The region can be defined by a country code/name, a list of points,
-        a Shapely geometry, or a GeoDataFrame. This method identifies the
-        relevant GHSL tiles intersecting the region and downloads the
-        specified type of data (polygons or points) for those tiles in parallel.
-
-        Args:
-            source: Defines the geographic area for which to download data.
-                    Can be:
-                      - A string representing a country code or name.
-                      - A list of (latitude, longitude) tuples or Shapely Point objects.
-                      - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
-                      - A GeoDataFrame with geometry column in EPSG:4326.
-            **kwargs: Additional keyword arguments. These will be passed down to
-                      `AdminBoundaries.create()` (if `source` is a country)
-                      and to `self.download_tiles()`. For example, you could
-                      pass `extract=True` or `file_pattern='.*\\.tif$'`.
-
-        Returns:
-            A list of local file paths for the successfully downloaded tiles.
-            Returns an empty list if no data is found for the region or if
-            all downloads fail.
-        """
-        if isinstance(source, str):
-            region = (
-                AdminBoundaries.create(country_code=source, **kwargs)
-                .to_geodataframe()
-                .to_crs(self.config.crs)
-                .geometry[0]
-            )
-
-        elif isinstance(source, (BaseGeometry, Iterable)):
-            region = source
-        else:
-            raise ValueError(
-                f"Data downloads supported for Country, Geometry, GeoDataFrame or iterable object of Points got {region.__class__}"
-            )
-
-        # Get intersecting tiles
-        tile_ids = self.config.get_intersecting_tiles(region)
-
-        if not tile_ids:
-            self.logger.info("No intersecting tiles found for the given source.")
-            return []
-
-        return self.download_tiles(
-            tile_ids, {k: kwargs[k] for k in kwargs if k in ["extract", "file_pattern"]}
-        )
-
-    def download_by_country(
-        self,
-        country_code: str,
-        data_store: Optional[DataStore] = None,
-        country_geom_path: Optional[Union[str, Path]] = None,
-        **kwargs,
-    ) -> List[str]:
-        """
-        Download GHSL data for a specific country.
-
-        This is a convenience method to download data for an entire country
-        using its code or name.
-
-        Args:
-            country_code: The country code (e.g., 'USA', 'GBR') or name.
-            data_type: The type of building data to download ('polygons' or 'points').
-                       Defaults to 'polygons'.
-            data_store: Optional instance of a `DataStore` to be used by
-                        `AdminBoundaries` for loading country boundaries. If None,
-                        `AdminBoundaries` will use its default data loading.
-            country_geom_path: Optional path to a GeoJSON file containing the
-                               country boundary. If provided, this boundary is used
-                               instead of the default from `AdminBoundaries`.
-            **kwargs: Additional keyword arguments that are passed to
-                      `download_tiles`. For example, `extract` to download and extract.
-
-        Returns:
-            A list of local file paths for the successfully downloaded tiles
-            for the specified country.
-        """
-
-        return self.download_data(
-            source=country_code,
-            data_store=data_store,
-            path=country_geom_path,
-            **kwargs,
-        )
-
 
 class GHSLDataReader(BaseHandlerReader):
 
@@ -567,6 +560,7 @@ class GHSLDataReader(BaseHandlerReader):
         self,
         config: Union[GHSLDataConfig, dict[str, Union[str, int]]],
         data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
     ):
         """
         Initialize the downloader.
@@ -576,42 +570,10 @@ class GHSLDataReader(BaseHandlerReader):
             data_store: Optional data storage interface. If not provided, uses LocalDataStore.
             logger: Optional custom logger. If not provided, uses default logger.
         """
-        super().__init__(data_store=data_store)
-        self.config = (
+        config = (
             config if isinstance(config, GHSLDataConfig) else GHSLDataConfig(**config)
         )
-
-    def _post_load_hook(self, data, **kwargs) -> gpd.GeoDataFrame:
-        """Post-processing after loading data files."""
-        if not data:
-            self.logger.warning("No data was loaded from the source files")
-            return data
-
-        self.logger.info(f"Post-load processing complete. {len(data)} rasters.")
-        return data
-
-    def resolve_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> List[Union[str, Path]]:
-        tiles = self.config.get_intersecting_tiles(geometry)
-        return [
-            str(file_path.with_suffix(".tif"))
-            for file_path in self.config.get_tile_paths(tiles, **kwargs)
-        ]
-
-    def resolve_by_country(self, country: str, **kwargs) -> List[Union[str, Path]]:
-        area = (
-            AdminBoundaries.create(country_code=country, **kwargs)
-            .to_geodataframe()
-            .to_crs(self.config.crs)
-            .geometry[0]
-        )
-        return self.resolve_by_geometry(geometry=area, **kwargs)
-
-    def resolve_by_points(
-        self, points: List[Union[Point, Tuple[float, float]]], **kwargs
-    ) -> List[Union[str, Path]]:
-        return self.resolve_by_geometry(points, **kwargs)
+        super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], **kwargs
@@ -625,9 +587,186 @@ class GHSLDataReader(BaseHandlerReader):
         """
         return self._load_raster_data(raster_paths=source_data_path)
 
-    def load_into_dataframe(self, source):
-        tif_processors = super().load(source=source)
+    def load(self, source, **kwargs):
+        return super().load(source=source, file_ext=".tif")
 
+
+class GHSLDataHandler(BaseHandler):
+    """
+    Handler for GHSL (Global Human Settlement Layer) dataset.
+
+    This class provides a unified interface for downloading and loading GHSL data.
+    It manages the lifecycle of configuration, downloading, and reading components.
+    """
+
+    def __init__(
+        self,
+        product: Literal[
+            "GHS_BUILT_S",
+            "GHS_BUILT_H_AGBH",
+            "GHS_BUILT_H_ANBH",
+            "GHS_BUILT_V",
+            "GHS_POP",
+            "GHS_SMOD",
+        ],
+        year: int = 2020,
+        resolution: int = 100,
+        config: Optional[GHSLDataConfig] = None,
+        downloader: Optional[GHSLDataDownloader] = None,
+        reader: Optional[GHSLDataReader] = None,
+        data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
+        **kwargs,
+    ):
+        """
+        Initialize the GHSLDataHandler.
+
+        Args:
+            product: The GHSL product to use. Must be one of:
+                    - GHS_BUILT_S: Built-up surface
+                    - GHS_BUILT_H_AGBH: Average building height
+                    - GHS_BUILT_H_ANBH: Average number of building heights
+                    - GHS_BUILT_V: Building volume
+                    - GHS_POP: Population
+                    - GHS_SMOD: Settlement model
+            year: The year of the data (default: 2020)
+            resolution: The resolution in meters (default: 100)
+            config: Optional configuration object
+            downloader: Optional downloader instance
+            reader: Optional reader instance
+            data_store: Optional data store instance
+            logger: Optional logger instance
+            **kwargs: Additional configuration parameters
+        """
+        self._product = product
+        self._year = year
+        self._resolution = resolution
+        super().__init__(
+            config=config,
+            downloader=downloader,
+            reader=reader,
+            data_store=data_store,
+            logger=logger,
+        )
+
+    def create_config(
+        self, data_store: DataStore, logger: logging.Logger, **kwargs
+    ) -> GHSLDataConfig:
+        """
+        Create and return a GHSLDataConfig instance.
+
+        Args:
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional configuration parameters
+
+        Returns:
+            Configured GHSLDataConfig instance
+        """
+        return GHSLDataConfig(
+            product=self._product,
+            year=self._year,
+            resolution=self._resolution,
+            data_store=data_store,
+            logger=logger,
+            **kwargs,
+        )
+
+    def create_downloader(
+        self,
+        config: GHSLDataConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> GHSLDataDownloader:
+        """
+        Create and return a GHSLDataDownloader instance.
+
+        Args:
+            config: The configuration object
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional downloader parameters
+
+        Returns:
+            Configured GHSLDataDownloader instance
+        """
+        return GHSLDataDownloader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )
+
+    def create_reader(
+        self,
+        config: GHSLDataConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> GHSLDataReader:
+        """
+        Create and return a GHSLDataReader instance.
+
+        Args:
+            config: The configuration object
+            data_store: The data store instance to use
+            logger: The logger instance to use
+            **kwargs: Additional reader parameters
+
+        Returns:
+            Configured GHSLDataReader instance
+        """
+        return GHSLDataReader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )
+
+    def load_data(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[tuple, Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+            Path,  # path
+            List[Union[str, Path]],  # list of paths
+        ],
+        ensure_available: bool = True,
+        **kwargs,
+    ):
+        return super().load_data(
+            source=source,
+            ensure_available=ensure_available,
+            file_ext=".tif",
+            extract=True,
+            file_pattern=r".*\.tif$",
+            **kwargs,
+        )
+
+    def load_into_dataframe(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[tuple, Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+            Path,  # path
+            List[Union[str, Path]],  # list of paths
+        ],
+        ensure_available: bool = True,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """
+        Load GHSL data into a pandas DataFrame.
+
+        Args:
+            source: The data source specification
+            ensure_available: If True, ensure data is downloaded before loading
+            **kwargs: Additional parameters passed to load methods
+
+        Returns:
+            DataFrame containing the GHSL data
+        """
+        tif_processors = self.load_data(
+            source=source, ensure_available=ensure_available, **kwargs
+        )
         return pd.concat(
             [tp.to_dataframe() for tp in tif_processors], ignore_index=True
         )
