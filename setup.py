@@ -18,7 +18,7 @@ def read_version():
 
 
 setup(
-    name="gigaspatial",
+    name="giga-spatial",
     version=read_version(),
     author="Utku Can Ozturk",
     author_email="utkucanozturk@gmail.com",
@@ -57,4 +57,6 @@ setup(
     ],
     python_requires=">=3.10",
     install_requires=requirements,
+    license="AGPL-3.0-or-later",
+    license_files=("LICENSE",),
 )

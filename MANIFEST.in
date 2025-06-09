@@ -1,0 +1,17 @@
+include README.md
+include requirements.txt
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include PULL_REQUEST_TEMPLATE.md
+include .env_sample
+
+recursive-include gigaspatial *.py
+recursive-include docs *
+recursive-exclude __pycache__ *
+recursive-exclude *.py[cod]
+recursive-exclude *.so
+recursive-exclude .git *
+recursive-exclude .github *
+recursive-exclude .DS_Store 
