@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.1] - 2025-06-09
+
+### Fixed
+
+- Gracefully handle missing or invalid GeoRepo API key in `AdminBoundaries.create()`:
+  - Wrapped `GeoRepoClient` initialization in a `try-except` block
+  - Added fallback to GADM if GeoRepo client fails
+  - Improved logging for better debugging and transparency
+
 ## [v0.6.0] - 2025-06-09
 
 ### Added
