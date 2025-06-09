@@ -230,19 +230,22 @@ class AdminBoundaries(BaseModel):
         elif country_code is not None:
             from gigaspatial.handlers.unicef_georepo import GeoRepoClient
 
-            client = GeoRepoClient()
-
-            if client.check_connection():
-                cls.logger.info("GeoRepo connection successful.")
-                return cls.from_georepo(
-                    iso3_code,
-                    admin_level=admin_level,
-                )
-            else:
+            try:
+                client = GeoRepoClient()
+                if client.check_connection():
+                    cls.logger.info("GeoRepo connection successful.")
+                    return cls.from_georepo(
+                        iso3_code,
+                        admin_level=admin_level,
+                    )
+            except ValueError as e:
                 cls.logger.warning(
-                    "GeoRepo connection check failed. Falling back to GADM."
+                    f"GeoRepo initialization failed: {str(e)}. Falling back to GADM."
                 )
-                return cls.from_gadm(iso3_code, admin_level, **kwargs)
+            except Exception as e:
+                cls.logger.warning(f"GeoRepo error: {str(e)}. Falling back to GADM.")
+
+            return cls.from_gadm(iso3_code, admin_level, **kwargs)
         else:
             raise ValueError(
                 "Either country_code or (data_store, path) must be provided."
