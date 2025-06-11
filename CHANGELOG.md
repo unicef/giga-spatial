@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.2] - 2025-06-11
+
+### Added
+- New `ROOT_DATA_DIR` configuration option to set a base directory for all data tiers
+  - Can be configured via environment variable `ROOT_DATA_DIR` or `.env` file
+  - Defaults to current directory (`.`) if not specified
+  - All tier data paths (bronze, silver, gold, views) are now constructed relative to this root directory
+  - Example: Setting `ROOT_DATA_DIR=/data/gigaspatial` will store all data under `/data/gigaspatial/bronze`, `/data/gigaspatial/silver`, etc.
+
+### Fixed
+- Fixed URL formatting in GHSL tiles by using Enum value instead of Enum member
+  - Ensures consistent URL formatting with numeric values (4326) instead of Enum names (WGS84)
+  - Fixes URL formatting issue across different Python environments
+
+- Refactored GHSL downloader to follow DataStore abstraction
+  - Directory creation is now handled by DataStore implementation
+  - Removed redundant directory creation logic from download_data_unit method
+  - Improves separation of concerns and makes the code more maintainable
+
 ## [v0.6.1] - 2025-06-09
 
 ### Fixed
