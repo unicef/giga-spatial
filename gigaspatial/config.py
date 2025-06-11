@@ -33,6 +33,12 @@ class Config(BaseSettings):
         default="", alias="GIGA_SCHOOL_LOCATION_API_KEY"
     )
 
+    ROOT_DATA_DIR: Path = Field(
+        default=Path("."),
+        description="Root directory for all data tiers",
+        alias="ROOT_DATA_DIR",
+    )
+
     BRONZE_DATA_DIR: Path = Field(
         default=Path("bronze"),
         description="Root directory for raw/bronze tier data",
@@ -129,12 +135,12 @@ class Config(BaseSettings):
                 f"Invalid tier: {tier}. Must be one of 'bronze', 'silver', 'gold', or 'views'."
             )
 
-        base_dir = getattr(self, f"{tier.upper()}_DATA_DIR")
+        tier_dir = getattr(self, f"{tier.upper()}_DATA_DIR")
         type_dir = self.DATA_TYPES[data_type]
         if version:
-            return base_dir / type_dir / version
+            return self.ROOT_DATA_DIR / tier_dir / type_dir / version
         else:
-            return base_dir / type_dir
+            return self.ROOT_DATA_DIR / tier_dir / type_dir
 
     def get_admin_path(
         self,
