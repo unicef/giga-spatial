@@ -74,7 +74,7 @@ class GHSLDataConfig(BaseHandlerConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        self.TILES_URL = self.TILES_URL.format(self.coord_system)
+        self.TILES_URL = self.TILES_URL.format(self.coord_system.value)
         self._load_tiles()
 
     def _load_tiles(self):
