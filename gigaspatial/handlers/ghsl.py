@@ -375,10 +375,9 @@ class GHSLDataDownloader(BaseHandlerDownloader):
 
                 for file in files_to_extract:
                     extracted_path = output_path.parent / Path(file).name
-                    with zip_ref.open(file) as source, open(
-                        extracted_path, "wb"
-                    ) as target:
-                        shutil.copyfileobj(source, target)
+                    with zip_ref.open(file) as source:
+                        file_content = source.read()
+                        self.data_store.write_file(str(extracted_path), file_content)
                     extracted_files.append(extracted_path)
                     self.logger.info(f"Extracted {file} to {extracted_path}")
 
