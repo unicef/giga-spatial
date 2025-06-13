@@ -1,6 +1,3 @@
 # Processing Module
 
-::: gigaspatial.processing
-    options:
-      show_root_heading: true
-      show_source: true
+Follow this [Link!](https://unicef.github.io/giga-spatial/api/processing/) For detailed documentation on the Processing Module. 

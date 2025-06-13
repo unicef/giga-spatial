@@ -1,6 +1,3 @@
 # Handlers Module
 
-::: gigaspatial.handlers
-    options:
-      show_root_heading: true
-      show_source: true
+Follow this [Link!](https://unicef.github.io/giga-spatial/api/handlers/) For detailed documentation on the handlers module. 

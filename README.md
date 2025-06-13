@@ -5,13 +5,13 @@
 
 # GigaSpatial
 
-# ![GigaSpatial logo](https://raw.githubusercontent.com/unicef/giga-spatial/main/docs/assets/logo.png)
+## About Giga
+
 Giga is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice. 
 Giga maps schools' Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity. 
 
----
 
-## About GigaSpatial
+## About Giga Spatial
 
 **GigaSpatial** is a Python package developed as part of the Giga Applied Science Team to handle geospatial data efficiently. It provides tools for downloading, processing, and analyzing geospatial data, enabling users to work with datasets such as OpenStreetMap (OSM), Global Human Settlement Layer (GHSL), Microsoft Global Buildings, Google Open Buildings, and more. The package is designed to support Giga's mission by providing robust geospatial capabilities for mapping and analyzing school connectivity.
 
@@ -36,6 +36,106 @@ The `gigaspatial` package supports data from the following providers:
     <img src="https://raw.githubusercontent.com/unicef/giga-spatial/main/docs/assets/datasets.png" alt="Dataset Providers" style="width: 75%; height: auto;"/>
 </div>
 
+---
+
+
+## Installation Guide
+
+This guide will walk you through the steps to install the `gigaspatial` package on your system. The package is compatible with Python 3.7 and above.
+
+---
+
+## Prerequisites
+
+Before installing `gigaspatial`, ensure you have Python installed on your system.  
+You can check your Python version by running:
+
+```bash
+python --version
+````
+
+If Python is not installed, you can download it from the [official Python website](https://www.python.org/).
+
+---
+
+## Installing via pip
+
+You can install the `gigaspatial` package directly from the source using `pip`.
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/unicef/giga-spatial.git
+cd giga-spatial
+```
+
+### Install the Package
+
+```bash
+pip install .
+```
+
+This will install `gigaspatial` along with its dependencies.
+
+---
+
+## Installing in Development Mode
+
+If you plan to contribute to the package or modify the source code, install it in development mode:
+
+```bash
+pip install -e .
+```
+
+---
+
+## Installing Dependencies
+
+Dependencies are installed automatically with the package.
+To install them manually:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Verifying the Installation
+
+Run this command to verify installation:
+
+```bash
+python -c "import gigaspatial; print(gigaspatial.__version__)"
+```
+
+You should see the installed version printed.
+
+---
+
+## Troubleshooting
+
+If you encounter issues during installation:
+
+### 1. Ensure pip is up to date
+
+```bash
+pip install --upgrade pip
+```
+
+### 2. Check for dependency conflicts
+
+Use a virtual environment to isolate the installation:
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+pip install .
+```
+
+```
+
+Let me know if you want this saved as a file.
+```
 ---
 
 ### View Generators

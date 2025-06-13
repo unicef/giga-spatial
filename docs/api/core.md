@@ -1,6 +1,3 @@
 # Core Module
 
-::: gigaspatial.core
-    options:
-      show_root_heading: true
-      show_source: true
+Follow this [Link!](https://unicef.github.io/giga-spatial/api/core/) For detailed documentation on the Core Module. 
