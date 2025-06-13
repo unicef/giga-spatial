@@ -11,7 +11,7 @@ Giga is a UNICEF-ITU initiative to connect every school to the Internet and ever
 Giga maps schools' Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity. 
 
 
-## About GigaSpatial
+## About Giga Spatial
 
 **GigaSpatial** is a Python package developed as part of the Giga Applied Science Team to handle geospatial data efficiently. It provides tools for downloading, processing, and analyzing geospatial data, enabling users to work with datasets such as OpenStreetMap (OSM), Global Human Settlement Layer (GHSL), Microsoft Global Buildings, Google Open Buildings, and more. The package is designed to support Giga's mission by providing robust geospatial capabilities for mapping and analyzing school connectivity.
 
