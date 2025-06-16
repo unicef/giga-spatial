@@ -74,8 +74,6 @@ class GHSLDataConfig(BaseHandlerConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        self.TILES_URL = self.TILES_URL.format(self.coord_system.value)
-        self._load_tiles()
 
     def _load_tiles(self):
         """Load GHSL tiles from tiles shapefile."""
@@ -158,6 +156,9 @@ class GHSLDataConfig(BaseHandlerConfig):
                 )
                 self.coord_system = CoordSystem.Mollweide
 
+        self.TILES_URL = self.TILES_URL.format(self.coord_system.value)
+        self._load_tiles()
+
         return self
 
     @property
@@ -176,7 +177,7 @@ class GHSLDataConfig(BaseHandlerConfig):
         self, points: Iterable[Union[Point, tuple]], **kwargs
     ) -> List[dict]:
         """
-        Return intersecting tiles for a list of points.
+        Return intersecting tiles f or a list of points.
         """
         return self._get_relevant_tiles(points)
 
@@ -240,8 +241,8 @@ class GHSLDataConfig(BaseHandlerConfig):
             ValueError: If the input `source` is not one of the supported types.
         """
         if isinstance(source, gpd.GeoDataFrame):
-            if source.crs != "EPSG:4326":
-                source = source.to_crs("EPSG:4326")
+            # if source.crs != "EPSG:4326":
+            #    source = source.to_crs("EPSG:4326")
             search_geom = source.geometry.unary_union
         elif isinstance(
             source,
@@ -282,7 +283,7 @@ class GHSLDataConfig(BaseHandlerConfig):
             else ("3ss" if self.resolution == 100 else "30ss")
         )
         product_folder = f"{self.product}_GLOBE_{self.release}"
-        product_name = f"{self.product}_E{self.year}_GLOBE_{self.release}_{self.coord_system}_{resolution_str}"
+        product_name = f"{self.product}_E{self.year}_GLOBE_{self.release}_{self.coord_system.value}_{resolution_str}"
         product_version = 2 if self.product == "GHS_SMOD" else 1
 
         return {

@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.3] - 2025-06-16
+
+### Added
+- Major refactor of `HDX` module to align with unified `BaseHandler` architecture:
+  - `HDXConfig`: fully aligned with `BaseHandlerConfig` structure.
+  - Added flexible pattern matching for resource filtering.
+  - Improved data unit resolution by country, geometry, and points.
+  - Enhanced resource filtering with exact and regex options.
+- `HDXDownloader` fully aligned with `BaseHandlerDownloader`:
+  - Simplified sequential download logic.
+  - Improved error handling, validation, and logging.
+- `HDXReader` fully aligned with `BaseHandlerReader`:
+  - Added `resolve_source_paths` and `load_all_resources` methods.
+  - Simplified source handling for single and multiple files.
+  - Cleaned up redundant and dataset-specific logic.
+- Introduced `HDXHandler` as unified orchestration layer using factory methods.
+
+- Refactor of `RelativeWealthIndex (RWI)` module:
+  - Added new `RWIHandler` class aligned with `HDXHandler` and `BaseHandler`.
+  - Simplified class names: `RWIDownloader` and `RWIReader`.
+  - Enhanced configuration with `latest_only` flag to select newest resources automatically.
+  - Simplified resource filtering and country resolution logic.
+  - Improved code maintainability, type hints, and error handling.
+
+
+- **New raster multi-band support in TifProcessor:**
+  - Added new `multi` mode for handling multi-band raster datasets.
+  - Automatic band name detection from raster metadata.
+  - Added strict mode validation (`single`, `rgb`, `rgba`, `multi`).
+  - Enhanced error handling for invalid modes and band counts.
+
+### Fixed
+- Fixed GHSL tiles loading behavior for correct coordinate system handling:
+  - Moved `TILES_URL` formatting and tile loading to `validate_configuration`.
+  - Ensures proper tile loading after CRS validation.
+
+### Documentation
+- Updated and standardized API references across documentation.
+- Standardized handler method names and usage examples.
+- Added building enrichment examples for POI processing.
+- Updated installation instructions.
+
+### Deprecated
+- Deprecated direct imports from individual handler modules.
+
 ## [v0.6.2] - 2025-06-11
 
 ### Added

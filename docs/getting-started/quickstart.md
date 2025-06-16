@@ -54,39 +54,57 @@ config.set_path("views", "/path/to/your/views_data")
 
 API keys and tokens should be set through environment variables.
 
-## Downloading Geospatial Data
+## Downloading and Processing Geospatial Data
 
-To download geospatial data, you can use the `GHSLDataDownloader` class from the `handlers` module. Here's an example of downloading data for a specific country:
+The `gigaspatial` package provides several handlers for different types of geospatial data. Here are examples for two commonly used handlers:
+
+### GHSL (Global Human Settlement Layer) Data
+
+The `GHSLDataHandler` provides access to various GHSL products including built-up surface, building height, population, and settlement model data:
 
 ```python
-from gigaspatial.handlers.ghsl import GHSLDataDownloader
+from gigaspatial.handlers import GHSLDataHandler
 
-# Initialize the downloader
-downloader = GHSLDataDownloader({
-    "product": "GHS_BUILT_S",
-    "year": 2020,
-    "resolution": 100,
-    "coord_system": "WGS84"
-})
+# Initialize the handler with desired product and parameters
+ghsl_handler = GHSLDataHandler(
+    product="GHS_BUILT_S",  # Built-up surface
+    year=2020,
+    resolution=100,  # 100m resolution
+)
 
 # Download data for a specific country
-country_code = "TUR" 
-downloader.download_by_country(country_code)
+country_code = "TUR"
+downloaded_files = ghsl_handler.load_data(country_code, ensure_available = True)
+
+# Load the data into a DataFrame
+df = ghsl_handler.load_into_dataframe(country_code, ensure_available = True)
+print(df.head())
+
+# You can also load data for specific points or geometries
+points = [(38.404581,27.4816677), (39.8915702, 32.7809618)]
+df_points = ghsl_handler.load_into_dataframe(points, ensure_available = True)
 ```
 
-## Processing Geospatial Data
+### Google Open Buildings Data
 
-Once the data is downloaded, you can process it using the `TifProcessor` class from the `processing` module. Here's an example of processing GHSL data:
+The `GoogleOpenBuildingsHandler` provides access to Google's Open Buildings dataset, which includes building footprints and points:
 
 ```python
-from gigaspatial.processing.tif_processor import TifProcessor
+from gigaspatial.handlers import GoogleOpenBuildingsHandler
 
-# Initialize the processor
-processor = TifProcessor(dataset_path="/path/to/ghsl/data/ghsl_data.tif", data_store=None, mode="single")
+# Initialize the handler
+gob_handler = GoogleOpenBuildingsHandler()
 
-# Process the GHSL data
-processed_data = processor.to_dataframe()
-print(processed_data.head())
+# Download and load building polygons for a country
+country_code = "TUR"
+polygons_gdf = gob_handler.load_polygons(country_code, ensure_available = True)
+
+# Download and load building points for a country
+points_gdf = gob_handler.load_points(country_code, ensure_available = True)
+
+# You can also load data for specific points or geometries
+points = [(38.404581, 27.4816677), (39.8915702, 32.7809618)]
+polygons_gdf = gob_handler.load_polygons(points, ensure_available = True)
 ```
 
 ## Storing Geospatial Data
@@ -94,7 +112,7 @@ print(processed_data.head())
 You can store the processed data in various formats using the `DataStore` class from the `core.io` module. Here's an example of saving data to a parquet file:
 
 ```python
-from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.core.io import LocalDataStore
 
 # Initialize the data store
 data_store = LocalDataStore()
@@ -112,7 +130,6 @@ from gigaspatial.core.io.writers import write_dataset
 # Save the processed data to a GeoJSON file
 write_dataset(data=processed_data, data_store=data_store, path="/path/to/your/output/processed_data.geojson")
 ```
-
 
 ## Visualizing Geospatial Data
 

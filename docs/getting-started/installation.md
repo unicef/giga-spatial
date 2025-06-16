@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide will walk you through the steps to install the `gigaspatial` package on your system. The package is compatible with Python 3.7 and above.
+This guide will walk you through the steps to install the `gigaspatial` package on your system. The package is compatible with Python 3.10 and above.
 
 ## Prerequisites
 
@@ -12,27 +12,34 @@ python --version
 
 If Python is not installed, you can download it from the [official Python website](https://www.python.org/downloads/).
 
-## Installing via pip
+## Installing from PyPI
 
-You can install the `gigaspatial` package directly from the source using `pip`. Follow these steps:
+The easiest way to install `gigaspatial` is directly from PyPI using pip:
 
-1. **Clone the Repository** (if you haven't already):
+```bash
+pip install giga-spatial
+```
+
+This will install the latest stable version of the package along with all its dependencies.
+
+## Installing from Source
+
+If you need to install a specific version or want to contribute to the development, you can install from the source:
+
+1. **Clone the Repository**:
    ```bash
    git clone https://github.com/unicef/giga-spatial.git
    cd giga-spatial
    ```
 
 2. **Install the Package**:
-   Run the following command in your terminal to install the package:
    ```bash
    pip install .
    ```
 
-   This command will install `gigaspatial` along with its dependencies.
+### Installing in Development Mode
 
-## Installing in Development Mode
-
-If you plan to contribute to the package or modify the source code, you can install it in development mode. This allows you to make changes to the code without reinstalling the package. To install in development mode, run:
+If you plan to contribute to the package or modify the source code, you can install it in development mode. This allows you to make changes to the code without reinstalling the package:
 
 ```bash
 pip install -e .
@@ -71,7 +78,7 @@ If you encounter any issues during installation, consider the following:
   ```bash
   python -m venv venv
   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-  pip install .
+  pip install giga-spatial  # or pip install . if installing from source
   ```
 
 ---

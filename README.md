@@ -5,17 +5,27 @@
 
 # GigaSpatial
 
-# ![GigaSpatial logo](https://raw.githubusercontent.com/unicef/giga-spatial/main/docs/assets/logo.png)
-Giga is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice. 
-Giga maps schools' Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity. 
+## About Giga
 
----
+[Giga](https://giga.global/) is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice. 
+Giga maps schools' Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity. 
 
 ## About GigaSpatial
 
 **GigaSpatial** is a Python package developed as part of the Giga Applied Science Team to handle geospatial data efficiently. It provides tools for downloading, processing, and analyzing geospatial data, enabling users to work with datasets such as OpenStreetMap (OSM), Global Human Settlement Layer (GHSL), Microsoft Global Buildings, Google Open Buildings, and more. The package is designed to support Giga's mission by providing robust geospatial capabilities for mapping and analyzing school connectivity.
 
-### Key Features
+## Installation
+
+See the [installation docs](https://unicef.github.io/giga-spatial/getting-started/installation/) for all details. GigaSpatial requires Python 3.10 or above and depends on the following key packages:
+
+- geopandas
+- pandas
+- shapely
+- rasterio
+
+We recommend using a virtual environment for installation. See the [installation docs](https://unicef.github.io/giga-spatial/getting-started/installation/) for more details.
+
+## Key Features
 - **Data Downloading**: Download geospatial data from various sources including GHSL, Microsoft Global Buildings, Google Open Buildings, OpenCellID, and HDX datasets.
 - **Data Processing**: Process and transform geospatial data, such as GeoTIFF files and vector data, with support for compression and efficient handling.
 - **View Generators**: 
@@ -28,7 +38,7 @@ Giga maps schools' Internet access in real time, creates models for innovative f
   - Centralized configuration via environment variables or `.env` file
   - Easy setup of API keys and paths
 
-### Supported Datasets
+## Supported Datasets
 
 The `gigaspatial` package supports data from the following providers:
 
@@ -38,7 +48,7 @@ The `gigaspatial` package supports data from the following providers:
 
 ---
 
-### View Generators
+## View Generators
 
 The **view generators** in GigaSpatial are designed to enrich the spatial context of school locations and map data into grid or POI locations. This enables users to analyze and visualize geospatial data in meaningful ways.
 

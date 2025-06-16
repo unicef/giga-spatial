@@ -18,12 +18,12 @@ from gigaspatial.config import config
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class TifProcessor:
     """
-    A class to handle tif data processing, supporting single-band, RGB, and RGBA data.
+    A class to handle tif data processing, supporting single-band, RGB, RGBA, and multi-band data.
     """
 
     dataset_path: Union[Path, str]
     data_store: Optional[DataStore] = None
-    mode: Literal["single", "rgb", "rgba"] = "single"
+    mode: Literal["single", "rgb", "rgba", "multi"] = "single"
 
     def __post_init__(self):
         """Validate inputs and set up logging."""
@@ -36,10 +36,15 @@ class TifProcessor:
 
         self._load_metadata()
 
+        # Validate mode and band count
         if self.mode == "rgba" and self.count != 4:
             raise ValueError("RGBA mode requires a 4-band TIF file")
         if self.mode == "rgb" and self.count != 3:
             raise ValueError("RGB mode requires a 3-band TIF file")
+        if self.mode == "single" and self.count != 1:
+            raise ValueError("Single mode requires a 1-band TIF file")
+        if self.mode == "multi" and self.count < 2:
+            raise ValueError("Multi mode requires a TIF file with 2 or more bands")
 
     @contextmanager
     def open_dataset(self):
@@ -118,6 +123,16 @@ class TifProcessor:
                     self._tabular = self._to_rgb_dataframe(drop_nodata=True)
                 elif self.mode == "rgba":
                     self._tabular = self._to_rgba_dataframe(drop_transparent=True)
+                elif self.mode == "multi":
+                    self._tabular = self._to_multi_band_dataframe(
+                        drop_nodata=True,
+                        drop_values=[],
+                        band_names=None,  # Use default band naming
+                    )
+                else:
+                    raise ValueError(
+                        f"Invalid mode: {self.mode}. Must be one of: single, rgb, rgba, multi"
+                    )
             except Exception as e:
                 raise ValueError(
                     f"Failed to process TIF file in mode '{self.mode}'. "
@@ -392,6 +407,77 @@ class TifProcessor:
 
         self.logger.info("Dataset is processed!")
         return data
+
+    def _to_multi_band_dataframe(
+        self,
+        drop_nodata: bool = True,
+        drop_values: list = [],
+        band_names: Optional[List[str]] = None,
+    ) -> pd.DataFrame:
+        """
+        Process multi-band TIF to DataFrame with all bands included.
+
+        Args:
+            drop_nodata (bool): Whether to drop nodata values. Defaults to True.
+            drop_values (list): Additional values to drop from the dataset. Defaults to empty list.
+            band_names (Optional[List[str]]): Custom names for the bands. If None, bands will be named using
+                                            the band descriptions from the GeoTIFF metadata if available,
+                                            otherwise 'band_1', 'band_2', etc.
+
+        Returns:
+            pd.DataFrame: DataFrame containing coordinates and all band values
+        """
+        self.logger.info("Processing multi-band dataset...")
+
+        with self.open_dataset() as src:
+            # Read all bands
+            stack = src.read()
+
+            x_coords, y_coords = self._get_pixel_coordinates()
+
+            # Initialize dictionary with coordinates
+            data_dict = {"lon": x_coords.flatten(), "lat": y_coords.flatten()}
+
+            # Get band descriptions from metadata if available
+            if band_names is None and hasattr(src, "descriptions") and src.descriptions:
+                band_names = [
+                    desc if desc else f"band_{i+1}"
+                    for i, desc in enumerate(src.descriptions)
+                ]
+
+            # Process each band
+            for band_idx in range(self.count):
+                band_data = stack[band_idx]
+
+                # Handle nodata and other values to drop
+                if drop_nodata or drop_values:
+                    values_to_mask = []
+                    if drop_nodata and src.nodata is not None:
+                        values_to_mask.append(src.nodata)
+                    if drop_values:
+                        values_to_mask.extend(drop_values)
+
+                    if values_to_mask:
+                        data_mask = ~np.isin(band_data, values_to_mask)
+                        band_values = np.extract(data_mask, band_data)
+                        if band_idx == 0:  # Only need to mask coordinates once
+                            data_dict["lon"] = np.extract(data_mask, x_coords)
+                            data_dict["lat"] = np.extract(data_mask, y_coords)
+                    else:
+                        band_values = band_data.flatten()
+                else:
+                    band_values = band_data.flatten()
+
+                # Use custom band names if provided, otherwise use descriptions or default naming
+                band_name = (
+                    band_names[band_idx]
+                    if band_names and len(band_names) > band_idx
+                    else f"band_{band_idx + 1}"
+                )
+                data_dict[band_name] = band_values
+
+        self.logger.info("Multi-band dataset is processed!")
+        return pd.DataFrame(data_dict)
 
     def _get_pixel_coordinates(self):
         """Helper method to generate coordinate arrays for all pixels"""

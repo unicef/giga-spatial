@@ -31,8 +31,8 @@ from gigaspatial.handlers.opencellid import (
     OpenCellIDDownloader,
     OpenCellIDReader,
 )
-from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader
-from gigaspatial.handlers.rwi import RWIConfig, RelativeWealthIndexDownloader
+from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
+from gigaspatial.handlers.rwi import RWIConfig, RWIDownloader, RWIReader, RWIHandler
 from gigaspatial.handlers.unicef_georepo import (
     GeoRepoClient,
     get_country_boundaries_by_iso3,
