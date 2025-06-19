@@ -37,4 +37,8 @@ from gigaspatial.handlers.unicef_georepo import (
     GeoRepoClient,
     get_country_boundaries_by_iso3,
 )
-from gigaspatial.handlers.giga import GigaSchoolLocationFetcher
+from gigaspatial.handlers.giga import (
+    GigaSchoolLocationFetcher,
+    GigaSchoolProfileFetcher,
+    GigaSchoolMeasurementsFetcher,
+)

@@ -32,6 +32,12 @@ class Config(BaseSettings):
     GIGA_SCHOOL_LOCATION_API_KEY: str = Field(
         default="", alias="GIGA_SCHOOL_LOCATION_API_KEY"
     )
+    GIGA_SCHOOL_PROFILE_API_KEY: str = Field(
+        default="", alias="GIGA_SCHOOL_PROFILE_API_KEY"
+    )
+    GIGA_SCHOOL_MEASUREMENTS_API_KEY: str = Field(
+        default="", alias="GIGA_SCHOOL_MEASUREMENTS_API_KEY"
+    )
 
     ROOT_DATA_DIR: Path = Field(
         default=Path("."),

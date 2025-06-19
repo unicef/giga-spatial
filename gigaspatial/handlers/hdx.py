@@ -1,13 +1,9 @@
-import os
 import logging
 from tqdm import tqdm
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Dict, Any, Iterable
+from typing import List, Optional, Union, Dict, Any, Iterable
 import tempfile
-import functools
-import multiprocessing
 
-import pandas as pd
 import geopandas as gpd
 from pydantic import Field, ConfigDict
 from pydantic.dataclasses import dataclass
@@ -50,6 +46,48 @@ class HDXConfig(BaseHandlerConfig):
     _hdx_configured: bool = Field(default=False, init=False)
     dataset: Optional[Dataset] = Field(default=None, init=False)
 
+    @staticmethod
+    def search_datasets(
+        query: str,
+        rows: int = None,
+        sort: str = "relevance asc, metadata_modified desc",
+        hdx_site: str = "prod",
+        user_agent: str = "gigaspatial",
+    ) -> List[Dict]:
+        """Search for datasets in HDX before initializing the class.
+
+        Args:
+            query: Search query string
+            rows: Number of results per page. Defaults to all datasets (sys.maxsize).
+            sort: Sort order - one of 'relevance', 'views_recent', 'views_total', 'last_modified' (default: 'relevance')
+            hdx_site: HDX site to use - 'prod' or 'test' (default: 'prod')
+            user_agent: User agent for HDX API requests (default: 'gigaspatial')
+
+        Returns:
+            List of dataset dictionaries containing search results
+
+        Example:
+            >>> results = HDXConfig.search_datasets("population", rows=5)
+            >>> for dataset in results:
+            >>>     print(f"Name: {dataset['name']}, Title: {dataset['title']}")
+        """
+        try:
+            Configuration.create(
+                hdx_site=hdx_site,
+                user_agent=user_agent,
+                hdx_read_only=True,
+            )
+        except:
+            pass
+
+        try:
+            results = Dataset.search_in_hdx(query=query, rows=rows, sort=sort)
+
+            return results
+        except Exception as e:
+            logging.error(f"Error searching HDX datasets: {str(e)}")
+            raise
+
     def __post_init__(self):
         super().__post_init__()
         try:
@@ -85,7 +123,11 @@ class HDXConfig(BaseHandlerConfig):
             self.logger.info(f"Fetching HDX dataset: {self.dataset_name}")
             dataset = Dataset.read_from_hdx(self.dataset_name)
             if not dataset:
-                raise ValueError(f"Dataset '{self.dataset_name}' not found on HDX")
+                raise ValueError(
+                    f"Dataset '{self.dataset_name}' not found on HDX. "
+                    "Please verify the dataset name or use search_datasets() "
+                    "to find available datasets."
+                )
             return dataset
         except Exception as e:
             self.logger.error(f"Error fetching HDX dataset: {str(e)}")
@@ -386,9 +428,9 @@ class HDXReader(BaseHandlerReader):
         self, source_data_path: List[Union[str, Path]], **kwargs
     ) -> Any:
         """Load data from paths"""
-        if len(source_data_path)==1:
+        if len(source_data_path) == 1:
             return read_dataset(self.data_store, source_data_path[0])
-        
+
         all_data = {}
         for file_path in source_data_path:
             try:
@@ -400,49 +442,6 @@ class HDXReader(BaseHandlerReader):
     def load_all_resources(self):
         resources = self.config.list_resources()
         return self.load_from_paths(resources)
-
-    # def read_resource(
-    #     self, resource_file: str
-    # ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-    #     """Read a specific resource file from the dataset using the data_store."""
-    #     if not self.dataset_path:
-    #         raise ValueError("No dataset path configured")
-
-    #     file_path = str(self.dataset_path / resource_file)
-
-    #     if not self.data_store.file_exists(file_path):
-    #         raise FileNotFoundError(
-    #             f"Resource file {resource_file} not found in dataset"
-    #         )
-
-    #     try:
-    #         return read_dataset(self.data_store, file_path)
-    #     except Exception as e:
-    #         raise ValueError(f"Could not read file {file_path}: {str(e)}")
-
-    # def read_all_resources(self) -> Dict[str, Union[pd.DataFrame, gpd.GeoDataFrame]]:
-    #     """Read all resources in the dataset directory using the data_store."""
-    #     resources = self.list_resources()
-    #     result = {}
-
-    #     for resource in resources:
-    #         try:
-    #             result[resource] = self.read_resource(resource)
-    #         except Exception as e:
-    #             self.logger.warning(f"Could not read resource {resource}: {str(e)}")
-
-    #     return result
-
-    # def load_from_paths(
-    #     self, source_data_path: List[Union[str, Path]], **kwargs
-    # ) -> Union[
-    #     pd.DataFrame, gpd.GeoDataFrame, Dict[str, Union[pd.DataFrame, gpd.GeoDataFrame]]
-    # ]:
-    #     """Load data from paths"""
-    #     if len(source_data_path) == 1:
-    #         return self.read_resource(str(source_data_path[0]))
-    #     else:
-    #         return self.read_all_resources()
 
 
 class HDXHandler(BaseHandler):

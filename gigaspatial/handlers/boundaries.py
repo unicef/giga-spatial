@@ -4,10 +4,12 @@ import geopandas as gpd
 from pathlib import Path
 from urllib.error import HTTPError
 from shapely.geometry import Polygon, MultiPolygon, shape
+import tempfile
 import pycountry
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.readers import read_dataset
+from gigaspatial.handlers.hdx import HDXConfig
 from gigaspatial.config import config
 
 
@@ -61,7 +63,30 @@ class AdminBoundaries(BaseModel):
             "name_en": "name_en",
             "country_code": "iso_3166_1_alpha_3",
         },
+        "geoBoundaries": {
+            "id": "shapeID",
+            "name": "shapeName",
+            "country_code": "shapeGroup",
+        },
     }
+
+    def to_geodataframe(self) -> gpd.GeoDataFrame:
+        """Convert the AdminBoundaries to a GeoDataFrame."""
+        if not self.boundaries:
+            if hasattr(self, "_empty_schema"):
+                columns = self._empty_schema
+            else:
+                columns = ["id", "name", "country_code", "geometry"]
+                if self.level > 0:
+                    columns.append("parent_id")
+
+            return gpd.GeoDataFrame(columns=columns, geometry="geometry", crs=4326)
+
+        return gpd.GeoDataFrame(
+            [boundary.model_dump() for boundary in self.boundaries],
+            geometry="geometry",
+            crs=4326,
+        )
 
     @classmethod
     def get_schema_config(cls) -> Dict[str, Dict[str, str]]:
@@ -100,6 +125,7 @@ class AdminBoundaries(BaseModel):
             cls.logger.warning(
                 f"Error loading GADM data for {country_code} at admin level {admin_level}: {str(e)}"
             )
+            cls.logger.info("Falling back to empty instance")
             return cls._create_empty_instance(country_code, admin_level, "gadm")
 
     @classmethod
@@ -138,6 +164,7 @@ class AdminBoundaries(BaseModel):
             cls.logger.warning(
                 f"No data found at {path} for admin level {admin_level}: {str(e)}"
             )
+            cls.logger.info("Falling back to empty instance")
             return cls._create_empty_instance(None, admin_level, "internal")
 
     @classmethod
@@ -203,6 +230,69 @@ class AdminBoundaries(BaseModel):
         return cls(boundaries=boundaries, level=admin_level)
 
     @classmethod
+    def from_geoboundaries(cls, country_code, admin_level: int = 0):
+        cls.logger.info(
+            f"Searching for geoBoundaries data for country: {country_code}, admin level: {admin_level}"
+        )
+
+        country_datasets = HDXConfig.search_datasets(
+            query=f'dataseries_name:"geoBoundaries - Subnational Administrative Boundaries" AND groups:"{country_code.lower()}"',
+            rows=1,
+        )
+        if not country_datasets:
+            cls.logger.error(f"No datasets found for country: {country_code}")
+            raise ValueError(
+                "No resources found for the specified country. Please check your search parameters and try again."
+            )
+
+        cls.logger.info(f"Found dataset: {country_datasets[0].get('title', 'Unknown')}")
+
+        resources = [
+            resource
+            for resource in country_datasets[0].get_resources()
+            if (
+                resource.data["name"]
+                == f"geoBoundaries-{country_code.upper()}-ADM{admin_level}.geojson"
+            )
+        ]
+
+        if not resources:
+            cls.logger.error(
+                f"No resources found for {country_code} at admin level {admin_level}"
+            )
+            raise ValueError(
+                "No resources found for the specified criteria. Please check your search parameters and try again."
+            )
+
+        cls.logger.info(f"Found resource: {resources[0].data.get('name', 'Unknown')}")
+
+        try:
+            cls.logger.info("Downloading and processing boundary data...")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                url, local_path = resources[0].download(folder=tmpdir)
+                cls.logger.debug(f"Downloaded file to temporary path: {local_path}")
+                with open(local_path, "rb") as f:
+                    gdf = gpd.read_file(f)
+
+            gdf = cls._map_fields(gdf, "geoBoundaries", admin_level)
+            boundaries = [
+                AdminBoundary(**row_dict) for row_dict in gdf.to_dict("records")
+            ]
+            cls.logger.info(
+                f"Successfully created {len(boundaries)} AdminBoundary objects"
+            )
+            return cls(boundaries=boundaries, level=admin_level)
+
+        except (ValueError, HTTPError, FileNotFoundError) as e:
+            cls.logger.warning(
+                f"Error loading geoBoundaries data for {country_code} at admin level {admin_level}: {str(e)}"
+            )
+            cls.logger.info("Falling back to empty instance")
+            return cls._create_empty_instance(
+                country_code, admin_level, "geoBoundaries"
+            )
+
+    @classmethod
     def create(
         cls,
         country_code: Optional[str] = None,
@@ -211,45 +301,126 @@ class AdminBoundaries(BaseModel):
         path: Optional[Union[str, "Path"]] = None,
         **kwargs,
     ) -> "AdminBoundaries":
-        """Factory method to create AdminBoundaries instance from either GADM or data store."""
+        """Factory method to create AdminBoundaries instance from either GADM or data store.
+
+        Args:
+            country_code: ISO country code (2 or 3 letter) or country name
+            admin_level: Administrative level (0=country, 1=state/province, etc.)
+            data_store: Optional data store instance for loading from existing data
+            path: Optional path to data file (used with data_store)
+            **kwargs: Additional arguments passed to the underlying creation methods
+
+        Returns:
+            AdminBoundaries: Configured instance
+
+        Raises:
+            ValueError: If neither country_code nor (data_store, path) are provided,
+                    or if country_code lookup fails
+
+        Example:
+            # From country code
+            boundaries = AdminBoundaries.create(country_code="USA", admin_level=1)
+
+            # From data store
+            boundaries = AdminBoundaries.create(data_store=store, path="data.shp")
+        """
         cls.logger.info(
-            f"Creating AdminBoundaries instance. Country: {country_code}, admin level: {admin_level}, data_store provided: {data_store is not None}, path provided: {path is not None}"
+            f"Creating AdminBoundaries instance. Country: {country_code}, "
+            f"admin level: {admin_level}, data_store provided: {data_store is not None}, "
+            f"path provided: {path is not None}"
         )
-        iso3_code = pycountry.countries.lookup(country_code).alpha_3
+
+        # Validate input parameters
+        if not country_code and not data_store:
+            raise ValueError("Either country_code or data_store must be provided.")
+
+        if data_store and not path and not country_code:
+            raise ValueError(
+                "If data_store is provided, either path or country_code must also be specified."
+            )
+
+        # Handle data store path first
         if data_store is not None:
-            if path is None:
-                if country_code is None:
-                    ValueError(
-                        "If data_store is provided, path or country_code must also be specified."
-                    )
+            iso3_code = None
+            if country_code:
+                try:
+                    iso3_code = pycountry.countries.lookup(country_code).alpha_3
+                except LookupError as e:
+                    raise ValueError(f"Invalid country code '{country_code}': {e}")
+
+            # Generate path if not provided
+            if path is None and iso3_code:
                 path = config.get_admin_path(
                     country_code=iso3_code,
                     admin_level=admin_level,
                 )
+
             return cls.from_data_store(data_store, path, admin_level, **kwargs)
-        elif country_code is not None:
+
+        # Handle country code path
+        if country_code is not None:
+            try:
+                iso3_code = pycountry.countries.lookup(country_code).alpha_3
+            except LookupError as e:
+                raise ValueError(f"Invalid country code '{country_code}': {e}")
+
+            # Try GeoRepo first
+            if cls._try_georepo(iso3_code, admin_level):
+                return cls.from_georepo(iso3_code, admin_level=admin_level)
+
+            # Fallback to GADM
+            try:
+                cls.logger.info("Attempting to load from GADM.")
+                return cls.from_gadm(iso3_code, admin_level, **kwargs)
+            except Exception as e:
+                cls.logger.warning(
+                    f"GADM loading failed: {e}. Falling back to geoBoundaries."
+                )
+
+            # Final fallback to geoBoundaries
+            try:
+                return cls.from_geoboundaries(iso3_code, admin_level)
+            except Exception as e:
+                cls.logger.error(f"All data sources failed. geoBoundaries error: {e}")
+                raise RuntimeError(
+                    f"Failed to load administrative boundaries for {country_code} "
+                    f"from all available sources (GeoRepo, GADM, geoBoundaries)."
+                ) from e
+
+        # This should never be reached due to validation above
+        raise ValueError("Unexpected error: no valid data source could be determined.")
+
+    @classmethod
+    def _try_georepo(cls, iso3_code: str, admin_level: int) -> bool:
+        """Helper method to test GeoRepo availability.
+
+        Args:
+            iso3_code: ISO3 country code
+            admin_level: Administrative level
+
+        Returns:
+            bool: True if GeoRepo is available and working, False otherwise
+        """
+        try:
             from gigaspatial.handlers.unicef_georepo import GeoRepoClient
 
-            try:
-                client = GeoRepoClient()
-                if client.check_connection():
-                    cls.logger.info("GeoRepo connection successful.")
-                    return cls.from_georepo(
-                        iso3_code,
-                        admin_level=admin_level,
-                    )
-            except ValueError as e:
-                cls.logger.warning(
-                    f"GeoRepo initialization failed: {str(e)}. Falling back to GADM."
-                )
-            except Exception as e:
-                cls.logger.warning(f"GeoRepo error: {str(e)}. Falling back to GADM.")
+            client = GeoRepoClient()
+            if client.check_connection():
+                cls.logger.info("GeoRepo connection successful.")
+                return True
+            else:
+                cls.logger.info("GeoRepo connection failed.")
+                return False
 
-            return cls.from_gadm(iso3_code, admin_level, **kwargs)
-        else:
-            raise ValueError(
-                "Either country_code or (data_store, path) must be provided."
-            )
+        except ImportError:
+            cls.logger.info("GeoRepo client not available (import failed).")
+            return False
+        except ValueError as e:
+            cls.logger.warning(f"GeoRepo initialization failed: {e}")
+            return False
+        except Exception as e:
+            cls.logger.warning(f"GeoRepo error: {e}")
+            return False
 
     @classmethod
     def _create_empty_instance(
@@ -288,21 +459,3 @@ class AdminBoundaries(BaseModel):
                 field_mapping[v] = k
 
         return gdf.rename(columns=field_mapping)
-
-    def to_geodataframe(self) -> gpd.GeoDataFrame:
-        """Convert the AdminBoundaries to a GeoDataFrame."""
-        if not self.boundaries:
-            if hasattr(self, "_empty_schema"):
-                columns = self._empty_schema
-            else:
-                columns = ["id", "name", "country_code", "geometry"]
-                if self.level > 0:
-                    columns.append("parent_id")
-
-            return gpd.GeoDataFrame(columns=columns, geometry="geometry", crs=4326)
-
-        return gpd.GeoDataFrame(
-            [boundary.model_dump() for boundary in self.boundaries],
-            geometry="geometry",
-            crs=4326,
-        )

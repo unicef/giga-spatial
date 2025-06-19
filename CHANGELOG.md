@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.4] - 2025-06-19
+
+### Added
+
+- **GigaSchoolProfileFetcher**  
+  - New class to fetch and process school profile data from the Giga School Profile API  
+  - Supports paginated fetching, filtering by country and school ID  
+  - Includes methods to generate connectivity summary statistics by region, connection type, and source
+
+- **GigaSchoolMeasurementsFetcher**  
+  - New class to fetch and process daily real-time connectivity measurements from the Giga API  
+  - Supports filtering by date range and school  
+  - Includes performance summary generation (download/upload speeds, latency, quality flags)
+
+- **AdminBoundaries.from_geoboundaries**  
+  - New class method to download and process geoBoundaries data by country and admin level  
+  - Automatically handles HDX dataset discovery, downloading, and fallback logic
+
+- **HDXConfig.search_datasets**  
+  - Static method to search HDX datasets without full handler initialization  
+  - Supports query string, sort order, result count, HDX site selection, and custom user agent
+
+### Fixed
+
+- Typo in `MaxarImageDownloader` causing runtime error
+
+### Documentation
+
+- **Improved Configuration Guide** (`docs/user-guide/configuration.md`)  
+  - Added comprehensive table of environment variables with defaults and descriptions  
+  - Synced `.env_sample` and `config.py` with docs  
+  - Example `.env` file and guidance on path overrides using `config.set_path`  
+  - New section on `config.ensure_directories_exist` and troubleshooting tips  
+  - Clearer handling of credentials and security notes  
+  - Improved formatting and structure for clarity
+
 ## [v0.6.3] - 2025-06-16
 
 ### Added

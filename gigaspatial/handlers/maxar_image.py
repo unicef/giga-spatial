@@ -14,7 +14,6 @@ from gigaspatial.processing.geo import (
     convert_to_geodataframe,
     buffer_geodataframe,
 )
-from gigaspatial.processing.sat_images import calculate_pixels_at_location
 from gigaspatial.config import config as global_config
 
 
@@ -142,7 +141,7 @@ class MaxarImageDownloader:
                 self.logger.warning(
                     f"Attempt {attempt + 1} of downloading {output_path.name} failed: {str(e)}"
                 )
-                if attempt < self.max_retries - 1:
+                if attempt < self.config.max_retries - 1:
                     sleep(self.config.retry_delay)
                 else:
                     self.logger.warning(
