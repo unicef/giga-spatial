@@ -234,17 +234,18 @@ class ZonalViewGenerator(ABC, Generic[T]):
         if mapping_function is not None:
             return mapping_function(self, polygons, **mapping_kwargs)
 
-        if area_column not in polygons_gdf:
-            if not isinstance(polygons, gpd.GeoDataFrame):
-                try:
-                    polygons_gdf = convert_to_geodataframe(polygons)
-                except:
-                    raise TypeError(
-                        "polygons must be a GeoDataFrame or convertible to one"
-                    )
-            else:
-                polygons_gdf = polygons.copy()
+        
+        if not isinstance(polygons, gpd.GeoDataFrame):
+            try:
+                polygons_gdf = convert_to_geodataframe(polygons)
+            except:
+                raise TypeError(
+                    "polygons must be a GeoDataFrame or convertible to one"
+                )
+        else:
+            polygons_gdf = polygons.copy()
 
+        if area_column not in polygons_gdf:    
             polygons_gdf[area_column] = polygons_gdf.to_crs(
                 polygons_gdf.estimate_utm_crs()
             ).geometry.area
