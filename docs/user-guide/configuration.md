@@ -123,7 +123,7 @@ print(config)
 
 ## Next Steps
 
-Once configuration is set up, proceed to the [Data Handling Guide](data-handling/downloading.md) to start using `gigaspatial`.
+Once configuration is set up, proceed to the [Data Handling Guide](data-handling/downloading.md) *(Coming Soon)* to start using `gigaspatial`.
 
 ---
 

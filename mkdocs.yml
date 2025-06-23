@@ -52,7 +52,6 @@ nav:
   - Getting Started:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md
-    - Configuration: getting-started/configuration.md
   - User Guide:
     - Overview: user-guide/index.md
     #- Basic Usage: user-guide/basic-usage.md

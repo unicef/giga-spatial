@@ -77,6 +77,7 @@ class ZonalViewGenerator(ABC, Generic[T]):
         self.config = config or ZonalViewGeneratorConfig()
         self.data_store = data_store or LocalDataStore()
         self.logger = logger or global_config.get_logger(self.__class__.__name__)
+        self._view: Optional[pd.DataFrame] = None
 
     @abstractmethod
     def get_zonal_geometries(self) -> List[Polygon]:
@@ -134,6 +135,74 @@ class ZonalViewGenerator(ABC, Generic[T]):
             self._zone_gdf = self.to_geodataframe()
         return self._zone_gdf
 
+    @property
+    def view(self) -> pd.DataFrame:
+        """The DataFrame representing the current zonal view.
+
+        Returns:
+            pd.DataFrame: The DataFrame containing zone IDs, and
+                              any added variables. If no variables have been added,
+                              it returns the base `zone_gdf` without geometries.
+        """
+        if self._view is None:
+            self._view = self.zone_gdf.drop(columns="geometry")
+        return self._view
+
+    def add_variable_to_view(self, data_dict: Dict, column_name: str) -> None:
+        """
+        Adds a new variable (column) to the zonal view GeoDataFrame.
+
+        This method takes a dictionary (typically the result of map_points or map_polygons)
+        and adds its values as a new column to the internal `_view` (or `zone_gdf` if not yet initialized).
+        The dictionary keys are expected to be the `zone_id` values.
+
+        Args:
+            data_dict (Dict): A dictionary where keys are `zone_id`s and values are
+                              the data to be added.
+            column_name (str): The name of the new column to be added to the GeoDataFrame.
+        Raises:
+            ValueError: If the `data_dict` keys do not match the `zone_id`s in the zonal view.
+                        If the `column_name` already exists in the zonal view.
+        """
+        if self._view is None:
+            self._view = self.zone_gdf.drop(columns="geometry")
+
+        if column_name in self._view.columns:
+            raise ValueError(
+                f"Column '{column_name}' already exists in the zonal view."
+            )
+
+        # Create a pandas Series from the dictionary, aligning by index (zone_id)
+        new_series = pd.Series(data_dict, name=column_name)
+
+        # Before merging, ensure the zone_ids in data_dict match those in _view
+        missing_zones_in_data = set(self._view["zone_id"]) - set(new_series.index)
+        extra_zones_in_data = set(new_series.index) - set(self._view["zone_id"])
+
+        if missing_zones_in_data:
+            self.logger.warning(
+                f"Warning: {len(missing_zones_in_data)} zone(s) from the zonal view "
+                f"are missing in the provided data_dict for column '{column_name}'. "
+                f"These zones will have NaN values for '{column_name}'. Missing: {list(missing_zones_in_data)[:5]}..."
+            )
+        if extra_zones_in_data:
+            self.logger.warning(
+                f"Warning: {len(extra_zones_in_data)} zone(s) in the provided data_dict "
+                f"are not present in the zonal view for column '{column_name}'. "
+                f"These will be ignored. Extra: {list(extra_zones_in_data)[:5]}..."
+            )
+
+        # Merge the new series with the _view based on 'zone_id'
+        # Using .set_index() for efficient alignment
+        original_index_name = self._view.index.name
+        self._view = self._view.set_index("zone_id").join(new_series).reset_index()
+        if original_index_name:  # Restore original index name if it existed
+            self._view.index.name = original_index_name
+        else:  # If it was a default integer index, ensure it's not named 'index'
+            self._view.index.name = None
+
+        self.logger.info(f"Added variable '{column_name}' to the zonal view.")
+
     def map_points(
         self,
         points: Union[pd.DataFrame, gpd.GeoDataFrame],
@@ -187,10 +256,23 @@ class ZonalViewGenerator(ABC, Generic[T]):
                 output_suffix=output_suffix,
             )
 
-            if not value_columns:
-                return result["point_count"].to_dict()
-
-            return result[value_columns].to_dict()
+            if isinstance(value_columns, str):
+                return result.set_index("zone_id")[value_columns].to_dict()
+            elif isinstance(value_columns, list):
+                # If multiple value columns, return a dictionary of dictionaries
+                # Or, if preferred, a dictionary where values are lists/tuples of results
+                # For now, let's return a dict of series, which is common.
+                # The previous version implied a single dictionary result from map_points/polygons
+                # but with multiple columns, it's usually {zone_id: {col1: val1, col2: val2}}
+                # or {col_name: {zone_id: val}}
+                # In this version, it'll return a dictionary for each column.
+                return {
+                    col: result.set_index("zone_id")[col].to_dict()
+                    for col in result.columns
+                    if col != "zone_id" and col != "geometry"
+                }
+            else:  # If value_columns is None, it should return point_count
+                return result.set_index("zone_id")["point_count"].to_dict()
 
     def map_polygons(
         self,
@@ -291,7 +373,7 @@ class ZonalViewGenerator(ABC, Generic[T]):
 
         Returns:
             Union[np.ndarray, Dict]: By default, returns a NumPy array of sampled values
-                with shape (n_zones, n_rasters), taking the first non-nodata value encountered.
+                with shape (n_zones, 1), taking the first non-nodata value encountered.
                 Custom mapping functions may return different data structures.
 
         Note:
@@ -318,7 +400,9 @@ class ZonalViewGenerator(ABC, Generic[T]):
             tif_processors=tif_processors, polygon_list=zone_geoms, stat=stat
         )
 
-        return sampled_values
+        zone_ids = self.get_zone_identifiers()
+
+        return {zone_id: value for zone_id, value in zip(zone_ids, sampled_values)}
 
     @lru_cache(maxsize=32)
     def _get_transformed_geometries(self, target_crs):
@@ -337,34 +421,50 @@ class ZonalViewGenerator(ABC, Generic[T]):
 
     def save_view(
         self,
-        view_data: gpd.GeoDataFrame,
         name: str,
         output_format: Optional[str] = None,
     ) -> Path:
         """Save the generated zonal view to disk.
 
         Args:
-            view_data (gpd.GeoDataFrame): The zonal view data to save.
             name (str): Base name for the output file (without extension).
             output_format (str, optional): File format to save in (e.g., "parquet",
-                "geojson", "shp"). If None, uses the format specified in generator_config.
+                "geojson", "shp"). If None, uses the format specified in config.
 
         Returns:
             Path: The full path where the view was saved.
 
         Note:
-            The output directory is determined by the generator_config.base_path setting.
+            The output directory is determined by the config.base_path setting.
             The file extension is automatically added based on the output format.
+            This method now saves the internal `self.view`.
         """
+        if self._view is None:
+            self.logger.warning(
+                "No variables have been added to the zonal view. Saving the base zone_gdf."
+            )
+            view_to_save = self.zone_gdf
+        else:
+            view_to_save = self._view
+
         format_to_use = output_format or self.config.output_format
         output_path = self.config.base_path / f"{name}.{format_to_use}"
 
         self.logger.info(f"Saving zonal view to {output_path}")
+
+        if format_to_use in ["geojson", "shp", "gpkg"]:
+            self.logger.warning(
+                f"Saving to {format_to_use} requires converting back to GeoDataFrame. Geometry column will be re-added."
+            )
+            # Re-add geometry for saving to geospatial formats
+            view_to_save = self.view.merge(
+                self.zone_gdf[["zone_id", "geometry"]], on="zone_id", how="left"
+            )
+
         write_dataset(
-            df=view_data,
+            df=view_to_save,
             path=str(output_path),
             data_store=self.data_store,
-            format=format_to_use,
         )
 
         return output_path

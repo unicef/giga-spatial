@@ -16,43 +16,36 @@ import gigaspatial as gs
 
 ## Setting Up Configuration
 
-The `gigaspatial` package uses a configuration file (`config.py`) to manage paths, API keys, and other settings. You can customize the configuration as needed.
+The `gigaspatial` package uses a unified configuration system to manage paths, API keys, and other settings.
 
-### Using Environment Variables
+- **Environment Variables:** Most configuration is handled via environment variables, which can be set in a `.env` file at the project root. For a full list of supported variables and their descriptions, see the [Configuration Guide](../user-guide/configuration.md).
+- **Defaults:** If not set, sensible defaults are used for all paths and keys.
+- **Manual Overrides:** You can override data directory paths in your code using `config.set_path`.
 
-The package can read configuration settings from an environment file (e.g., `.env`). Here's an example of how to set up the `.env` file based on the `env_sample`:
+### Example `.env` File
 
 ```bash
-# Paths for different data types
 BRONZE_DIR=/path/to/your/bronze_tier_data
 SILVER_DIR=/path/to/your/silver_tier_data
 GOLD_DIR=/path/to/your/gold_tier_data
 VIEWS_DIR=/path/to/your/views_data
-ADMIN_BOUNDARIES_DIR=/path/to/your/admin_boundaries_data
-
-# API keys and tokens
+CACHE_DIR=/path/to/your/cache
+ADMIN_BOUNDARIES_DIR=/path/to/your/admin_boundaries
 MAPBOX_ACCESS_TOKEN=your_mapbox_token_here
-MAXAR_USERNAME=your_maxar_username_here
-MAXAR_PASSWORD=your_maxar_password_here
-MAXAR_CONNECTION_STRING=your_maxar_key_here
+# ... other keys ...
 ```
 
-The `config.py` file will automatically read these environment variables and set the paths and keys accordingly.
-
-### Setting Paths Manually
-
-You can also set paths manually in your code:
+### Setting Paths Programmatically
 
 ```python
 from gigaspatial.config import config
 
-# Example: Setting custom data storage paths
 config.set_path("bronze", "/path/to/your/bronze_tier_data")
 config.set_path("gold", "/path/to/your/gold_tier_data")
 config.set_path("views", "/path/to/your/views_data")
 ```
 
-API keys and tokens should be set through environment variables.
+> For more details and troubleshooting, see the [full configuration guide](../user-guide/configuration.md).
 
 ## Downloading and Processing Geospatial Data
 

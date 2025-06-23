@@ -14,7 +14,6 @@ import requests
 from tqdm import tqdm
 import zipfile
 import tempfile
-import shutil
 from pydantic import (
     HttpUrl,
     Field,
@@ -25,8 +24,6 @@ from pydantic import (
 import logging
 
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.boundaries import AdminBoundaries
 from gigaspatial.processing.tif_processor import TifProcessor
 from gigaspatial.handlers.base import (
     BaseHandlerConfig,
@@ -241,8 +238,8 @@ class GHSLDataConfig(BaseHandlerConfig):
             ValueError: If the input `source` is not one of the supported types.
         """
         if isinstance(source, gpd.GeoDataFrame):
-            # if source.crs != "EPSG:4326":
-            #    source = source.to_crs("EPSG:4326")
+            if source.crs != crs:
+                source = source.to_crs(crs)
             search_geom = source.geometry.unary_union
         elif isinstance(
             source,
@@ -273,7 +270,9 @@ class GHSLDataConfig(BaseHandlerConfig):
             tile_geom.intersects(search_geom) for tile_geom in self.tiles_gdf.geometry
         )
 
-        return self.tiles_gdf.loc[mask, "tile_id"].to_list()
+        intersecting_tiles = self.tiles_gdf.loc[mask, "tile_id"].to_list()
+
+        return intersecting_tiles
 
     def _get_product_info(self) -> dict:
         """Generate and return common product information used in multiple methods."""
@@ -358,12 +357,33 @@ class GHSLDataDownloader(BaseHandlerDownloader):
         extracted_files: List[Path] = []
 
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
-                downloaded_path = self._download_file(url, Path(temp_file.name))
-                if not downloaded_path:
-                    return None
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".zip", dir=global_config.CACHE_DIR
+            ) as temp_file:
+                temp_downloaded_path = Path(temp_file.name)
+                self.logger.debug(
+                    f"Downloading {url} to temporary file: {temp_downloaded_path}"
+                )
 
-            with zipfile.ZipFile(str(downloaded_path), "r") as zip_ref:
+                response = requests.get(url, stream=True)
+                response.raise_for_status()
+
+                total_size = int(response.headers.get("content-length", 0))
+
+                with tqdm(
+                    total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc=f"Downloading {tile_id}",
+                ) as pbar:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            temp_file.write(chunk)
+                            pbar.update(len(chunk))
+
+            self.logger.info(f"Successfully downloaded temporary file!")
+
+            with zipfile.ZipFile(str(temp_downloaded_path), "r") as zip_ref:
                 if file_pattern:
                     import re
 
@@ -385,9 +405,24 @@ class GHSLDataDownloader(BaseHandlerDownloader):
             Path(temp_file.name).unlink()
             return extracted_files
 
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Failed to download {url} to temporary file: {e}")
+            return None
+        except zipfile.BadZipFile:
+            self.logger.error(f"Downloaded file for {tile_id} is not a valid zip file.")
+            return None
         except Exception as e:
             self.logger.error(f"Error downloading/extracting tile {tile_id}: {e}")
             return None
+        finally:
+            if temp_downloaded_path and temp_downloaded_path.exists():
+                try:
+                    temp_downloaded_path.unlink()
+                    self.logger.debug(f"Deleted temporary file: {temp_downloaded_path}")
+                except OSError as e:
+                    self.logger.warning(
+                        f"Could not delete temporary file {temp_downloaded_path}: {e}"
+                    )
 
     def download_data_units(
         self,

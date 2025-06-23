@@ -205,56 +205,67 @@ class TifProcessor:
                     raise ValueError("Single band mode requires a 1-band TIF file")
                 return np.array([vals[0] for vals in src.sample(coordinate_list)])
 
+    def _sample_polygon(self, polygon: Union[Polygon, MultiPolygon]) -> np.ndarray:
+        """
+        Sample raster values within a single polygon or multipolygon.
+
+        Args:
+            polygon: A shapely Polygon or MultiPolygon.
+
+        Returns:
+            np.ndarray: Flattened array of valid raster values within the polygon.
+        """
+        with self.open_dataset() as src:
+            out_image, _ = mask(src, [polygon], crop=True)
+            nodata = self.nodata
+            # out_image shape: (bands, rows, cols)
+            if nodata is not None:
+                values = out_image[out_image != nodata].flatten()
+            else:
+                values = out_image.flatten()
+            return values
+
     def sample_by_polygons(
-        self, polygon_list: List[Union[Polygon, MultiPolygon]], stat: str = "mean"
+        self,
+        polygon_list: List[Union[Polygon, MultiPolygon]],
+        stat: str = "mean",
+        warn_on_error: bool = True,
     ) -> np.ndarray:
         """
-        Sample raster values within each polygon of a GeoDataFrame.
+        Sample raster values by polygons and compute a statistic for each polygon.
 
-        Parameters:
-            polygon_list: List of polygon geometries (can include MultiPolygons).
-            stat (str): Aggregation statistic to compute within each polygon.
-                        Options: "mean", "median", "sum", "min", "max".
+        Args:
+            polygon_list: List of shapely Polygon or MultiPolygon objects.
+            stat: Statistic to compute ('mean', 'median', 'sum', 'min', 'max').
+            warn_on_error: If True, log a warning when a polygon cannot be processed. Default is True.
+
         Returns:
-            A NumPy array of sampled values
+            np.ndarray: Array of computed statistics for each polygon (np.nan if error).
         """
-        self.logger.info("Sampling raster values within polygons...")
-
-        with self.open_dataset() as src:
-            results = []
-
-            for geom in polygon_list:
-                if geom.is_empty:
+        results = []
+        for polygon in polygon_list:
+            try:
+                values = self._sample_polygon(polygon)
+                if len(values) == 0:
                     results.append(np.nan)
-                    continue
-
-                try:
-                    # Mask the raster with the polygon
-                    out_image, _ = mask(src, [geom], crop=True)
-
-                    # Flatten the raster values and remove NoData values
-                    values = out_image[out_image != src.nodata].flatten()
-
-                    # Compute the desired statistic
-                    if len(values) == 0:
-                        results.append(np.nan)
+                else:
+                    if stat == "mean":
+                        results.append(np.mean(values))
+                    elif stat == "median":
+                        results.append(np.median(values))
+                    elif stat == "sum":
+                        results.append(np.sum(values))
+                    elif stat == "min":
+                        results.append(np.min(values))
+                    elif stat == "max":
+                        results.append(np.max(values))
                     else:
-                        if stat == "mean":
-                            results.append(np.mean(values))
-                        elif stat == "median":
-                            results.append(np.median(values))
-                        elif stat == "sum":
-                            results.append(np.sum(values))
-                        elif stat == "min":
-                            results.append(np.min(values))
-                        elif stat == "max":
-                            results.append(np.max(values))
-                        else:
-                            raise ValueError(f"Unknown statistic: {stat}")
+                        raise ValueError(f"Unknown statistic: {stat}")
 
-                except Exception as e:
-                    self.logger.error(f"Error processing polygon: {e}")
-                    results.append(np.nan)
+            except Exception as e:
+                if warn_on_error:
+                    self.logger.warning(f"Error processing polygon: {e}")
+                results.append(np.nan)
 
         return np.array(results)
 
@@ -539,6 +550,7 @@ def sample_multiple_tifs_by_polygons(
     tif_processors: List[TifProcessor],
     polygon_list: List[Union[Polygon, MultiPolygon]],
     stat: str = "mean",
+    warn_on_error=False,
 ) -> np.ndarray:
     """
     Sample raster values from multiple TIFF files for polygons in a list and join the results.
@@ -547,6 +559,7 @@ def sample_multiple_tifs_by_polygons(
     - tif_processors: List of TifProcessor instances.
     - polygon_list: List of polygon geometries (can include MultiPolygons).
     - stat: Aggregation statistic to compute within each polygon (mean, median, sum, min, max).
+    - warn_on_error: If True, log a warning when polygon(s) cannot be processed. Default is False.
 
     Returns:
     - A NumPy array of sampled values, taking the first non-nodata value encountered.
@@ -554,7 +567,9 @@ def sample_multiple_tifs_by_polygons(
     sampled_values = np.full(len(polygon_list), np.nan, dtype=np.float32)
 
     for tp in tif_processors:
-        values = tp.sample_by_polygons(polygon_list=polygon_list, stat=stat)
+        values = tp.sample_by_polygons(
+            polygon_list=polygon_list, stat=stat, warn_on_error=warn_on_error
+        )
 
         mask = np.isnan(sampled_values)  # replace all NaNs
 
