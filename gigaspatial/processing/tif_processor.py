@@ -712,7 +712,6 @@ def sample_multiple_tifs_by_polygons(
     tif_processors: List[TifProcessor],
     polygon_list: List[Union[Polygon, MultiPolygon]],
     stat: str = "mean",
-    warn_on_error=False,
 ) -> np.ndarray:
     """
     Sample raster values from multiple TIFF files for polygons in a list and join the results.
@@ -721,7 +720,6 @@ def sample_multiple_tifs_by_polygons(
     - tif_processors: List of TifProcessor instances.
     - polygon_list: List of polygon geometries (can include MultiPolygons).
     - stat: Aggregation statistic to compute within each polygon (mean, median, sum, min, max).
-    - warn_on_error: If True, log a warning when polygon(s) cannot be processed. Default is False.
 
     Returns:
     - A NumPy array of sampled values, taking the first non-nodata value encountered.
@@ -730,7 +728,7 @@ def sample_multiple_tifs_by_polygons(
 
     for tp in tif_processors:
         values = tp.sample_by_polygons(
-            polygon_list=polygon_list, stat=stat, warn_on_error=warn_on_error
+            polygon_list=polygon_list, stat=stat
         )
 
         mask = np.isnan(sampled_values)  # replace all NaNs

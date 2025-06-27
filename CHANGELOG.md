@@ -59,7 +59,7 @@ All notable changes to this project will be documented in this file.
   - Temporary ZIP files are now downloaded directly using `requests.get()` into the cache directory, improving reliability and avoiding unnecessary writes.
 
 - **`TifProcessor` Sampling**  
-  - Optional warnings for polygon sampling errors controlled via `warn_on_error`.
+  - Warnings for polygon sampling errors removed.
 
 ### Deprecated
 
