@@ -89,7 +89,7 @@ class PoiViewGenerator:
                 An instance of a data store for managing data access (e.g., LocalDataStore).
                 If None, a default `LocalDataStore` will be used.
         """
-        if not points or (hasattr(points, "__len__") and len(points) == 0):
+        if hasattr(points, "__len__") and len(points) == 0:
             raise ValueError("Points input cannot be empty")
 
         self.config = config or PoiViewGeneratorConfig()
@@ -796,15 +796,15 @@ class PoiViewGenerator:
     def validate_data_coverage(self, data_bounds: gpd.GeoDataFrame) -> dict:
         """
         Validate how many POIs fall within the data coverage area.
-        
+
         Returns:
             dict: Coverage statistics
         """
         poi_within = self.points_gdf.within(data_bounds.union_all())
         coverage_stats = {
-            'total_pois': len(self.points_gdf),
-            'covered_pois': poi_within.sum(),
-            'coverage_percentage': (poi_within.sum() / len(self.points_gdf)) * 100,
-            'uncovered_pois': (~poi_within).sum()
+            "total_pois": len(self.points_gdf),
+            "covered_pois": poi_within.sum(),
+            "coverage_percentage": (poi_within.sum() / len(self.points_gdf)) * 100,
+            "uncovered_pois": (~poi_within).sum(),
         }
         return coverage_stats

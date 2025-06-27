@@ -34,6 +34,12 @@ All notable changes to this project will be documented in this file.
   - Automatic detection of band names from metadata.  
   - Strict validation for modes (`single`, `rgb`, `rgba`, `multi`) and band count consistency.
 
+- **Spatial Distance Graph Algorithm**  
+  - Added `build_distance_graph()` utility function.  
+  - Enables fast spatial matching between two sets of points or geometries using a KD-tree for nearest-neighbor search.  
+  - Configurable distance threshold and neighbor limits.
+  - Returns a `networkx.Graph` representing spatial relationships, with optional DataFrame output of matched pairs. 
+
 ### Changed
 
 - **`MercatorTiles.from_points()`**  
