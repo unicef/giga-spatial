@@ -104,7 +104,7 @@ class ZonalViewGenerator(ABC, Generic[T]):
         """
         pass
 
-    def to_geodataframe(self) -> gpd.GeoDataFrame:
+    def get_zone_geodataframe(self) -> gpd.GeoDataFrame:
         """Convert zones to a GeoDataFrame.
 
         Creates a GeoDataFrame containing zone identifiers and their corresponding
@@ -132,7 +132,7 @@ class ZonalViewGenerator(ABC, Generic[T]):
                 and identifiers.
         """
         if not hasattr(self, "_zone_gdf"):
-            self._zone_gdf = self.to_geodataframe()
+            self._zone_gdf = self.get_zone_geodataframe()
         return self._zone_gdf
 
     @property
@@ -268,86 +268,117 @@ class ZonalViewGenerator(ABC, Generic[T]):
                 # In this version, it'll return a dictionary for each column.
                 return {
                     col: result.set_index("zone_id")[col].to_dict()
-                    for col in result.columns
-                    if col != "zone_id" and col != "geometry"
+                    for col in value_columns
                 }
             else:  # If value_columns is None, it should return point_count
                 return result.set_index("zone_id")["point_count"].to_dict()
 
     def map_polygons(
         self,
-        polygons: Union[pd.DataFrame, gpd.GeoDataFrame],
+        polygons,
         value_columns: Optional[Union[str, List[str]]] = None,
-        aggregation: Union[str, Dict[str, str]] = "sum",
-        area_weighted: bool = False,
-        area_column: str = "area_in_meters",
-        mapping_function: Optional[Callable] = None,
-        **mapping_kwargs,
+        aggregation: Union[str, Dict[str, str]] = "count",
+        predicate: str = "intersects",
+        **kwargs,
     ) -> Dict:
-        """Map polygon data to zones with optional area weighting.
+        """
+        Maps polygon data to the instance's zones and aggregates values.
 
-        Aggregates polygon data to zones based on spatial intersections. Values can be
-        weighted by the fractional area of intersection between polygons and zones.
+        This method leverages `aggregate_polygons_to_zones` to perform a spatial
+        aggregation of polygon data onto the zones stored within this object instance.
+        It can count polygons, or aggregate their values, based on different spatial
+        relationships defined by the `predicate`.
 
         Args:
-            polygons (Union[pd.DataFrame, gpd.GeoDataFrame]): The polygon data to map.
-                Must contain geometry information if DataFrame.
-            value_columns (Union[str, List[str]], optional): Column name(s) to aggregate.
-                If None, only intersection areas will be calculated.
-            aggregation (Union[str, Dict[str, str]]): Aggregation method(s) to use.
-                Can be a single string ("sum", "mean", "max", "min") or a dictionary
-                mapping column names to specific aggregation methods. Defaults to "sum".
-            area_weighted (bool): Whether to weight values by fractional area of
-                intersection. Defaults to False.
-            area_column (str): Name of column to store calculated areas. Only used
-                if area calculation is needed. Defaults to "area_in_meters".
-            mapping_function (Callable, optional): Custom function for mapping polygons
-                to zones. If provided, signature should be mapping_function(self, polygons, **mapping_kwargs).
-                When used, all other parameters except mapping_kwargs are ignored.
-            **mapping_kwargs: Additional keyword arguments passed to the mapping function.
+            polygons (Union[pd.DataFrame, gpd.GeoDataFrame]):
+                The polygon data to map. Must contain geometry information if a
+                DataFrame.
+            value_columns (Union[str, List[str]], optional):
+                The column name(s) from the `polygons` data to aggregate. If `None`,
+                the method will automatically count the number of polygons that
+                match the given `predicate` for each zone.
+            aggregation (Union[str, Dict[str, str]], optional):
+                The aggregation method(s) to use. Can be a single string (e.g., "sum",
+                "mean", "max") or a dictionary mapping column names to specific
+                aggregation methods. This is ignored and set to "count" if
+                `value_columns` is `None`. Defaults to "count".
+            predicate (Literal["intersects", "within", "fractional"], optional):
+                The spatial relationship to use for aggregation:
+                - "intersects": Counts or aggregates values for any polygon that
+                  intersects a zone.
+                - "within": Counts or aggregates values for polygons that are
+                  entirely contained within a zone.
+                - "fractional": Performs area-weighted aggregation. The value of a
+                  polygon is distributed proportionally to the area of its overlap
+                  with each zone.
+                Defaults to "intersects".
+            **kwargs:
+                Additional keyword arguments to be passed to the underlying
+                `aggregate_polygons_to_zones_new` function.
 
         Returns:
-            Dict: Dictionary with zone IDs as keys and aggregated values as values.
-                Returns aggregated values for the specified value_columns.
+            Dict:
+                A dictionary or a nested dictionary containing the aggregated values,
+                with zone IDs as keys. If `value_columns` is a single string, the
+                return value is a dictionary mapping zone ID to the aggregated value.
+                If `value_columns` is a list, the return value is a nested dictionary
+                mapping each column name to its own dictionary of aggregated values.
 
         Raises:
-            TypeError: If polygons cannot be converted to a GeoDataFrame.
+            ValueError: If `value_columns` is of an unexpected type after processing.
+
+        Example:
+            >>> # Assuming 'self' is an object with a 'zone_gdf' attribute
+            >>> # Count all land parcels that intersect each zone
+            >>> parcel_counts = self.map_polygons(landuse_polygons)
+            >>>
+            >>> # Aggregate total population within zones using area weighting
+            >>> population_by_zone = self.map_polygons(
+            ...     landuse_polygons,
+            ...     value_columns="population",
+            ...     predicate="fractional",
+            ...     aggregation="sum"
+            ... )
+            >>>
+            >>> # Get the sum of residential area and count of buildings within each zone
+            >>> residential_stats = self.map_polygons(
+            ...     building_polygons,
+            ...     value_columns=["residential_area_sqm", "building_id"],
+            ...     aggregation={"residential_area_sqm": "sum", "building_id": "count"},
+            ...     predicate="intersects"
+            ... )
         """
-        if mapping_function is not None:
-            return mapping_function(self, polygons, **mapping_kwargs)
-
-        
-        if not isinstance(polygons, gpd.GeoDataFrame):
-            try:
-                polygons_gdf = convert_to_geodataframe(polygons)
-            except:
-                raise TypeError(
-                    "polygons must be a GeoDataFrame or convertible to one"
-                )
-        else:
-            polygons_gdf = polygons.copy()
-
-        if area_column not in polygons_gdf:    
-            polygons_gdf[area_column] = polygons_gdf.to_crs(
-                polygons_gdf.estimate_utm_crs()
-            ).geometry.area
 
         if value_columns is None:
             self.logger.warning(
-                "Using default polygon mapping implementation. Consider providing value_columns."
+                f"No value_columns specified. Defaulting to counting polygons with {predicate} predicate."
             )
-            value_columns = area_column
+            temp_value_col = "_temp_polygon_count_dummy"
+            polygons[temp_value_col] = 1
+            actual_value_columns = temp_value_col
+            aggregation = "count"  # Force count if no value columns
+        else:
+            actual_value_columns = value_columns
 
         result = aggregate_polygons_to_zones(
-            polygons=polygons_gdf,
+            polygons=polygons,
             zones=self.zone_gdf,
-            value_columns=value_columns,
+            value_columns=actual_value_columns,
             aggregation=aggregation,
-            area_weighted=area_weighted,
+            predicate=predicate,
             zone_id_column="zone_id",
         )
 
-        return result[value_columns].to_dict()
+        # Convert the result GeoDataFrame to the expected dictionary format
+        if isinstance(actual_value_columns, str):
+            return result.set_index("zone_id")[actual_value_columns].to_dict()
+        elif isinstance(actual_value_columns, list):
+            return {
+                col: result.set_index("zone_id")[col].to_dict()
+                for col in actual_value_columns
+            }
+        else:
+            raise ValueError("Unexpected type for actual_value_columns.")
 
     def map_rasters(
         self,
@@ -469,3 +500,28 @@ class ZonalViewGenerator(ABC, Generic[T]):
         )
 
         return output_path
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """
+        Returns the current zonal view as a DataFrame.
+
+        This method combines all accumulated variables in the view
+
+        Returns:
+            pd.DataFrame: The current view.
+        """
+        return self.view
+
+    def to_geodataframe(self) -> gpd.GeoDataFrame:
+        """
+        Returns the current zonal view merged with zone geometries as a GeoDataFrame.
+
+        This method combines all accumulated variables in the view with the corresponding
+        zone geometries, providing a spatially-enabled DataFrame for further analysis or export.
+
+        Returns:
+            gpd.GeoDataFrame: The current view merged with zone geometries.
+        """
+        return self.view.merge(
+            self.zone_gdf[["zone_id", "geometry"]], on="zone_id", how="left"
+        )

@@ -89,6 +89,9 @@ class PoiViewGenerator:
                 An instance of a data store for managing data access (e.g., LocalDataStore).
                 If None, a default `LocalDataStore` will be used.
         """
+        if not points or (hasattr(points, "__len__") and len(points) == 0):
+            raise ValueError("Points input cannot be empty")
+
         self.config = config or PoiViewGeneratorConfig()
         self.data_store = data_store or LocalDataStore()
         self.logger = logger or global_config.get_logger(self.__class__.__name__)
@@ -194,7 +197,7 @@ class PoiViewGenerator:
                         df = df.rename(
                             columns={poi_id_column: "poi_id"},
                         )
-                        if points["poi_id"].duplicated().any():
+                        if df["poi_id"].duplicated().any():
                             raise ValueError(
                                 f"Column '{poi_id_column}' provided as 'poi_id_column' contains duplicate values."
                             )
@@ -226,7 +229,21 @@ class PoiViewGenerator:
                                      to be merged into the main view.
         """
         if "poi_id" not in new_data.columns:
-            raise ValueError("new_data DataFrame must contain 'poi_id' column.")
+            available_cols = list(new_data.columns)
+            raise ValueError(
+                f"new_data DataFrame must contain 'poi_id' column. "
+                f"Available columns: {available_cols}"
+            )
+
+        # Check for poi_id mismatches
+        original_poi_ids = set(self._view["poi_id"])
+        new_poi_ids = set(new_data["poi_id"])
+        missing_pois = original_poi_ids - new_poi_ids
+
+        if missing_pois:
+            self.logger.warning(
+                f"{len(missing_pois)} POIs will have NaN values for new columns"
+            )
 
         # Ensure poi_id is the index for efficient merging
         # Create a copy to avoid SettingWithCopyWarning if new_data is a slice
@@ -385,7 +402,7 @@ class PoiViewGenerator:
         )
         if buildings_df is None or len(buildings_df) == 0:
             self.logger.info("No Google buildings data found for the provided POIs")
-            return self.points_gdf.copy()
+            return self.view
 
         return self.map_nearest_points(
             points_df=buildings_df,
@@ -739,3 +756,55 @@ class PoiViewGenerator:
             )
 
         return output_path
+
+    def to_geodataframe(self) -> gpd.GeoDataFrame:
+        """
+        Returns the current POI view merged with the original point geometries as a GeoDataFrame.
+
+        This method combines all accumulated variables in the view with the corresponding
+        point geometries, providing a spatially-enabled DataFrame for further analysis or export.
+
+        Returns:
+            gpd.GeoDataFrame: The current view merged with point geometries.
+        """
+        return self.view.merge(
+            self.points_gdf[["poi_id", "geometry"]], on="poi_id", how="left"
+        )
+
+    def chain_operations(self, operations: List[dict]) -> "PoiViewGenerator":
+        """
+        Chain multiple mapping operations for fluent interface.
+
+        Args:
+            operations: List of dicts with 'method' and 'kwargs' keys
+
+        Example:
+            generator.chain_operations([
+                {'method': 'map_google_buildings', 'kwargs': {}},
+                {'method': 'map_built_s', 'kwargs': {'map_radius_meters': 200}},
+            ])
+        """
+        for op in operations:
+            method_name = op["method"]
+            kwargs = op.get("kwargs", {})
+            if hasattr(self, method_name):
+                getattr(self, method_name)(**kwargs)
+            else:
+                raise AttributeError(f"Method {method_name} not found")
+        return self
+
+    def validate_data_coverage(self, data_bounds: gpd.GeoDataFrame) -> dict:
+        """
+        Validate how many POIs fall within the data coverage area.
+        
+        Returns:
+            dict: Coverage statistics
+        """
+        poi_within = self.points_gdf.within(data_bounds.union_all())
+        coverage_stats = {
+            'total_pois': len(self.points_gdf),
+            'covered_pois': poi_within.sum(),
+            'coverage_percentage': (poi_within.sum() / len(self.points_gdf)) * 100,
+            'uncovered_pois': (~poi_within).sum()
+        }
+        return coverage_stats

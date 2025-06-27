@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Union, Literal
 from pydantic.dataclasses import dataclass
 from datetime import datetime
+import pycountry
 
 from hdx.data.resource import Resource
 
@@ -36,8 +37,10 @@ class RWIConfig(HDXConfig):
         self, country: str, **kwargs
     ) -> List[Resource]:
         """Get relevant data units for a country, optionally filtering for latest version"""
-        resources = super().get_relevant_data_units_by_country(
-            country=country, key="url"
+        country = pycountry.countries.lookup(country)
+        values = [country.alpha_3]
+        resources = self.get_dataset_resources(
+            filter={"url": values},
         )
 
         if self.latest_only and len(resources) > 1:

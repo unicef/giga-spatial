@@ -339,7 +339,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
 
         Args:
             tile_id: tile ID to process.
-            extract: If True and the downloaded file is a zip, extract its contents. Defaults to False.
+            extract: If True and the downloaded file is a zip, extract its contents. Defaults to True.
             file_pattern: Optional regex pattern to filter extracted files (if extract=True).
             **kwargs: Additional parameters passed to download methods
 
@@ -355,11 +355,10 @@ class GHSLDataDownloader(BaseHandlerDownloader):
             return self._download_file(url, output_path)
 
         extracted_files: List[Path] = []
+        temp_downloaded_path: Optional[Path] = None
 
         try:
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=".zip", dir=global_config.CACHE_DIR
-            ) as temp_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
                 temp_downloaded_path = Path(temp_file.name)
                 self.logger.debug(
                     f"Downloading {url} to temporary file: {temp_downloaded_path}"
@@ -436,7 +435,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
 
         Args:
             tile_ids: A list of tile IDs to download.
-            extract: If True and the downloaded files are zips, extract their contents. Defaults to False.
+            extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
             file_pattern: Optional regex pattern to filter extracted files (if extract=True).
             **kwargs: Additional parameters passed to download methods
 
@@ -491,7 +490,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
                       - A list of (latitude, longitude) tuples or Shapely Point objects.
                       - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
                       - A GeoDataFrame with geometry column in EPSG:4326.
-            extract: If True and the downloaded files are zips, extract their contents. Defaults to False.
+            extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
             file_pattern: Optional regex pattern to filter extracted files (if extract=True).
             **kwargs: Additional keyword arguments. These will be passed down to
                       `AdminBoundaries.create()` (if `source` is a country)
@@ -531,7 +530,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
             country_geom_path: Optional path to a GeoJSON file containing the
                                country boundary. If provided, this boundary is used
                                instead of the default from `AdminBoundaries`.
-            extract: If True and the downloaded files are zips, extract their contents. Defaults to False.
+            extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
             file_pattern: Optional regex pattern to filter extracted files (if extract=True).
             **kwargs: Additional keyword arguments that are passed to
                       `download_data_units`. For example, `extract` to download and extract.

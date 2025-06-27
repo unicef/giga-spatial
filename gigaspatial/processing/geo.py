@@ -858,39 +858,79 @@ def aggregate_polygons_to_zones(
     zones: gpd.GeoDataFrame,
     value_columns: Union[str, List[str]],
     aggregation: Union[str, Dict[str, str]] = "sum",
-    area_weighted: bool = True,
+    predicate: Literal["intersects", "within", "fractional"] = "intersects",
     zone_id_column: str = "zone_id",
     output_suffix: str = "",
     drop_geometry: bool = False,
 ) -> gpd.GeoDataFrame:
     """
-    Aggregate polygon data to zones with area-weighted values.
+    Aggregates polygon data to zones based on a specified spatial relationship.
 
-    This function maps polygon data to zones, weighting values by the
-    fractional area of overlap between polygons and zones.
+    This function performs a spatial join between polygons and zones and then
+    aggregates values from the polygons to their corresponding zones. The aggregation
+    method depends on the `predicate` parameter, which determines the nature of the
+    spatial relationship.
 
     Args:
-        polygons (Union[pd.DataFrame, gpd.GeoDataFrame]): Polygon data to aggregate
-        zones (gpd.GeoDataFrame): Zones to aggregate polygons to
-        value_columns (Union[str, List[str]]): Column(s) containing values to aggregate
-        aggregation (Union[str, Dict[str, str]]): Aggregation method(s) to use:
-            - Single string: Use same method for all columns ("sum", "mean", "max", etc.)
-            - Dict: Map column names to aggregation methods
-        area_weighted (bool): Whether to weight values by fractional area overlap
-            If False, values are not weighted before aggregation
-        zone_id_column (str): Column in zones containing zone identifiers
-        output_suffix (str): Suffix to add to output column names
-        drop_geometry (bool): Whether to drop the geometry column from output
+        polygons (Union[pd.DataFrame, gpd.GeoDataFrame]):
+            Polygon data to aggregate. Must be a GeoDataFrame or convertible to one.
+        zones (gpd.GeoDataFrame):
+            The target zones to which the polygon data will be aggregated.
+        value_columns (Union[str, List[str]]):
+            The column(s) in `polygons` containing the numeric values to aggregate.
+        aggregation (Union[str, Dict[str, str]], optional):
+            The aggregation method(s) to use. Can be a single string (e.g., "sum",
+            "mean", "max") to apply the same method to all columns, or a dictionary
+            mapping column names to aggregation methods (e.g., `{'population': 'sum'}`).
+            Defaults to "sum".
+        predicate (Literal["intersects", "within", "fractional"], optional):
+            The spatial relationship to use for aggregation:
+            - "intersects": Aggregates values for any polygon that intersects a zone.
+            - "within": Aggregates values for polygons entirely contained within a zone.
+            - "fractional": Performs area-weighted aggregation. The value of a polygon
+              is distributed proportionally to the area of its overlap with each zone.
+              This requires calculating a UTM CRS for accurate area measurements.
+            Defaults to "intersects".
+        zone_id_column (str, optional):
+            The name of the column in `zones` that contains the unique zone identifiers.
+            Defaults to "zone_id".
+        output_suffix (str, optional):
+            A suffix to add to the names of the new aggregated columns in the output
+            GeoDataFrame. Defaults to "".
+        drop_geometry (bool, optional):
+            If True, the geometry column will be dropped from the output GeoDataFrame.
+            Defaults to False.
 
     Returns:
-        gpd.GeoDataFrame: Zones with aggregated polygon values
+        gpd.GeoDataFrame:
+            The `zones` GeoDataFrame with new columns containing the aggregated values.
+            Zones with no intersecting or contained polygons will have `0` values.
+
+    Raises:
+        TypeError: If `zones` is not a GeoDataFrame or `polygons` cannot be converted.
+        ValueError: If `zone_id_column` or any `value_columns` are not found, or
+                    if the geometry types in `polygons` are not polygons.
+        RuntimeError: If an error occurs during the area-weighted aggregation process.
 
     Example:
-        >>> landuse_stats = aggregate_polygons_to_zones(
+        >>> import geopandas as gpd
+        >>> # Assuming 'landuse_polygons' and 'grid_zones' are GeoDataFrames
+        >>> # Aggregate total population within each grid zone using area-weighting
+        >>> pop_by_zone = aggregate_polygons_to_zones(
         ...     landuse_polygons,
         ...     grid_zones,
-        ...     value_columns=["area", "population"],
-        ...     aggregation="sum"
+        ...     value_columns="population",
+        ...     predicate="fractional",
+        ...     aggregation="sum",
+        ...     output_suffix="_pop"
+        ... )
+        >>> # Aggregate the count of landuse parcels intersecting each zone
+        >>> count_by_zone = aggregate_polygons_to_zones(
+        ...     landuse_polygons,
+        ...     grid_zones,
+        ...     value_columns="parcel_id",
+        ...     predicate="intersects",
+        ...     aggregation="count"
         ... )
     """
     # Input validation
@@ -899,6 +939,11 @@ def aggregate_polygons_to_zones(
 
     if zone_id_column not in zones.columns:
         raise ValueError(f"Zone ID column '{zone_id_column}' not found in zones")
+
+    if predicate not in ["intersects", "within", "fractional"]:
+        raise ValueError(
+            f"Unsupported predicate: {predicate}. Predicate can be one of `intersects`, `within`, `fractional`"
+        )
 
     # Convert polygons to GeoDataFrame if necessary
     if not isinstance(polygons, gpd.GeoDataFrame):
@@ -956,7 +1001,7 @@ def aggregate_polygons_to_zones(
     # Create a copy of the zones
     result = zones.copy()
 
-    if area_weighted:
+    if predicate == "fractional":
         # Use area-weighted aggregation with polygon overlay
         try:
             # Compute UTM CRS for accurate area calculations
@@ -1020,7 +1065,7 @@ def aggregate_polygons_to_zones(
     else:
         # Non-weighted aggregation - simpler approach
         # Perform spatial join
-        joined = gpd.sjoin(polygons_gdf, zones, how="inner", predicate="intersects")
+        joined = gpd.sjoin(polygons_gdf, zones, how="inner", predicate=predicate)
 
         # Remove geometry column for aggregation
         if "geometry" in joined.columns:

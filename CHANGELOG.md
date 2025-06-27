@@ -2,77 +2,64 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.6.5] - 2025-xx-xx
+## [v0.6.5] - 2025-06-27
 
 ### Added
 
-#### AdminBoundariesViewGenerator
+- **`MercatorTiles.get_quadkeys_from_points()`**  
+  New static method that efficiently maps input points to quadkeys, offering a performant alternative to spatial joins.
 
-- **New Class:**  
-  Added `AdminBoundariesViewGenerator` for generating zonal views based on administrative boundaries for a given country and administrative level.
-- **Detailed `_init_zone_data` Documentation:**  
-  The private `_init_zone_data` helper method features a thorough docstring explaining its process for loading administrative boundaries, including support for local `admin_path` overrides.
+- **`AdminBoundariesViewGenerator`**  
+  New class for generating zonal views using administrative boundaries for a given country and administrative level.  
+  Includes comprehensive `_init_zone_data` documentation and support for local `admin_path` overrides.
+
+- **Zonal View Generator Enhancements**  
+  - `_view`: Internal attribute to accumulate mapped variables.  
+  - `view`: Public property exposing the current state of the zonal view.  
+  - `add_variable_to_view(data_dict, column_name)`: Adds mapped data (e.g., from points, polygons, rasters) to the view with robust alignment and validation.
+
+- **`PoiViewGenerator` Enhancements**  
+  - `_view`: Central DataFrame for storing mapped attributes.  
+  - `_update_view`: Centralized helper to merge new data.  
+  - `save_view()`: Improved support for CSV, Parquet, GeoJSON, and Shapefile with correct geometry handling.  
+  - Improved duplicate ID checks and CRS handling in `map_zonal_stats`.
+
+- **`TifProcessor` Enhancements**  
+  - `sample_by_polygons_batched()`: New parallel processing method.  
+  - `sample_by_polygons()`: Refactored with better nodata masking and multiple statistic support.  
+  - `warn_on_error`: Optional flag to suppress or enable warnings for polygon sampling.
+
+- **GeoTIFF Multi-Band Support**  
+  - `multi` mode for handling multi-band GeoTIFFs.  
+  - Automatic detection of band names from metadata.  
+  - Strict validation for modes (`single`, `rgb`, `rgba`, `multi`) and band count consistency.
 
 ### Changed
 
-#### ZonalViewGenerator (Base Class) Updates
+- **`MercatorTiles.from_points()`**  
+  Now uses `get_quadkeys_from_points()` internally for performance.
 
-- **New `_view` Attribute:**  
-  Introduced a new internal attribute, `_view: Optional[pd.DataFrame]`, to the ZonalViewGenerator base class. This DataFrame now stores the evolving zonal view, accumulating all mapped variables as new columns.
+- **Zonal View Return Formats**  
+  - `map_points()` and `map_rasters()` now return results as dictionaries aligned to `zone_id` for seamless integration with `add_variable_to_view()`.
 
-- **New `view` Property:**  
-  Added a `@property` called `view` that provides a consistent and convenient way to access the current state of the zonal view. It lazily initializes `_view` from `zone_gdf` if no variables have been added yet.
-
-- **New `add_variable_to_view` Method:**  
-  Added a powerful new method, `add_variable_to_view(self, data_dict: Dict, column_name: str)`, which allows seamless integration of results from `map_points`, `map_polygons`, or `map_rasters` (or any other dictionary keyed by `zone_id`) directly into the main zonal view DataFrame as a new column.
-  - Includes robust checks to prevent adding duplicate column names.
-  - Intelligently aligns data using `zone_id`, handling cases where some zones might be missing data or extra data is provided.
-  - Logs detailed warnings for missing or extra zone IDs to ensure data integrity and transparency.
-
-- **Enhanced `map_points` Return Value:**  
-  The `map_points` method now returns its results in a dictionary format optimized for easy integration with `add_variable_to_view`. If multiple `value_columns` are specified, it returns a dictionary of dictionaries (e.g., `{column_name: {zone_id: value}}`).
-
-- **Enhanced `map_rasters` Return Value:**  
-  The `map_rasters` method now returns raster statistics in a dictionary format (e.g., `{zone_id: value}`), making it straightforward to add to the zonal view.
-
-- **Smarter `save_view`:**  
-  The `save_view` method now consistently saves the internal `self.view` (which uses `_view`), ensuring that all accumulated variables are included in the saved output. A warning is logged if no variables have been added yet, and it falls back to saving the base `zone_gdf`.
-
-#### PoiViewGenerator Updates
-
-- **Improved View Management:**  
-  The internal `_view` DataFrame, which holds all mapped attributes for Points of Interest (POIs), is now consistently managed. Each `map_` method (e.g., `map_nearest_points`, `map_google_buildings`, `map_zonal_stats`) now directly updates this central `_view` and returns it, simplifying access to enriched POI data.
-
-- **New `_update_view` Helper:**  
-  Introduced a private `_update_view` method to centralize the merging of new data into the main `_view` DataFrame, ensuring consistent and efficient attribute addition.
-
-- **Enhanced `_init_points_gdf`:**  
-  - Added robust handling for duplicate `poi_id` values, raising a `ValueError` if non-unique IDs are detected during initialization to prevent potential data corruption.
-  - Incorporated `.copy()` calls to prevent `SettingWithCopyWarning` when modifying input DataFrames.
-
-- **Refined `map_zonal_stats`:**  
-  - Fixed and improved coordinate system handling for raster sampling to ensure data alignment.
-
-- **Smarter `save_view`:**  
-  The `save_view` method can now correctly save the enriched POI DataFrame to standard tabular formats (e.g., CSV, Parquet) and re-adds geometry when saving to geospatial formats like GeoJSON or Shapefile.
-
-
-#### MercatorViewGenerator Updates
-
-- **Clearer Docstring:**  
-  The main docstring has been completely rewritten to accurately reflect its purpose: generating zonal views using Mercator tiles at specified zoom levels, making its function distinct from the generic `GeometryBasedZonalViewGenerator`.
-
-- **Descriptive Error Messaging:**  
-  The `_init_zone_data` method now provides informative `TypeError` messages when an unsupported source type is provided, guiding users on expected input formats.
+- **Refactored `aggregate_polygons_to_zones()`**  
+  - Replaces `area_weighted` with a more flexible `predicate` parameter (`within`, `fractional`, etc.).  
+  - Updated `map_polygons()` to reflect the new structure.  
+  - Clearer logic and alignment with GIS terminology.
 
 ### Fixed
 
-- **GHSL Downloader:**  
-  - When extracting downloaded files, the initial ZIP is now downloaded directly to a temporary file in the cache directory (`global_config.CACHE_DIR`) using `requests.get`, instead of through the data store. This ensures proper handling and cleanup of temporary files and avoids unnecessary writes to the data store.
+- **GHSL Downloader**  
+  - Temporary ZIP files are now downloaded directly using `requests.get()` into the cache directory, improving reliability and avoiding unnecessary writes.
 
-- **TifProcessor:**  
-  - Added a missing `_sample_polygon` method, which samples raster values within a polygon or multipolygon using `rasterio.mask.mask`.
-  - The warning for errors encountered during polygon sampling is now optional. This can be controlled using the `warn_on_error` parameter in both `sample_by_polygons` and `sample_multiple_tifs_by_polygons`. By default, warnings are suppressed unless explicitly enabled.
+- **`TifProcessor` Sampling**  
+  - Optional warnings for polygon sampling errors controlled via `warn_on_error`.
+
+### Deprecated
+
+- `TifProcessor.tabular` → use `to_dataframe()` instead.  
+- `TifProcessor.get_zoned_geodataframe()` → use `to_geodataframe()` instead.  
+- `area_weighted` → replaced by `predicate` in spatial aggregation functions for clarity and control.
 
 ## [v0.6.4] - 2025-06-19
 

@@ -138,7 +138,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         """
         return self._zone_gdf.zone_id.tolist()
 
-    def to_geodataframe(self) -> gpd.GeoDataFrame:
+    def get_zone_geodataframe(self) -> gpd.GeoDataFrame:
         """Convert zones to a GeoDataFrame with standardized column names.
 
         Returns:
@@ -339,7 +339,12 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             self.logger.info(
                 "Calculating building areas with area-weighted aggregation"
             )
-            area_result = self.map_polygons(buildings_gdf, area_weighted=True)
+            area_result = self.map_polygons(
+                buildings_gdf,
+                value_columns="area_in_meters",
+                aggregation="sum",
+                predicate="fractional",
+            )
 
             self.logger.info("Counting buildings using points data")
             count_result = self.map_points(points=buildings_df, predicate="within")
@@ -394,7 +399,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             )
             return self._zone_gdf.copy()
 
-        buildings_gdf = add_area_in_meters(buildings_gdf)
+        buildings_gdf = add_area_in_meters(
+            buildings_gdf, area_column_name="area_in_meters"
+        )
 
         building_centroids = get_centroids(buildings_gdf)
 
@@ -415,7 +422,12 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             self.logger.info(
                 "Calculating building areas with area-weighted aggregation"
             )
-            area_result = self.map_polygons(buildings_gdf, area_weighted=True)
+            area_result = self.map_polygons(
+                buildings_gdf,
+                value_columns="area_in_meters",
+                aggregation="sum",
+                predicate="fractional",
+            )
 
             self.logger.info("Counting Microsoft buildings per zone")
 

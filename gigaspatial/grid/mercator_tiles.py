@@ -4,10 +4,10 @@ import mercantile
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
-from shapely import MultiPolygon, Polygon, Point
+from shapely import Point
 import json
 from pathlib import Path
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field
 from typing import List, Union, Iterable, Optional, Tuple, ClassVar
 import pycountry
 
@@ -31,6 +31,9 @@ class MercatorTiles(BaseModel):
         if not quadkeys:
             cls.logger.warning("No quadkeys provided to from_quadkeys.")
             return cls(zoom_level=0, quadkeys=[])
+        cls.logger.info(
+            f"Initializing MercatorTiles from {len(quadkeys)} provided quadkeys."
+        )
         return cls(zoom_level=len(quadkeys[0]), quadkeys=set(quadkeys))
 
     @classmethod
@@ -120,14 +123,7 @@ class MercatorTiles(BaseModel):
         cls.logger.info(
             f"Creating MercatorTiles from {len(points)} points at zoom level: {zoom_level}"
         )
-        quadkeys = {
-            (
-                mercantile.quadkey(mercantile.tile(p.x, p.y, zoom_level))
-                if isinstance(p, Point)
-                else mercantile.quadkey(mercantile.tile(p[1], p[0], zoom_level))
-            )
-            for p in points
-        }
+        quadkeys = set(cls.get_quadkeys_from_points(points, zoom_level))
         cls.logger.info(f"Generated {len(quadkeys)} unique quadkeys from points.")
         return cls(zoom_level=zoom_level, quadkeys=list(quadkeys), **kwargs)
 
@@ -219,6 +215,29 @@ class MercatorTiles(BaseModel):
             {"quadkey": self.quadkeys, "geometry": self.to_geoms()}, crs="EPSG:4326"
         )
 
+    @staticmethod
+    def get_quadkeys_from_points(
+        points: List[Union[Point, Tuple[float, float]]], zoom_level: int
+    ) -> List[str]:
+        """Get list of quadkeys for the provided points at specified zoom level.
+
+        Args:
+            points: List of points as either shapely Points or (lon, lat) tuples
+            zoom_level: Zoom level for the quadkeys
+
+        Returns:
+            List of quadkey strings
+        """
+        quadkeys = [
+            (
+                mercantile.quadkey(mercantile.tile(p.x, p.y, zoom_level))
+                if isinstance(p, Point)
+                else mercantile.quadkey(mercantile.tile(p[1], p[0], zoom_level))
+            )
+            for p in points
+        ]
+        return quadkeys
+
     def save(self, file: Union[str, Path], format: str = "json") -> None:
         """Save MercatorTiles to file in specified format."""
         with self.data_store.open(str(file), "wb" if format == "parquet" else "w") as f:
@@ -268,6 +287,10 @@ class CountryMercatorTiles(MercatorTiles):
             quadkeys=[],
             data_store=data_store or LocalDataStore(),
             country=pycountry.countries.lookup(country).alpha_3,
+        )
+
+        cls.logger.info(
+            f"Initializing Mercator zones for country: {country} at zoom level {zoom_level}"
         )
 
         country_geom = (
