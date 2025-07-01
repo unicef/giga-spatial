@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from typing import List, Optional, Tuple, Union, Literal
+from typing import List, Optional, Tuple, Union, Literal, Callable
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 from contextlib import contextmanager
@@ -9,6 +9,9 @@ from shapely.geometry import box, Polygon, MultiPolygon
 from pathlib import Path
 import rasterio
 from rasterio.mask import mask
+from functools import partial
+import multiprocessing
+from tqdm import tqdm
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
@@ -113,6 +116,9 @@ class TifProcessor:
     @property
     def tabular(self) -> pd.DataFrame:
         """Get the data from the TIF file"""
+        self.logger.warning(
+            "The `tabular` property is deprecated, use `to_dataframe` instead"
+        )
         if not hasattr(self, "_tabular"):
             try:
                 if self.mode == "single":
@@ -142,14 +148,56 @@ class TifProcessor:
 
         return self._tabular
 
-    def to_dataframe(self) -> pd.DataFrame:
-        return self.tabular
+    def to_dataframe(self, drop_nodata=True, **kwargs) -> pd.DataFrame:
+        try:
+            if self.mode == "single":
+                df = self._to_band_dataframe(drop_nodata=drop_nodata, **kwargs)
+            elif self.mode == "rgb":
+                df = self._to_rgb_dataframe(drop_nodata=drop_nodata)
+            elif self.mode == "rgba":
+                df = self._to_rgba_dataframe(drop_transparent=drop_nodata)
+            elif self.mode == "multi":
+                df = self._to_multi_band_dataframe(drop_nodata=drop_nodata, **kwargs)
+            else:
+                raise ValueError(
+                    f"Invalid mode: {self.mode}. Must be one of: single, rgb, rgba, multi"
+                )
+        except Exception as e:
+            raise ValueError(
+                f"Failed to process TIF file in mode '{self.mode}'. "
+                f"Please ensure the file is valid and matches the selected mode. "
+                f"Original error: {str(e)}"
+            )
+
+        return df
+
+    def to_geodataframe(self, **kwargs) -> gpd.GeoDataFrame:
+        """
+        Convert the processed TIF data into a GeoDataFrame, where each row represents a pixel zone.
+        Each zone is defined by its bounding box, based on pixel resolution and coordinates.
+        """
+        df = self.to_dataframe(**kwargs)
+
+        x_res, y_res = self.resolution
+
+        # create bounding box for each pixel
+        geometries = [
+            box(lon - x_res / 2, lat - y_res / 2, lon + x_res / 2, lat + y_res / 2)
+            for lon, lat in zip(df["lon"], df["lat"])
+        ]
+
+        gdf = gpd.GeoDataFrame(df, geometry=geometries, crs=self.crs)
+
+        return gdf
 
     def get_zoned_geodataframe(self) -> gpd.GeoDataFrame:
         """
         Convert the processed TIF data into a GeoDataFrame, where each row represents a pixel zone.
         Each zone is defined by its bounding box, based on pixel resolution and coordinates.
         """
+        self.logger.warning(
+            "The `get_zoned_geodataframe` method is deprecated, use `to_geodataframe` instead"
+        )
         self.logger.info("Converting data to GeoDataFrame with zones...")
 
         df = self.tabular
@@ -168,7 +216,7 @@ class TifProcessor:
         return gdf
 
     def sample_by_coordinates(
-        self, coordinate_list: List[Tuple[float, float]]
+        self, coordinate_list: List[Tuple[float, float]], **kwargs
     ) -> Union[np.ndarray, dict]:
         self.logger.info("Sampling raster values at the coordinates...")
 
@@ -200,63 +248,188 @@ class TifProcessor:
                     ]
 
                 return rgb_values
+            elif self.count > 1:
+                return np.array(
+                    [vals for vals in src.sample(coordinate_list, **kwargs)]
+                )
             else:
-                if src.count != 1:
-                    raise ValueError("Single band mode requires a 1-band TIF file")
                 return np.array([vals[0] for vals in src.sample(coordinate_list)])
 
     def sample_by_polygons(
-        self, polygon_list: List[Union[Polygon, MultiPolygon]], stat: str = "mean"
-    ) -> np.ndarray:
+        self,
+        polygon_list,
+        stat: Union[str, Callable, List[Union[str, Callable]]] = "mean",
+    ):
         """
-        Sample raster values within each polygon of a GeoDataFrame.
+        Sample raster values by polygons and compute statistic(s) for each polygon.
 
-        Parameters:
-            polygon_list: List of polygon geometries (can include MultiPolygons).
-            stat (str): Aggregation statistic to compute within each polygon.
-                        Options: "mean", "median", "sum", "min", "max".
+        Args:
+            polygon_list: List of shapely Polygon or MultiPolygon objects.
+            stat: Statistic(s) to compute. Can be:
+                - Single string: 'mean', 'median', 'sum', 'min', 'max', 'std', 'count'
+                - Single callable: custom function that takes array and returns scalar
+                - List of strings/callables: multiple statistics to compute
+
         Returns:
-            A NumPy array of sampled values
+            If single stat: np.ndarray of computed statistics for each polygon
+            If multiple stats: List of dictionaries with stat names as keys
         """
-        self.logger.info("Sampling raster values within polygons...")
+        # Determine if single or multiple stats
+        single_stat = not isinstance(stat, list)
+        stats_list = [stat] if single_stat else stat
+
+        # Prepare stat functions
+        stat_funcs = []
+        stat_names = []
+
+        for s in stats_list:
+            if callable(s):
+                stat_funcs.append(s)
+                stat_names.append(
+                    s.__name__
+                    if hasattr(s, "__name__")
+                    else f"custom_{len(stat_names)}"
+                )
+            else:
+                # Handle string statistics
+                if s == "count":
+                    stat_funcs.append(len)
+                else:
+                    stat_funcs.append(getattr(np, s))
+                stat_names.append(s)
+
+        results = []
 
         with self.open_dataset() as src:
-            results = []
-
-            for geom in polygon_list:
-                if geom.is_empty:
-                    results.append(np.nan)
-                    continue
-
+            for polygon in tqdm(polygon_list):
                 try:
-                    # Mask the raster with the polygon
-                    out_image, _ = mask(src, [geom], crop=True)
+                    out_image, _ = mask(src, [polygon], crop=True, filled=False)
 
-                    # Flatten the raster values and remove NoData values
-                    values = out_image[out_image != src.nodata].flatten()
+                    # Use masked arrays for more efficient nodata handling
+                    if hasattr(out_image, "mask"):
+                        valid_data = out_image.compressed()
+                    else:
+                        valid_data = (
+                            out_image[out_image != self.nodata]
+                            if self.nodata
+                            else out_image.flatten()
+                        )
 
-                    # Compute the desired statistic
-                    if len(values) == 0:
+                    if len(valid_data) == 0:
+                        if single_stat:
+                            results.append(np.nan)
+                        else:
+                            results.append({name: np.nan for name in stat_names})
+                    else:
+                        if single_stat:
+                            results.append(stat_funcs[0](valid_data))
+                        else:
+                            # Compute all statistics for this polygon
+                            polygon_stats = {}
+                            for func, name in zip(stat_funcs, stat_names):
+                                try:
+                                    polygon_stats[name] = func(valid_data)
+                                except Exception:
+                                    polygon_stats[name] = np.nan
+                            results.append(polygon_stats)
+
+                except Exception:
+                    if single_stat:
                         results.append(np.nan)
                     else:
-                        if stat == "mean":
-                            results.append(np.mean(values))
-                        elif stat == "median":
-                            results.append(np.median(values))
-                        elif stat == "sum":
-                            results.append(np.sum(values))
-                        elif stat == "min":
-                            results.append(np.min(values))
-                        elif stat == "max":
-                            results.append(np.max(values))
-                        else:
-                            raise ValueError(f"Unknown statistic: {stat}")
+                        results.append({name: np.nan for name in stat_names})
 
-                except Exception as e:
-                    self.logger.error(f"Error processing polygon: {e}")
-                    results.append(np.nan)
+        return np.array(results) if single_stat else results
+
+    def sample_by_polygons_batched(
+        self,
+        polygon_list: List[Union[Polygon, MultiPolygon]],
+        stat: Union[str, Callable] = "mean",
+        batch_size: int = 100,
+        n_workers: int = 4,
+        **kwargs,
+    ) -> np.ndarray:
+        """
+        Sample raster values by polygons in parallel using batching.
+        """
+
+        def _chunk_list(data_list, chunk_size):
+            """Yield successive chunks from data_list."""
+            for i in range(0, len(data_list), chunk_size):
+                yield data_list[i : i + chunk_size]
+
+        if len(polygon_list) == 0:
+            return np.array([])
+
+        stat_func = stat if callable(stat) else getattr(np, stat)
+
+        polygon_chunks = list(_chunk_list(polygon_list, batch_size))
+
+        with multiprocessing.Pool(
+            initializer=self._initializer_worker, processes=n_workers
+        ) as pool:
+            process_func = partial(self._process_polygon_batch, stat_func=stat_func)
+            batched_results = list(
+                tqdm(
+                    pool.imap(process_func, polygon_chunks),
+                    total=len(polygon_chunks),
+                    desc=f"Sampling polygons",
+                )
+            )
+
+            results = [item for sublist in batched_results for item in sublist]
 
         return np.array(results)
+    
+    def _initializer_worker(self):
+        """
+        Initializer function for each worker process.
+        Opens the raster dataset and stores it in a process-local variable.
+        This function runs once per worker, not for every task.
+        """
+        global src_handle
+        with self.data_store.open(self.dataset_path, "rb") as f:
+            with rasterio.MemoryFile(f.read()) as memfile:
+                src_handle = memfile.open()
+
+    def _process_single_polygon(self, polygon, stat_func):
+        """
+        Helper function to process a single polygon.
+        This will be run in a separate process.
+        """
+        global src_handle
+        if src_handle is None:
+            # This should not happen if the initializer is set up correctly,
+            # but it's a good defensive check.
+            raise RuntimeError("Raster dataset not initialized in this process.")
+
+        try:
+            out_image, _ = mask(src_handle, [polygon], crop=True, filled=False)
+
+            if hasattr(out_image, "mask"):
+                valid_data = out_image.compressed()
+            else:
+                valid_data = (
+                    out_image[out_image != self.nodata]
+                    if self.nodata
+                    else out_image.flatten()
+                )
+
+            if len(valid_data) == 0:
+                return np.nan
+            else:
+                return stat_func(valid_data)
+        except Exception:
+            return np.nan
+
+    def _process_polygon_batch(self, polygon_batch, stat_func):
+        """
+        Processes a batch of polygons.
+        """
+        return [
+            self._process_single_polygon(polygon, stat_func)
+            for polygon in polygon_batch
+        ]
 
     def _to_rgba_dataframe(self, drop_transparent: bool = False) -> pd.DataFrame:
         """
@@ -554,7 +727,9 @@ def sample_multiple_tifs_by_polygons(
     sampled_values = np.full(len(polygon_list), np.nan, dtype=np.float32)
 
     for tp in tif_processors:
-        values = tp.sample_by_polygons(polygon_list=polygon_list, stat=stat)
+        values = tp.sample_by_polygons(
+            polygon_list=polygon_list, stat=stat
+        )
 
         mask = np.isnan(sampled_values)  # replace all NaNs
 

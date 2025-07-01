@@ -1,1 +1,1 @@
-from gigaspatial.grid.mercator_tiles import *
+from gigaspatial.grid.mercator_tiles import MercatorTiles, CountryMercatorTiles

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Literal
 from shapely.geometry import Polygon, MultiPolygon
 
 import geopandas as gpd
@@ -136,9 +136,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             List[T]: A list of zone identifiers in the order they appear in the
                 underlying GeoDataFrame.
         """
-        return self._zone_gdf[self.zone_id_column].tolist()
+        return self._zone_gdf.zone_id.tolist()
 
-    def to_geodataframe(self) -> gpd.GeoDataFrame:
+    def get_zone_geodataframe(self) -> gpd.GeoDataFrame:
         """Convert zones to a GeoDataFrame with standardized column names.
 
         Returns:
@@ -158,7 +158,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         stat: str = "sum",
         name_prefix: str = "built_surface_m2_",
         **kwargs,
-    ) -> gpd.GeoDataFrame:
+    ) -> pd.DataFrame:
         """Map GHSL Built-up Surface data to zones.
 
         Convenience method for mapping Global Human Settlement Layer Built-up Surface
@@ -172,7 +172,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             name_prefix (str): Prefix for the output column name. Defaults to "built_surface_m2_".
 
         Returns:
-            gpd.GeoDataFrame: Updated GeoDataFrame with zones and built surface metrics.
+            pd.DataFrame: Updated GeoDataFrame with zones and built surface metrics.
                 Adds a column named "{name_prefix}{stat}" containing the aggregated values.
         """
         handler = GHSLDataHandler(
@@ -190,11 +190,11 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
     def map_smod(
         self,
         year=2020,
-        resolution=100,
+        resolution=1000,
         stat: str = "median",
         name_prefix: str = "smod_class_",
         **kwargs,
-    ) -> gpd.GeoDataFrame:
+    ) -> pd.DataFrame:
         """Map GHSL Settlement Model data to zones.
 
         Convenience method for mapping Global Human Settlement Layer Settlement Model
@@ -208,7 +208,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             name_prefix (str): Prefix for the output column name. Defaults to "smod_class_".
 
         Returns:
-            gpd.GeoDataFrame: Updated GeoDataFrame with zones and settlement classification.
+            pd.DataFrame: Updated DataFrame with zones and settlement classification.
                 Adds a column named "{name_prefix}{stat}" containing the aggregated values.
         """
         handler = GHSLDataHandler(
@@ -230,7 +230,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         stat: str,
         name_prefix: Optional[str] = None,
         **kwargs,
-    ) -> gpd.GeoDataFrame:
+    ) -> pd.DataFrame:
         """Map Global Human Settlement Layer data to zones.
 
         Loads and processes GHSL raster data for the intersecting tiles, then samples
@@ -245,7 +245,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 If None, uses the GHSL product name in lowercase followed by underscore.
 
         Returns:
-            gpd.GeoDataFrame: Updated GeoDataFrame with zones and GHSL metrics.
+            pd.DataFrame: Updated DataFrame with GHSL metrics.
                 Adds a column named "{name_prefix}{stat}" containing the sampled values.
 
         Note:
@@ -269,17 +269,15 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             name_prefix if name_prefix else handler.config.product.lower() + "_"
         )
         column_name = f"{name_prefix}{stat}"
-        self._zone_gdf[column_name] = sampled_values
+        self.add_variable_to_view(sampled_values, column_name)
 
-        self.logger.info(f"Added {column_name} column")
-
-        return self._zone_gdf.copy()
+        return self.view
 
     def map_google_buildings(
         self,
         handler: Optional[GoogleOpenBuildingsHandler] = None,
         use_polygons: bool = False,
-    ) -> gpd.GeoDataFrame:
+    ) -> pd.DataFrame:
         """Map Google Open Buildings data to zones.
 
         Processes Google Open Buildings dataset to calculate building counts and total
@@ -295,7 +293,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 area values from attributes for faster processing. Defaults to False.
 
         Returns:
-            gpd.GeoDataFrame: Updated GeoDataFrame with zones and building metrics.
+            pd.DataFrame: Updated DataFrame with building metrics.
                 Adds columns:
                 - 'google_buildings_count': Number of buildings in each zone
                 - 'google_buildings_area_in_meters': Total building area in square meters
@@ -341,19 +339,20 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             self.logger.info(
                 "Calculating building areas with area-weighted aggregation"
             )
-            area_result = self.map_polygons(buildings_gdf, area_weighted=True)
+            area_result = self.map_polygons(
+                buildings_gdf,
+                value_columns="area_in_meters",
+                aggregation="sum",
+                predicate="fractional",
+            )
 
             self.logger.info("Counting buildings using points data")
             count_result = self.map_points(points=buildings_df, predicate="within")
 
-        self._zone_gdf["google_buildings_count"] = self.zone_gdf.index.map(count_result)
-        self._zone_gdf["google_buildings_area_in_meters"] = self.zone_gdf.index.map(
-            area_result
-        )
+        self.add_variable_to_view(count_result, "google_buildings_count")
+        self.add_variable_to_view(area_result, "google_buildings_area_in_meters")
 
-        self.logger.info(f"Added Google building data")
-
-        return self._zone_gdf.copy()
+        return self.view
 
     def map_ms_buildings(
         self,
@@ -400,7 +399,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             )
             return self._zone_gdf.copy()
 
-        buildings_gdf = add_area_in_meters(buildings_gdf)
+        buildings_gdf = add_area_in_meters(
+            buildings_gdf, area_column_name="area_in_meters"
+        )
 
         building_centroids = get_centroids(buildings_gdf)
 
@@ -421,7 +422,12 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             self.logger.info(
                 "Calculating building areas with area-weighted aggregation"
             )
-            area_result = self.map_polygons(buildings_gdf, area_weighted=True)
+            area_result = self.map_polygons(
+                buildings_gdf,
+                value_columns="area_in_meters",
+                aggregation="sum",
+                predicate="fractional",
+            )
 
             self.logger.info("Counting Microsoft buildings per zone")
 
@@ -429,11 +435,48 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 points=building_centroids, predicate="within"
             )
 
-        self._zone_gdf["ms_buildings_count"] = self.zone_gdf.index.map(count_result)
-        self._zone_gdf["ms_buildings_area_in_meters"] = self.zone_gdf.index.map(
-            area_result
+        self.add_variable_to_view(count_result, "ms_buildings_count")
+        self.add_variable_to_view(area_result, "ms_buildings_area_in_meters")
+
+        return self.view
+
+    def map_ghsl_pop(
+        self,
+        year=2020,
+        resolution=100,
+        stat: str = "sum",
+        name_prefix: str = "ghsl_pop_",
+        predicate: Literal["intersects", "fractional"] = "intersects",
+        **kwargs,
+    ):
+        handler = GHSLDataHandler(
+            product="GHS_POP",
+            year=year,
+            resolution=resolution,
+            data_store=self.data_store,
+            **kwargs,
         )
 
-        self.logger.info(f"Added Microsoft building data")
+        if predicate == "fractional":
+            if resolution == 100:
+                self.logger.warning(
+                    "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
+                )
+                predicate = "intersects"
+            else:
+                gdf_pop = handler.load_into_geodataframe()
 
-        return self._zone_gdf.copy()
+                result = self.map_polygons(
+                    gdf_pop,
+                    value_columns="pixel_value",
+                    aggregation="sum",
+                    predicate="fractional",
+                )
+
+                column_name = f"{name_prefix}{stat}"
+                self.add_variable_to_view(result, column_name)
+                return self.view
+
+        return self.map_ghsl(
+            handler=handler, stat=stat, name_prefix=name_prefix, **kwargs
+        )

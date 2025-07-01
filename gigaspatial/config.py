@@ -70,11 +70,12 @@ class Config(BaseSettings):
         description="Directory for temporary/cache files",
         alias="CACHE_DIR",
     )
-    ADMIN_BOUNDARIES_DATA_DIR: Path = Field(
-        default=Path("admin_boundaries"),
+    ADMIN_BOUNDARIES_DATA_DIR: Optional[Path] = Field(
+        default=None,
         description="Root directory for administrative boundary data",
         alias="ADMIN_BOUNDARIES_DIR",
     )
+    DB_CONFIG: Optional[Dict] = Field(default=None, alias="DB_CONFIG")
 
     DATA_TYPES: Dict[str, str] = Field(
         default={
@@ -156,6 +157,11 @@ class Config(BaseSettings):
     ) -> Path:
         """Dynamic path construction for administrative boundary data based on admin level."""
         base_dir = getattr(self, "ADMIN_BOUNDARIES_DATA_DIR")
+        if base_dir is None:
+            raise ValueError(
+                "ADMIN_BOUNDARIES_DATA_DIR is not configured. "
+                "Please set the ADMIN_BOUNDARIES_DIR environment variable."
+            )
         level_dir = f"admin{admin_level}"
         file = f"{country_code}_{level_dir}{file_suffix}"
 
@@ -174,7 +180,6 @@ class Config(BaseSettings):
         "SILVER_DATA_DIR",
         "GOLD_DATA_DIR",
         "CACHE_DIR",
-        "ADMIN_BOUNDARIES_DATA_DIR",
         mode="before",
     )
     def resolve_and_validate_paths(
@@ -192,10 +197,30 @@ class Config(BaseSettings):
         resolved = path.expanduser().resolve()
         return resolved if resolve else path
 
+    @field_validator("ADMIN_BOUNDARIES_DATA_DIR", mode="before")
+    def validate_admin_boundaries_dir(
+        cls, value: Union[str, Path, None]
+    ) -> Optional[Path]:
+        """Validator for ADMIN_BOUNDARIES_DATA_DIR that handles None and string values."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return Path(value)
+        elif isinstance(value, Path):
+            return value
+        else:
+            raise ValueError(
+                f"Invalid path type for ADMIN_BOUNDARIES_DATA_DIR: {type(value)}"
+            )
+
     def ensure_directories_exist(self, create: bool = False) -> None:
         """Ensures all configured directories exist."""
         for field_name, field_value in self.__dict__.items():
-            if isinstance(field_value, Path) and not field_value.exists():
+            if (
+                isinstance(field_value, Path)
+                and field_value is not None
+                and not field_value.exists()
+            ):
                 if create:
                     field_value.mkdir(parents=True, exist_ok=True)
                 else:
