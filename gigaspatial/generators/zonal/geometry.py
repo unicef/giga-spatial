@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Literal
 from shapely.geometry import Polygon, MultiPolygon
 
 import geopandas as gpd
@@ -439,3 +439,44 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.add_variable_to_view(area_result, "ms_buildings_area_in_meters")
 
         return self.view
+
+    def map_ghsl_pop(
+        self,
+        year=2020,
+        resolution=100,
+        stat: str = "sum",
+        name_prefix: str = "ghsl_pop_",
+        predicate: Literal["intersects", "fractional"] = "intersects",
+        **kwargs,
+    ):
+        handler = GHSLDataHandler(
+            product="GHS_POP",
+            year=year,
+            resolution=resolution,
+            data_store=self.data_store,
+            **kwargs,
+        )
+
+        if predicate == "fractional":
+            if resolution == 100:
+                self.logger.warning(
+                    "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
+                )
+                predicate = "intersects"
+            else:
+                gdf_pop = handler.load_into_geodataframe()
+
+                result = self.map_polygons(
+                    gdf_pop,
+                    value_columns="pixel_value",
+                    aggregation="sum",
+                    predicate="fractional",
+                )
+
+                column_name = f"{name_prefix}{stat}"
+                self.add_variable_to_view(result, column_name)
+                return self.view
+
+        return self.map_ghsl(
+            handler=handler, stat=stat, name_prefix=name_prefix, **kwargs
+        )

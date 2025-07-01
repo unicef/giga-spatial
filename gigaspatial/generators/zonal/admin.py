@@ -39,9 +39,9 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
         self,
         country: str,
         admin_level: int,
+        data_store: Optional[DataStore] = None,
         admin_path: Optional[Union[str, Path]] = None,
         config: Optional[ZonalViewGeneratorConfig] = None,
-        data_store: Optional[DataStore] = None,
         logger: logging.Logger = None,
     ):
         """

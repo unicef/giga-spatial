@@ -272,8 +272,13 @@ def buffer_geodataframe(
     input_crs = gdf_work.crs
 
     try:
-        # Create a custom UTM CRS based on the calculated UTM zone
-        utm_crs = gdf_work.estimate_utm_crs()
+        try:
+            utm_crs = gdf_work.estimate_utm_crs()
+        except Exception as e:
+            LOGGER.warning(
+                f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
+            )
+            utm_crs = "EPSG:3857"  # Fallback to Web Mercator
 
         # Transform to UTM, create buffer, and transform back
         gdf_work = gdf_work.to_crs(utm_crs)
@@ -452,7 +457,13 @@ def add_area_in_meters(
     gdf_with_area = gdf.copy()
 
     # Calculate the UTM CRS for accurate area calculation
-    utm_crs = gdf_with_area.estimate_utm_crs()
+    try:
+        utm_crs = gdf_with_area.estimate_utm_crs()
+    except Exception as e:
+        LOGGER.warning(
+            f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
+        )
+        utm_crs = "EPSG:3857"  # Fallback to Web Mercator
 
     # Transform to UTM CRS and calculate the area in square meters
     gdf_with_area[area_column_name] = gdf_with_area.to_crs(utm_crs).geometry.area
@@ -1005,7 +1016,13 @@ def aggregate_polygons_to_zones(
         # Use area-weighted aggregation with polygon overlay
         try:
             # Compute UTM CRS for accurate area calculations
-            overlay_utm_crs = polygons_gdf.estimate_utm_crs()
+            try:
+                overlay_utm_crs = polygons_gdf.estimate_utm_crs()
+            except Exception as e:
+                LOGGER.warning(
+                    f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
+                )
+                overlay_utm_crs = "EPSG:3857"  # Fallback to Web Mercator
 
             # Prepare polygons for overlay
             polygons_utm = polygons_gdf.to_crs(overlay_utm_crs)

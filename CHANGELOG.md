@@ -2,70 +2,87 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.6.5] - 2025-06-27
+## [v0.6.5] - 2025-07-01
 
 ### Added
 
 - **`MercatorTiles.get_quadkeys_from_points()`**  
-  New static method that efficiently maps input points to quadkeys, offering a performant alternative to spatial joins.
+  New static method for efficient 1:1 point-to-quadkey mapping using coordinate-based logic, improving performance over spatial joins.
 
 - **`AdminBoundariesViewGenerator`**  
-  New class for generating zonal views using administrative boundaries for a given country and administrative level.  
-  Includes comprehensive `_init_zone_data` documentation and support for local `admin_path` overrides.
+  New generator class for producing zonal views based on administrative boundaries (e.g., districts, provinces) with flexible source and admin level support.
 
 - **Zonal View Generator Enhancements**  
-  - `_view`: Internal attribute to accumulate mapped variables.  
-  - `view`: Public property exposing the current state of the zonal view.  
-  - `add_variable_to_view(data_dict, column_name)`: Adds mapped data (e.g., from points, polygons, rasters) to the view with robust alignment and validation.
+  - `_view`: Internal attribute for accumulating mapped statistics.  
+  - `view`: Exposes current state of zonal view.  
+  - `add_variable_to_view()`: Adds mapped data from `map_points`, `map_polygons`, or `map_rasters` with robust validation and zone alignment.  
+  - `to_dataframe()` and `to_geodataframe()` methods added for exporting current view in tabular or spatial formats.
 
 - **`PoiViewGenerator` Enhancements**  
-  - `_view`: Central DataFrame for storing mapped attributes.  
-  - `_update_view`: Centralized helper to merge new data.  
-  - `save_view()`: Improved support for CSV, Parquet, GeoJSON, and Shapefile with correct geometry handling.  
-  - Improved duplicate ID checks and CRS handling in `map_zonal_stats`.
+  - Consistent `_view` DataFrame for storing mapped results.  
+  - `_update_view()`: Central method to update POI data.  
+  - `save_view()`: Improved format handling (CSV, Parquet, GeoJSON, etc.) with geometry recovery.  
+  - `to_dataframe()` and `to_geodataframe()` methods added for convenient export of enriched POI view.  
+  - Robust duplicate ID detection and CRS validation in `map_zonal_stats`.
 
 - **`TifProcessor` Enhancements**  
-  - `sample_by_polygons_batched()`: New parallel processing method.  
-  - `sample_by_polygons()`: Refactored with better nodata masking and multiple statistic support.  
-  - `warn_on_error`: Optional flag to suppress or enable warnings for polygon sampling.
+  - `sample_by_polygons_batched()`: Parallel polygon sampling.  
+  - Enhanced `sample_by_polygons()` with nodata masking and multiple stats.  
+  - `warn_on_error`: Flag to suppress sampling warnings.
 
 - **GeoTIFF Multi-Band Support**  
-  - `multi` mode for handling multi-band GeoTIFFs.  
-  - Automatic detection of band names from metadata.  
-  - Strict validation for modes (`single`, `rgb`, `rgba`, `multi`) and band count consistency.
+  - `multi` mode added for multi-band raster support.  
+  - Auto-detects band names via metadata.  
+  - Strict validation of band count based on mode (`single`, `rgb`, `rgba`, `multi`).
 
 - **Spatial Distance Graph Algorithm**  
-  - Added `build_distance_graph()` utility function.  
-  - Enables fast spatial matching between two sets of points or geometries using a KD-tree for nearest-neighbor search.  
-  - Configurable distance threshold and neighbor limits.
-  - Returns a `networkx.Graph` representing spatial relationships, with optional DataFrame output of matched pairs. 
+  - `build_distance_graph()` added for fast KD-tree-based spatial matching.  
+  - Supports both `DataFrame` and `GeoDataFrame` inputs.  
+  - Outputs a `networkx.Graph` with optional DataFrame of matches.  
+  - Handles projections, self-match exclusion, and includes verbose stats/logs.
+
+- **Database Integration (Experimental)**  
+  - Added `DBConnection` class in `core/io/database.py` for unified Trino and PostgreSQL access.  
+  - Supports schema/table introspection, query execution, and reading into `pandas` or `dask`.  
+  - Handles connection creation, credential management, and diagnostics.  
+  - Utility methods for schema/view/table/column listings and parameterized queries.
+
+- **GHSL Population Mapping**  
+  - `map_ghsl_pop()` method added to `GeometryBasedZonalViewGenerator`.  
+  - Aggregates GHSL population rasters to user-defined zones.  
+  - Supports `intersects` and `fractional` predicates (latter for 1000m resolution only).  
+  - Returns population statistics (e.g., `sum`) with customizable column prefix.
 
 ### Changed
 
-- **`MercatorTiles.from_points()`**  
-  Now uses `get_quadkeys_from_points()` internally for performance.
+- **`MercatorTiles.from_points()`** now internally uses `get_quadkeys_from_points()` for better performance.
 
-- **Zonal View Return Formats**  
-  - `map_points()` and `map_rasters()` now return results as dictionaries aligned to `zone_id` for seamless integration with `add_variable_to_view()`.
+- **`map_points()` and `map_rasters()`** now return `Dict[zone_id, value]` to support direct usage with `add_variable_to_view()`.
 
 - **Refactored `aggregate_polygons_to_zones()`**  
-  - Replaces `area_weighted` with a more flexible `predicate` parameter (`within`, `fractional`, etc.).  
-  - Updated `map_polygons()` to reflect the new structure.  
-  - Clearer logic and alignment with GIS terminology.
+  - `area_weighted` deprecated in favor of `predicate`.  
+  - Supports flexible predicates like `"within"`, `"fractional"` for spatial aggregation.  
+  - `map_polygons()` updated to reflect this change.
+
+- **Optional Admin Boundaries Configuration**  
+  - `ADMIN_BOUNDARIES_DATA_DIR` is now optional.  
+  - `AdminBoundaries.create()` only attempts to load if explicitly configured or path is provided.  
+  - Improved documentation and fallback behavior for missing configs.
 
 ### Fixed
 
 - **GHSL Downloader**  
-  - Temporary ZIP files are now downloaded directly using `requests.get()` into the cache directory, improving reliability and avoiding unnecessary writes.
+  - ZIP files are now downloaded into a temporary cache directory using `requests.get()`.  
+  - Avoids unnecessary writes and ensures cleanup.
 
-- **`TifProcessor` Sampling**  
-  - Warnings for polygon sampling errors removed.
+- **`TifProcessor`**  
+  - Removed polygon sampling warnings unless explicitly enabled.
 
 ### Deprecated
 
 - `TifProcessor.tabular` → use `to_dataframe()` instead.  
 - `TifProcessor.get_zoned_geodataframe()` → use `to_geodataframe()` instead.  
-- `area_weighted` → replaced by `predicate` in spatial aggregation functions for clarity and control.
+- `area_weighted` → use `predicate` in aggregation methods instead.
 
 ## [v0.6.4] - 2025-06-19
 

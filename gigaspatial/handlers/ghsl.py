@@ -804,3 +804,34 @@ class GHSLDataHandler(BaseHandler):
         return pd.concat(
             [tp.to_dataframe() for tp in tif_processors], ignore_index=True
         )
+    
+    def load_into_geodataframe(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[tuple, Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+            Path,  # path
+            List[Union[str, Path]],  # list of paths
+        ],
+        ensure_available: bool = True,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """
+        Load GHSL data into a geopandas GeoDataFrame.
+
+        Args:
+            source: The data source specification
+            ensure_available: If True, ensure data is downloaded before loading
+            **kwargs: Additional parameters passed to load methods
+
+        Returns:
+            GeoDataFrame containing the GHSL data
+        """
+        tif_processors = self.load_data(
+            source=source, ensure_available=ensure_available, **kwargs
+        )
+        return pd.concat(
+            [tp.to_geodataframe() for tp in tif_processors], ignore_index=True
+        )

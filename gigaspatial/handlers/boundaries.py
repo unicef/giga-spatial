@@ -10,7 +10,7 @@ import pycountry
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.handlers.hdx import HDXConfig
-from gigaspatial.config import config
+from gigaspatial.config import config as global_config
 
 
 class AdminBoundary(BaseModel):
@@ -33,7 +33,6 @@ class AdminBoundary(BaseModel):
     )
 
     class Config:
-        # extra = "allow"
         arbitrary_types_allowed = True
 
 
@@ -48,7 +47,7 @@ class AdminBoundaries(BaseModel):
         description="Administrative level (e.g., 0=country, 1=state, etc.)",
     )
 
-    logger: ClassVar = config.get_logger("AdminBoundaries")
+    logger: ClassVar = global_config.get_logger("AdminBoundaries")
 
     _schema_config: ClassVar[Dict[str, Dict[str, str]]] = {
         "gadm": {
@@ -301,28 +300,50 @@ class AdminBoundaries(BaseModel):
         path: Optional[Union[str, "Path"]] = None,
         **kwargs,
     ) -> "AdminBoundaries":
-        """Factory method to create AdminBoundaries instance from either GADM or data store.
+        """
+        Factory method to create an AdminBoundaries instance using various data sources,
+        depending on the provided parameters and global configuration.
+
+        Loading Logic:
+            1. If a `data_store` is provided and either a `path` is given or
+               `global_config.ADMIN_BOUNDARIES_DATA_DIR` is set:
+                - If `path` is not provided but `country_code` is, the path is constructed
+                  using `global_config.get_admin_path()`.
+                - Loads boundaries from the specified data store and path.
+
+            2. If only `country_code` is provided (no data_store):
+                - Attempts to load boundaries from GeoRepo (if available).
+                - If GeoRepo is unavailable, attempts to load from GADM.
+                - If GADM fails, falls back to geoBoundaries.
+                - Raises an error if all sources fail.
+
+            3. If neither `country_code` nor `data_store` is provided:
+                - Raises a ValueError.
 
         Args:
-            country_code: ISO country code (2 or 3 letter) or country name
-            admin_level: Administrative level (0=country, 1=state/province, etc.)
-            data_store: Optional data store instance for loading from existing data
-            path: Optional path to data file (used with data_store)
-            **kwargs: Additional arguments passed to the underlying creation methods
+            country_code (Optional[str]): ISO country code (2 or 3 letter) or country name.
+            admin_level (int): Administrative level (0=country, 1=state/province, etc.).
+            data_store (Optional[DataStore]): Optional data store instance for loading from existing data.
+            path (Optional[Union[str, Path]]): Optional path to data file (used with data_store).
+            **kwargs: Additional arguments passed to the underlying creation methods.
 
         Returns:
-            AdminBoundaries: Configured instance
+            AdminBoundaries: Configured instance.
 
         Raises:
             ValueError: If neither country_code nor (data_store, path) are provided,
-                    or if country_code lookup fails
+                        or if country_code lookup fails.
+            RuntimeError: If all data sources fail to load boundaries.
 
-        Example:
-            # From country code
-            boundaries = AdminBoundaries.create(country_code="USA", admin_level=1)
+        Examples:
+            # Load from a data store (path auto-generated if not provided)
+            boundaries = AdminBoundaries.create(country_code="USA", admin_level=1, data_store=store)
 
-            # From data store
+            # Load from a specific file in a data store
             boundaries = AdminBoundaries.create(data_store=store, path="data.shp")
+
+            # Load from online sources (GeoRepo, GADM, geoBoundaries)
+            boundaries = AdminBoundaries.create(country_code="USA", admin_level=1)
         """
         cls.logger.info(
             f"Creating AdminBoundaries instance. Country: {country_code}, "
@@ -330,17 +351,21 @@ class AdminBoundaries(BaseModel):
             f"path provided: {path is not None}"
         )
 
+        from_data_store = data_store is not None and (
+            global_config.ADMIN_BOUNDARIES_DATA_DIR is not None or path is not None
+        )
+
         # Validate input parameters
         if not country_code and not data_store:
             raise ValueError("Either country_code or data_store must be provided.")
 
-        if data_store and not path and not country_code:
+        if from_data_store and not path and not country_code:
             raise ValueError(
                 "If data_store is provided, either path or country_code must also be specified."
             )
 
         # Handle data store path first
-        if data_store is not None:
+        if from_data_store:
             iso3_code = None
             if country_code:
                 try:
@@ -350,7 +375,7 @@ class AdminBoundaries(BaseModel):
 
             # Generate path if not provided
             if path is None and iso3_code:
-                path = config.get_admin_path(
+                path = global_config.get_admin_path(
                     country_code=iso3_code,
                     admin_level=admin_level,
                 )

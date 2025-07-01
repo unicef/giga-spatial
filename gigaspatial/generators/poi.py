@@ -744,18 +744,29 @@ class PoiViewGenerator:
                 self.points_gdf[["poi_id", "geometry"]], on="poi_id", how="left"
             )
             write_dataset(
-                df=view_to_save_gdf,
+                data=view_to_save_gdf,
                 path=str(output_path),
                 data_store=self.data_store,
             )
         else:
             write_dataset(
-                df=self.view,  # Use the internal _view DataFrame
+                data=self.view,  # Use the internal _view DataFrame
                 path=str(output_path),
                 data_store=self.data_store,
             )
 
         return output_path
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """
+        Returns the current POI view as a DataFrame.
+
+        This method combines all accumulated variables in the view
+
+        Returns:
+            pd.DataFrame: The current view.
+        """
+        return self.view
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
         """

@@ -494,7 +494,7 @@ class ZonalViewGenerator(ABC, Generic[T]):
             )
 
         write_dataset(
-            df=view_to_save,
+            data=view_to_save,
             path=str(output_path),
             data_store=self.data_store,
         )

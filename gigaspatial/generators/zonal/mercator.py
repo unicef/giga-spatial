@@ -76,7 +76,7 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
     ):
 
         super().__init__(
-            zone_data=self._init_zone_data(source, zoom_level, predicate),
+            zone_data=self._init_zone_data(source, zoom_level, predicate, data_store),
             zone_id_column="quadkey",
             config=config,
             data_store=data_store,
@@ -84,9 +84,11 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
         )
         self.logger.info(f"Initialized MercatorViewGenerator")
 
-    def _init_zone_data(self, source, zoom_level, predicate):
+    def _init_zone_data(self, source, zoom_level, predicate, data_store=None):
         if isinstance(source, str):
-            tiles = CountryMercatorTiles.create(country=source, zoom_level=zoom_level)
+            tiles = CountryMercatorTiles.create(
+                country=source, zoom_level=zoom_level, data_store=data_store
+            )
         elif isinstance(source, (BaseGeometry, Iterable)):
             if isinstance(source, Iterable) and all(
                 isinstance(qk, str) for qk in source
