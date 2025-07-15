@@ -948,6 +948,9 @@ def aggregate_polygons_to_zones(
     if not isinstance(zones, gpd.GeoDataFrame):
         raise TypeError("zones must be a GeoDataFrame")
 
+    if zones.empty:
+        raise ValueError("zones GeoDataFrame is empty")
+
     if zone_id_column not in zones.columns:
         raise ValueError(f"Zone ID column '{zone_id_column}' not found in zones")
 
@@ -960,10 +963,16 @@ def aggregate_polygons_to_zones(
     if not isinstance(polygons, gpd.GeoDataFrame):
         try:
             polygons_gdf = convert_to_geodataframe(polygons)
-        except:
-            raise TypeError("polygons must be a GeoDataFrame or convertible to one")
+        except Exception as e:
+            raise TypeError(
+                f"polygons must be a GeoDataFrame or convertible to one: {e}"
+            )
     else:
         polygons_gdf = polygons.copy()
+
+    if polygons_gdf.empty:
+        LOGGER.warning("Empty polygons GeoDataFrame provided")
+        return zones
 
     # Validate geometry types
     non_polygon_geoms = [
@@ -991,8 +1000,53 @@ def aggregate_polygons_to_zones(
         polygons_gdf = polygons_gdf.to_crs(zones.crs)
 
     # Handle aggregation method
+    agg_funcs = _process_aggregation_methods(aggregation, value_columns)
+
+    # Prepare minimal zones for spatial operations (only zone_id_column and geometry)
+    minimal_zones = zones[[zone_id_column, "geometry"]].copy()
+
+    if predicate == "fractional":
+        aggregated_data = _fractional_aggregation(
+            polygons_gdf, minimal_zones, value_columns, agg_funcs, zone_id_column
+        )
+    else:
+        aggregated_data = _simple_aggregation(
+            polygons_gdf,
+            minimal_zones,
+            value_columns,
+            agg_funcs,
+            zone_id_column,
+            predicate,
+        )
+
+    # Merge aggregated results back to complete zones data
+    result = zones.merge(
+        aggregated_data[[col for col in aggregated_data.columns if col != "geometry"]],
+        on=zone_id_column,
+        how="left",
+    )
+
+    # Fill NaN values with zeros for the newly aggregated columns only
+    aggregated_cols = [col for col in result.columns if col not in zones.columns]
+    for col in aggregated_cols:
+        if pd.api.types.is_numeric_dtype(result[col]):
+            result[col] = result[col].fillna(0)
+
+    # Apply output suffix consistently to result columns only
+    if output_suffix:
+        rename_dict = {col: f"{col}{output_suffix}" for col in aggregated_cols}
+        result = result.rename(columns=rename_dict)
+
+    if drop_geometry:
+        result = result.drop(columns=["geometry"])
+
+    return result
+
+
+def _process_aggregation_methods(aggregation, value_columns):
+    """Process and validate aggregation methods"""
     if isinstance(aggregation, str):
-        agg_funcs = {col: aggregation for col in value_columns}
+        return {col: aggregation for col in value_columns}
     elif isinstance(aggregation, dict):
         # Validate dictionary keys
         missing_aggs = [col for col in value_columns if col not in aggregation]
@@ -1005,112 +1059,98 @@ def aggregate_polygons_to_zones(
                 f"Aggregation methods specified for non-existent columns: {extra_aggs}"
             )
 
-        agg_funcs = aggregation
+        return aggregation
     else:
         raise TypeError("aggregation must be a string or dictionary")
 
-    # Create a copy of the zones
-    result = zones.copy()
 
-    if predicate == "fractional":
-        # Use area-weighted aggregation with polygon overlay
+def _fractional_aggregation(
+    polygons_gdf, zones, value_columns, agg_funcs, zone_id_column
+):
+    """Perform area-weighted (fractional) aggregation"""
+    try:
+        # Compute UTM CRS for accurate area calculations
         try:
-            # Compute UTM CRS for accurate area calculations
-            try:
-                overlay_utm_crs = polygons_gdf.estimate_utm_crs()
-            except Exception as e:
-                LOGGER.warning(
-                    f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
-                )
-                overlay_utm_crs = "EPSG:3857"  # Fallback to Web Mercator
-
-            # Prepare polygons for overlay
-            polygons_utm = polygons_gdf.to_crs(overlay_utm_crs)
-            polygons_utm["orig_area"] = polygons_utm.area
-
-            # Keep only necessary columns
-            overlay_cols = value_columns + ["geometry", "orig_area"]
-            overlay_gdf = polygons_utm[overlay_cols].copy()
-
-            # Prepare zones for overlay
-            zones_utm = zones.to_crs(overlay_utm_crs)
-
-            # Perform the spatial overlay
-            gdf_overlayed = gpd.overlay(
-                overlay_gdf, zones_utm[[zone_id_column, "geometry"]], how="intersection"
-            )
-
-            # Calculate fractional areas
-            gdf_overlayed["intersection_area"] = gdf_overlayed.area
-            gdf_overlayed["area_fraction"] = (
-                gdf_overlayed["intersection_area"] / gdf_overlayed["orig_area"]
-            )
-
-            # Apply area weighting to value columns
-            for col in value_columns:
-                gdf_overlayed[col] = gdf_overlayed[col] * gdf_overlayed["area_fraction"]
-
-            # Aggregate by zone ID
-            aggregated = gdf_overlayed.groupby(zone_id_column)[value_columns].agg(
-                agg_funcs
-            )
-
-            # Handle column naming for multi-level index
-            if isinstance(aggregated.columns, pd.MultiIndex):
-                aggregated.columns = [
-                    f"{col[0]}_{col[1]}{output_suffix}" for col in aggregated.columns
-                ]
-
-            # Reset index
-            aggregated = aggregated.reset_index()
-
-            # Merge aggregated values back to the zones
-            result = result.merge(aggregated, on=zone_id_column, how="left")
-
-            # Fill NaN values with zeros
-            for col in result.columns:
-                if (
-                    col != zone_id_column
-                    and col != "geometry"
-                    and pd.api.types.is_numeric_dtype(result[col])
-                ):
-                    result[col] = result[col].fillna(0)
-
+            overlay_utm_crs = polygons_gdf.estimate_utm_crs()
         except Exception as e:
-            raise RuntimeError(f"Error during area-weighted aggregation: {e}")
+            LOGGER.warning(f"UTM CRS estimation failed, using Web Mercator. Error: {e}")
+            overlay_utm_crs = "EPSG:3857"  # Fallback to Web Mercator
 
-    else:
-        # Non-weighted aggregation - simpler approach
-        # Perform spatial join
-        joined = gpd.sjoin(polygons_gdf, zones, how="inner", predicate=predicate)
+        # Prepare polygons for overlay - only necessary columns
+        polygons_utm = polygons_gdf.to_crs(overlay_utm_crs)
+        polygons_utm["orig_area"] = polygons_utm.area
 
-        # Remove geometry column for aggregation
-        if "geometry" in joined.columns:
-            joined = joined.drop(columns=["geometry"])
+        # Keep only necessary columns
+        overlay_cols = value_columns + ["geometry", "orig_area"]
+        overlay_gdf = polygons_utm[overlay_cols].copy()
 
-        # Group by zone ID and aggregate
-        aggregated = joined.groupby(zone_id_column)[value_columns].agg(agg_funcs)
+        # Prepare zones for overlay
+        zones_utm = zones.to_crs(overlay_utm_crs)
+
+        # Perform the spatial overlay
+        gdf_overlayed = gpd.overlay(overlay_gdf, zones_utm, how="intersection")
+
+        if gdf_overlayed.empty:
+            LOGGER.warning("No intersections found during fractional aggregation")
+            return zones
+
+        # Calculate fractional areas
+        gdf_overlayed["intersection_area"] = gdf_overlayed.area
+        gdf_overlayed["area_fraction"] = (
+            gdf_overlayed["intersection_area"] / gdf_overlayed["orig_area"]
+        )
+
+        # Apply area weighting to value columns
+        for col in value_columns:
+            gdf_overlayed[col] = gdf_overlayed[col] * gdf_overlayed["area_fraction"]
+
+        # Aggregate by zone ID
+        aggregated = gdf_overlayed.groupby(zone_id_column)[value_columns].agg(agg_funcs)
 
         # Handle column naming for multi-level index
-        if isinstance(aggregated.columns, pd.MultiIndex):
-            aggregated.columns = [
-                f"{col[0]}_{col[1]}{output_suffix}" for col in aggregated.columns
-            ]
+        aggregated = _handle_multiindex_columns(aggregated)
 
         # Reset index and merge back to zones
         aggregated = aggregated.reset_index()
-        result = result.merge(aggregated, on=zone_id_column, how="left")
 
-        # Fill NaN values with zeros
-        for col in result.columns:
-            if (
-                col != zone_id_column
-                and col != "geometry"
-                and pd.api.types.is_numeric_dtype(result[col])
-            ):
-                result[col] = result[col].fillna(0)
+        # Return only the aggregated data (will be merged with full zones later)
+        return aggregated
 
-    if drop_geometry:
-        result = result.drop(columns=["geometry"])
+    except Exception as e:
+        raise RuntimeError(f"Error during area-weighted aggregation: {e}")
 
-    return result
+
+def _simple_aggregation(
+    polygons_gdf, zones, value_columns, agg_funcs, zone_id_column, predicate
+):
+    """Perform simple (non-weighted) aggregation"""
+    # Perform spatial join
+    joined = gpd.sjoin(polygons_gdf, zones, how="inner", predicate=predicate)
+
+    if joined.empty:
+        LOGGER.warning(f"No {predicate} relationships found during spatial join")
+        return zones
+
+    # Remove geometry column for aggregation (keep only necessary columns)
+    agg_cols = value_columns + [zone_id_column]
+    joined_subset = joined[agg_cols].copy()
+
+    # Group by zone ID and aggregate
+    aggregated = joined_subset.groupby(zone_id_column)[value_columns].agg(agg_funcs)
+
+    # Handle column naming for multi-level index
+    aggregated = _handle_multiindex_columns(aggregated)
+
+    # Reset index and merge back to zones
+    aggregated = aggregated.reset_index()
+
+    # Return only the aggregated data (will be merged with full zones later)
+    return aggregated
+
+
+def _handle_multiindex_columns(aggregated):
+    """Handle multi-level column index from groupby aggregation"""
+    if isinstance(aggregated.columns, pd.MultiIndex):
+        # Flatten multi-level columns: combine column name with aggregation method
+        aggregated.columns = [f"{col[0]}_{col[1]}" for col in aggregated.columns]
+    return aggregated

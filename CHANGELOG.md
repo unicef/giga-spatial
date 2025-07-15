@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.6] - 2025-07-15
+
+### Added
+
+- **`AdminBoundaries.from_global_country_boundaries(scale="medium")`**
+  - New class method to load global admin level 0 boundaries from Natural Earth.
+  - Supports `"large"` (10m), `"medium"` (50m), and `"small"` (110m) scale options.
+
+- **WorldPop Handler Refactor (API Integration)**
+  - Introduced `WPPopulationHandler`, `WPPopulationConfig`, `WPPopulationDownloader`, and `WPPopulationReader`.
+  - Uses new `WorldPopRestClient` to dynamically query the WorldPop REST API.
+  - Replaces static metadata files and hardcoded logic with API-based discovery and download.
+  - Country code lookup and dataset filtering now handled at runtime.
+  - Improved validation, extensibility, logging, and error handling.
+
+- **POI-Based WorldPop Mapping**
+  - `PoiViewGenerator.map_wp_pop()` method:
+    - Maps WorldPop population data around POIs using flexible spatial predicates:
+      - `"centroid_within"`, `"intersects"`, `"fractional"` (1000m only), `"within"`
+    - Supports configurable radius and resolution (100m or 1000m).
+    - Aggregates population data and appends it to the view.
+
+- **Geometry-Based Zonal WorldPop Mapping**
+  - `GeometryBasedZonalViewGenerator.map_wp_pop()` method:
+    - Maps WorldPop population data to polygons/zones using:
+      - `"intersects"` or `"fractional"` predicate
+    - Returns zonal population sums as a new view column.
+    - Handles predicate-dependent data loading (raster vs. GeoDataFrame).
+
+### Changed
+
+- **Refactored `BaseHandler.ensure_data_available`**
+  - More efficient data check and download logic.
+  - Downloads only missing units unless `force_download=True`.
+  - Cleaner structure and better reuse of `get_relevant_data_units()`.
+
+- **Refactored WorldPop Module**
+  - Complete handler redesign using API-based architecture.
+  - Dataset paths and URLs are now dynamically constructed from API metadata.
+  - Resolution/year validation is more robust and descriptive.
+  - Removed static constants, gender/school_age toggles, and local CSV dependency.
+
+### Fixed
+- Several small fixes and improvements to zonal aggregation methods, especially around CRS consistency, missing values, and result alignment.
+
 ## [v0.6.5] - 2025-07-01
 
 ### Added

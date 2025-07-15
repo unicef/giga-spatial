@@ -21,7 +21,14 @@ from gigaspatial.handlers.osm import OSMLocationFetcher
 from gigaspatial.handlers.overture import OvertureAmenityFetcher
 from gigaspatial.handlers.mapbox_image import MapboxImageDownloader
 from gigaspatial.handlers.maxar_image import MaxarConfig, MaxarImageDownloader
-from gigaspatial.handlers.worldpop import WorldPopConfig, WorldPopDownloader
+
+from gigaspatial.handlers.worldpop import (
+    WPPopulationConfig,
+    WPPopulationReader,
+    WPPopulationDownloader,
+    WPPopulationHandler,
+    WorldPopRestClient,
+)
 from gigaspatial.handlers.ookla_speedtest import (
     OoklaSpeedtestTileConfig,
     OoklaSpeedtestConfig,

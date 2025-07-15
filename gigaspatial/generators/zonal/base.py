@@ -13,7 +13,6 @@ from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.writers import write_dataset
 from gigaspatial.config import config as global_config
 from gigaspatial.processing.geo import (
-    convert_to_geodataframe,
     aggregate_polygons_to_zones,
     aggregate_points_to_zones,
 )
@@ -242,36 +241,37 @@ class ZonalViewGenerator(ABC, Generic[T]):
         if mapping_function is not None:
             return mapping_function(self, points, **mapping_kwargs)
 
-        else:
-            self.logger.warning(
-                "Using default points mapping implementation. Consider creating a specialized mapping function."
-            )
-            result = aggregate_points_to_zones(
-                points=points,
-                zones=self.zone_gdf,
-                value_columns=value_columns,
-                aggregation=aggregation,
-                point_zone_predicate=predicate,
-                zone_id_column="zone_id",
-                output_suffix=output_suffix,
-            )
+        self.logger.warning(
+            "Using default points mapping implementation. Consider creating a specialized mapping function."
+        )
+        result = aggregate_points_to_zones(
+            points=points,
+            zones=self.zone_gdf,
+            value_columns=value_columns,
+            aggregation=aggregation,
+            point_zone_predicate=predicate,
+            zone_id_column="zone_id",
+            output_suffix=output_suffix,
+        )
 
-            if isinstance(value_columns, str):
-                return result.set_index("zone_id")[value_columns].to_dict()
-            elif isinstance(value_columns, list):
-                # If multiple value columns, return a dictionary of dictionaries
-                # Or, if preferred, a dictionary where values are lists/tuples of results
-                # For now, let's return a dict of series, which is common.
-                # The previous version implied a single dictionary result from map_points/polygons
-                # but with multiple columns, it's usually {zone_id: {col1: val1, col2: val2}}
-                # or {col_name: {zone_id: val}}
-                # In this version, it'll return a dictionary for each column.
-                return {
-                    col: result.set_index("zone_id")[col].to_dict()
-                    for col in value_columns
-                }
-            else:  # If value_columns is None, it should return point_count
-                return result.set_index("zone_id")["point_count"].to_dict()
+        if isinstance(value_columns, str):
+            return result.set_index("zone_id")[value_columns].to_dict()
+        elif isinstance(value_columns, list):
+            # If multiple value columns, return a dictionary of dictionaries
+            # Or, if preferred, a dictionary where values are lists/tuples of results
+            # For now, let's return a dict of series, which is common.
+            # The previous version implied a single dictionary result from map_points/polygons
+            # but with multiple columns, it's usually {zone_id: {col1: val1, col2: val2}}
+            # or {col_name: {zone_id: val}}
+            # In this version, it'll return a dictionary for each column.
+            return {
+                col: result.set_index("zone_id")[col].to_dict() for col in value_columns
+            }
+        else:  # If value_columns is None, it should return point_count
+            self.logger.warning(
+                "No `value_columns` provided. Mapping point counts. Consider passing `value_columns` and `aggregation` or `mapping_function`."
+            )
+            return result.set_index("zone_id")["point_count"].to_dict()
 
     def map_polygons(
         self,
@@ -415,10 +415,6 @@ class ZonalViewGenerator(ABC, Generic[T]):
         if mapping_function is not None:
             return mapping_function(self, tif_processors, **mapping_kwargs)
 
-        self.logger.warning(
-            "Using default raster mapping implementation. Consider creating a specialized mapping function."
-        )
-
         raster_crs = tif_processors[0].crs
 
         if raster_crs != self.zone_gdf.crs:
@@ -522,6 +518,9 @@ class ZonalViewGenerator(ABC, Generic[T]):
         Returns:
             gpd.GeoDataFrame: The current view merged with zone geometries.
         """
-        return self.view.merge(
-            self.zone_gdf[["zone_id", "geometry"]], on="zone_id", how="left"
+        return gpd.GeoDataFrame(
+            (self.view).merge(
+                self.zone_gdf[["zone_id", "geometry"]], on="zone_id", how="left"
+            ),
+            crs=self.zone_gdf.crs,
         )

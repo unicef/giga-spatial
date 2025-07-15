@@ -272,6 +272,7 @@ class DBConnection:
     def read_sql_to_dask_dataframe(
         self,
         table_name: str,
+        index_col: str,
         columns: Optional[List[str]] = None,
         limit: Optional[int] = None,
         **kwargs,
@@ -310,7 +311,9 @@ class DBConnection:
             if limit:
                 query = query.limit(limit)
 
-            return dd.read_sql_query(sql=query, con=connection_string, **kwargs)
+            return dd.read_sql_query(
+                sql=query, con=connection_string, index_col=index_col, **kwargs
+            )
         except Exception as e:
             print(f"Error reading SQL to Dask DataFrame: {e}")
             raise ValueError(f"Failed to read SQL to Dask DataFrame: {e}") from e

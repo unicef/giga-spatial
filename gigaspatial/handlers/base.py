@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional, Union, Tuple, Callable, Iterable
 import pandas as pd
@@ -13,7 +14,6 @@ from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.processing.tif_processor import TifProcessor
-from dataclasses import dataclass, field
 
 
 @dataclass
@@ -584,6 +584,8 @@ class BaseHandler(ABC):
             bool: True if data is available after this operation
         """
         try:
+            data_units = None
+            data_paths = None
             # Resolve what data units are needed
             if hasattr(self.config, "get_relevant_data_units"):
                 data_units = self.config.get_relevant_data_units(source, **kwargs)
@@ -606,11 +608,29 @@ class BaseHandler(ABC):
                 if not missing_paths:
                     self.logger.info("All required data is already available")
                     return True
+            else:
+                # If force_download, treat all as missing
+                missing_paths = data_paths
 
-            # Download missing or all data
-            if hasattr(self.config, "get_relevant_data_units"):
-                data_units = self.config.get_relevant_data_units(source, **kwargs)
-                self.downloader.download_data_units(data_units, **kwargs)
+            if not missing_paths:
+                self.logger.info("No missing data to download.")
+                return True
+
+            # Download logic
+            if data_units is not None:
+                # Map data_units to their paths and select only those that are missing
+                unit_to_path = dict(zip(data_units, data_paths))
+                if force_download:
+                    # Download all units if force_download
+                    self.downloader.download_data_units(data_units, **kwargs)
+                else:
+                    missing_units = [
+                        unit
+                        for unit, path in unit_to_path.items()
+                        if path in missing_paths
+                    ]
+                    if missing_units:
+                        self.downloader.download_data_units(missing_units, **kwargs)
             else:
                 self.downloader.download(source, **kwargs)
 

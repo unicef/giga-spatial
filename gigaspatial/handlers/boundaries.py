@@ -292,6 +292,56 @@ class AdminBoundaries(BaseModel):
             )
 
     @classmethod
+    def from_global_country_boundaries(cls, scale: str = "medium") -> "AdminBoundaries":
+        """
+        Load global country boundaries from Natural Earth Data.
+
+        Args:
+            scale (str): One of 'large', 'medium', 'small'.
+                - 'large'  -> 10m
+                - 'medium' -> 50m
+                - 'small'  -> 110m
+        Returns:
+            AdminBoundaries: All country boundaries at admin_level=0
+        """
+        scale_map = {
+            "large": "10m",
+            "medium": "50m",
+            "small": "110m",
+        }
+        if scale not in scale_map:
+            raise ValueError(
+                f"Invalid scale '{scale}'. Choose from 'large', 'medium', 'small'."
+            )
+        scale_folder = scale_map[scale]
+        url = f"https://naciscdn.org/naturalearth/{scale_folder}/cultural/ne_{scale_folder}_admin_0_countries.zip"
+        cls.logger.info(f"Loading Natural Earth global country boundaries from {url}")
+        try:
+            gdf = gpd.read_file(url)
+            # Map fields to AdminBoundary schema
+            boundaries = []
+            for _, row in gdf.iterrows():
+                iso_a3 = row.get("ISO_A3_EH") or row.get("ISO_A3") or row.get("ADM0_A3")
+                name = row.get("NAME") or row.get("ADMIN") or row.get("SOVEREIGNT")
+                geometry = row.get("geometry")
+                if not iso_a3 or not name or geometry is None:
+                    continue
+                boundary = AdminBoundary(
+                    id=iso_a3,
+                    name=name,
+                    geometry=geometry,
+                    country_code=iso_a3,
+                )
+                boundaries.append(boundary)
+            cls.logger.info(
+                f"Loaded {len(boundaries)} country boundaries from Natural Earth."
+            )
+            return cls(boundaries=boundaries, level=0)
+        except Exception as e:
+            cls.logger.error(f"Failed to load Natural Earth global boundaries: {e}")
+            raise
+
+    @classmethod
     def create(
         cls,
         country_code: Optional[str] = None,

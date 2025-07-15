@@ -35,7 +35,9 @@ class GigaDataAPI:
         :param sort: Whether to sort the country list alphabetically (default is True).
         """
         country_list = [
-            t.name for t in self.client.list_all_tables() if t.share == self.share_name
+            t.name
+            for t in self.client.list_all_tables()
+            if t.schema == self.schema_name
         ]
         if sort:
             country_list.sort()

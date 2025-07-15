@@ -597,7 +597,7 @@ class GHSLDataReader(BaseHandlerReader):
         logger: Optional[logging.Logger] = None,
     ):
         """
-        Initialize the downloader.
+        Initialize the reader.
 
         Args:
             config: Configuration for the GHSL dataset, either as a GHSLDataConfig object or a dictionary of parameters
@@ -804,7 +804,7 @@ class GHSLDataHandler(BaseHandler):
         return pd.concat(
             [tp.to_dataframe() for tp in tif_processors], ignore_index=True
         )
-    
+
     def load_into_geodataframe(
         self,
         source: Union[
@@ -817,7 +817,7 @@ class GHSLDataHandler(BaseHandler):
         ],
         ensure_available: bool = True,
         **kwargs,
-    ) -> pd.DataFrame:
+    ) -> gpd.GeoDataFrame:
         """
         Load GHSL data into a geopandas GeoDataFrame.
 
@@ -835,3 +835,15 @@ class GHSLDataHandler(BaseHandler):
         return pd.concat(
             [tp.to_geodataframe() for tp in tif_processors], ignore_index=True
         )
+
+    def get_available_data_info(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[tuple, Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+        ],
+        **kwargs,
+    ) -> dict:
+        return super().get_available_data_info(source, file_ext=".tif", **kwargs)

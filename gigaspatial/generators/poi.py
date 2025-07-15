@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple, Literal
 from pydantic.dataclasses import dataclass, Field
 
 import geopandas as gpd
@@ -13,6 +13,7 @@ from gigaspatial.config import config as global_config
 from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
 from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
 from gigaspatial.handlers.ghsl import GHSLDataHandler
+from gigaspatial.handlers.worldpop import WPPopulationHandler
 from gigaspatial.processing.geo import (
     convert_to_geodataframe,
     buffer_geodataframe,
@@ -468,7 +469,7 @@ class PoiViewGenerator:
         map_radius_meters: Optional[float] = None,
         output_column: str = "zonal_stat",
         value_column: Optional[str] = None,
-        area_weighted: bool = False,
+        predicate: Literal["intersects", "within", "fractional"] = "intersects",
         **kwargs,
     ) -> pd.DataFrame:
         """
@@ -496,9 +497,8 @@ class PoiViewGenerator:
             value_column (str, optional):
                 For polygon data: Name of the column to aggregate. Required for polygon data.
                 Not used for raster data.
-            area_weighted (bool, optional):
-                For polygon data: Whether to weight values by fractional area of
-                intersection. Defaults to False.
+            predicate (Literal["intersects", "within", "fractional"], optional):
+                The spatial relationship to use for aggregation. Defaults to "intersects".
             **kwargs:
                 Additional keyword arguments passed to the sampling/aggregation functions.
 
@@ -575,7 +575,7 @@ class PoiViewGenerator:
                 )
 
             self.logger.info(
-                f"Aggregating {value_column} within {map_radius_meters}m buffers around POIs"
+                f"Aggregating {value_column} within {map_radius_meters}m buffers around POIs using predicate '{predicate}'"
             )
 
             # Create buffers around POIs
@@ -591,12 +591,17 @@ class PoiViewGenerator:
                 zones=buffer_gdf,
                 value_columns=value_column,
                 aggregation=stat,
-                area_weighted=area_weighted,
+                predicate=predicate,
                 zone_id_column="poi_id",
+                output_suffix="",
+                drop_geometry=True,
                 **kwargs,
             )
 
-            results_df = aggregation_result_gdf[["poi_id", value_column]].copy()
+            results_df = aggregation_result_gdf[["poi_id", value_column]]
+
+            if output_column != "zonal_stat":
+                results_df = results_df.rename(columns={value_column: output_column})
 
         else:
             raise ValueError(
@@ -662,7 +667,6 @@ class PoiViewGenerator:
 
     def map_smod(
         self,
-        stat="median",
         dataset_year=2020,
         dataset_resolution=1000,
         output_column="smod_class",
@@ -703,9 +707,65 @@ class PoiViewGenerator:
 
         return self.map_zonal_stats(
             data=tif_processors,
-            stat=stat,  # Use median for categorical data
             output_column=output_column,
             **kwargs,
+        )
+
+    def map_wp_pop(
+        self,
+        country: Union[str, List[str]],
+        map_radius_meters: float,
+        resolution=1000,
+        predicate: Literal[
+            "centroid_within", "intersects", "fractional", "within"
+        ] = "fractional",
+        output_column: str = "population",
+        **kwargs,
+    ):
+        if isinstance(country, str):
+            country = [country]
+
+        handler = WPPopulationHandler(
+            project="pop", resolution=resolution, data_store=self.data_store, **kwargs
+        )
+
+        self.logger.info(
+            f"Mapping WorldPop Population data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
+        )
+
+        if predicate == "fractional" and resolution == 100:
+            self.logger.warning(
+                "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
+            )
+            predicate = "intersects"
+        
+        if predicate == "centroid_within":
+            data = []
+            for c in country:
+                data.extend(
+                    handler.load_data(c, ensure_available=self.config.ensure_available)
+                )
+        else:
+            data = pd.concat(
+                [
+                    handler.load_into_geodataframe(
+                        c, ensure_available=self.config.ensure_available
+                    )
+                    for c in country
+                ],
+                ignore_index=True,
+            )
+
+        self.logger.info(f"Mapping WorldPop Population data into {map_radius_meters}m zones around POIs using 'sum' statistic")
+
+        return self.map_zonal_stats(
+            data,
+            stat="sum",
+            map_radius_meters=map_radius_meters,
+            value_column="pixel_value",
+            predicate=predicate,
+            output_column=output_column,
+            **kwargs
         )
 
     def save_view(
@@ -778,8 +838,11 @@ class PoiViewGenerator:
         Returns:
             gpd.GeoDataFrame: The current view merged with point geometries.
         """
-        return self.view.merge(
-            self.points_gdf[["poi_id", "geometry"]], on="poi_id", how="left"
+        return gpd.GeoDataFrame(
+            self.view.merge(
+                self.points_gdf[["poi_id", "geometry"]], on="poi_id", how="left"
+            ),
+            crs="EPSG:4326",
         )
 
     def chain_operations(self, operations: List[dict]) -> "PoiViewGenerator":
