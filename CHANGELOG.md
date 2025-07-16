@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.7] - 2024-07-16
+
+### Fixed
+
+- Fixed a bug in WorldPopHandler/ADLSDataStore integration where a `Path` object was passed instead of a string, causing a `quote_from_bytes() expected bytes` error during download.
+
 ## [v0.6.6] - 2025-07-15
 
 ### Added

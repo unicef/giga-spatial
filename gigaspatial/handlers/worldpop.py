@@ -611,7 +611,7 @@ class WPPopulationDownloader(BaseHandlerDownloader):
             total_size = int(response.headers.get("content-length", 0))
             file_path = self.config.get_data_unit_path(url)
 
-            with self.data_store.open(file_path, "wb") as file:
+            with self.data_store.open(str(file_path), "wb") as file:
                 with tqdm(
                     total=total_size,
                     unit="B",
