@@ -619,14 +619,14 @@ class BaseHandler(ABC):
             # Download logic
             if data_units is not None:
                 # Map data_units to their paths and select only those that are missing
-                unit_to_path = dict(zip(data_units, data_paths))
+                unit_to_path = dict(zip(data_paths,data_units)) #units might be dicts, cannot be used as key
                 if force_download:
                     # Download all units if force_download
                     self.downloader.download_data_units(data_units, **kwargs)
                 else:
                     missing_units = [
                         unit
-                        for unit, path in unit_to_path.items()
+                        for path, unit in unit_to_path.items()
                         if path in missing_paths
                     ]
                     if missing_units:
