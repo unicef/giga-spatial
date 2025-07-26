@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.6.9] - 2025-07-26
+
+### Fixed
+
+- Resolved a bug in the handler base class where non-hashable types (dicts) were incorrectly used as dictionary keys in `unit_to_path` mapping, preventing potential runtime errors during data availability checks.
+
 ## [v0.6.8] - 2025-07-26
 
 ### Added
