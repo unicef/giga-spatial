@@ -1,7 +1,8 @@
 import requests
 import pandas as pd
 from typing import List, Dict, Union, Optional, Literal
-from dataclasses import dataclass
+from pydantic.dataclasses import dataclass
+from pydantic import Field
 from time import sleep
 from concurrent.futures import ThreadPoolExecutor
 from requests.exceptions import RequestException
@@ -20,8 +21,10 @@ class OSMLocationFetcher:
     shops, and other POI categories.
     """
 
-    country: str
-    location_types: Union[List[str], Dict[str, List[str]]]
+    country: Optional[str] = None
+    admin_level: Optional[int] = None
+    admin_value: Optional[str] = None
+    location_types: Union[List[str], Dict[str, List[str]]] = Field(...)
     base_url: str = "http://overpass-api.de/api/interpreter"
     timeout: int = 600
     max_retries: int = 3
@@ -29,10 +32,6 @@ class OSMLocationFetcher:
 
     def __post_init__(self):
         """Validate inputs, normalize location_types, and set up logging."""
-        try:
-            self.country = pycountry.countries.lookup(self.country).alpha_2
-        except LookupError:
-            raise ValueError(f"Invalid country code provided: {self.country}")
 
         # Normalize location_types to always be a dictionary
         if isinstance(self.location_types, list):
@@ -43,6 +42,75 @@ class OSMLocationFetcher:
             )
 
         self.logger = config.get_logger(self.__class__.__name__)
+
+        # Validate area selection
+        if self.admin_level is not None and self.admin_value is not None:
+            self.area_query = f'area["admin_level"={self.admin_level}]["name"="{self.admin_value}"]->.searchArea;'
+            self.logger.info(
+                f"Using admin_level={self.admin_level}, name={self.admin_value} for area selection."
+            )
+        elif self.country is not None:
+            try:
+                self.country = pycountry.countries.lookup(self.country).alpha_2
+            except LookupError:
+                raise ValueError(f"Invalid country code provided: {self.country}")
+            self.area_query = f'area["ISO3166-1"={self.country}]->.searchArea;'
+            self.logger.info(f"Using country={self.country} for area selection.")
+        else:
+            raise ValueError(
+                "Either country or both admin_level and admin_value must be provided."
+            )
+
+    @staticmethod
+    def get_admin_names(
+        admin_level: int, country: Optional[str] = None, timeout: int = 120
+    ) -> List[str]:
+        """
+        Fetch all admin area names for a given admin_level (optionally within a country).
+
+        Args:
+            admin_level (int): The OSM admin_level to search for (e.g., 4 for states, 6 for counties).
+            country (str, optional): Country name or ISO code to filter within.
+            timeout (int): Timeout for the Overpass API request.
+
+        Returns:
+            List[str]: List of admin area names.
+        """
+
+        # Build area filter for country if provided
+        if country:
+            try:
+                country_code = pycountry.countries.lookup(country).alpha_2
+            except LookupError:
+                raise ValueError(f"Invalid country code or name: {country}")
+            area_filter = f'area["ISO3166-1"="{country_code}"]->.countryArea;'
+            area_ref = "(area.countryArea)"
+        else:
+            area_filter = ""
+            area_ref = ""
+
+        # Overpass QL to get all admin areas at the specified level
+        query = f"""
+        [out:json][timeout:{timeout}];
+        {area_filter}
+        (
+          relation["admin_level"="{admin_level}"]{area_ref};
+        );
+        out tags;
+        """
+
+        url = "http://overpass-api.de/api/interpreter"
+        response = requests.get(url, params={"data": query}, timeout=timeout)
+        response.raise_for_status()
+        data = response.json()
+
+        names = []
+        for el in data.get("elements", []):
+            tags = el.get("tags", {})
+            name = tags.get("name")
+            if name:
+                names.append(name)
+        return sorted(set(names))
 
     def _build_queries(self, since_year: Optional[int] = None) -> List[str]:
         """
@@ -68,7 +136,7 @@ class OSMLocationFetcher:
 
         nodes_relations_query = f"""
         [out:json][timeout:{self.timeout}];
-        area["ISO3166-1"={self.country}]->.searchArea;
+        {self.area_query}
         (
             {nodes_relations_queries}
         );
@@ -86,7 +154,7 @@ class OSMLocationFetcher:
 
         ways_query = f"""
         [out:json][timeout:{self.timeout}];
-        area["ISO3166-1"={self.country}]->.searchArea;
+        {self.area_query}
         (
             {ways_queries}
         );

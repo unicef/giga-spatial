@@ -247,7 +247,10 @@ class HDXConfig(BaseHandlerConfig):
             # If source is a dict, use it directly as a filter
             return self.get_dataset_resources(filter=source, **kwargs)
         else:
-            raise ValueError(f"Unsupported source type: {type(source)}")
+            raise ValueError(
+                f"Unsupported source type: {type(source)}"
+                "Please use country-based filtering or direct resource filtering instead."
+            )
 
     def get_relevant_data_units_by_geometry(
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
