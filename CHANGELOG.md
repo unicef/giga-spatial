@@ -2,7 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.6.7] - 2024-07-16
+## [v0.6.8] - 2025-07-26
+
+### Added
+
+- **OSMLocationFetcher Enhancements**
+  - Support for querying OSM locations by arbitrary administrative levels (e.g., states, provinces, cities), in addition to country-level queries.
+  - New optional parameters:
+    - `admin_level`: Specify OSM administrative level (e.g., 4 for states, 6 for counties).
+    - `admin_value`: Name of the administrative area to query (e.g., "California").
+  - New static method `get_admin_names(admin_level, country=None)`:
+    - Fetch all administrative area names for a given `admin_level`, optionally filtered by country.
+    - Helps users discover valid admin area names for constructing precise queries.
+
+- **Multi-Raster Merging Support in TifProcessor**
+  - Added ability to initialize `TifProcessor` with **multiple raster datasets**.
+  - Merges rasters on load with configurable strategies:
+    - Supported `merge_method` options: `first`, `last`, `min`, `max`, `mean`.
+  - Supports **on-the-fly reprojection** for rasters with differing coordinate reference systems via `target_crs`.
+  - Handles **resampling** using `resampling_method` (default: `nearest`).
+  - Comprehensive validation to ensure compatibility of input rasters (e.g., resolution, nodata, dtype).
+  - Temporary file management for merged output with automatic cleanup.
+  - Backward compatible with single-raster use cases.
+
+  **New TifProcessor Parameters:**
+  - `merge_method` (default: `first`) – How to combine pixel values across rasters.
+  - `target_crs` (optional) – CRS to reproject rasters before merging.
+  - `resampling_method` – Resampling method for reprojection.
+
+  **New Properties:**
+  - `is_merged`: Indicates whether the current instance represents merged rasters.
+  - `source_count`: Number of raster datasets merged.
+
+### Changed
+
+- **OSMLocationFetcher Overpass Query Logic**
+  - Refactored Overpass QL query builder to support **subnational queries** using `admin_level` and `admin_value`.
+  - Improved flexibility and precision for spatial data collection across different administrative hierarchies.
+
+### Breaking Changes
+
+- None. All changes are fully backward compatible.
+
+## [v0.6.7] - 2025-07-16
 
 ### Fixed
 
