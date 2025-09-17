@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.0] - 2025-09-17
+
+### Added
+
+- **TifProcessor Revamp**
+    - **Explicit Reprojection Method:** Introduced `reproject_to()` method, allowing on-demand reprojection of rasters to a new CRS with customizable `resampling_method` and `resolution`.
+    - **Reprojection Resolution Control:** Added `reprojection_resolution` parameter to `TifProcessor` for precise control over output pixel size during reprojection.
+    - **Advanced Raster Information:** Added `get_raster_info()` method to retrieve a comprehensive dictionary of raster metadata.
+    - **Graph Conversion Capabilities:** Implemented `to_graph()` method to convert raster data into a graph (NetworkX or sparse matrix) based on pixel adjacency (4- or 8-connectivity).
+    - **Internal Refactoring: `_reproject_to_temp_file`:** Introduced `_reproject_to_temp_file` as a helper for reprojection into temporary files.
+
+- **H3 Grid Generation**
+    - **H3 Grid Generation Module (`gigaspatial/grid/h3.py`):**
+        - Introduced `H3Hexagons` class for managing H3 cell IDs.
+        - Supports creation from lists of hexagons, geographic bounds, spatial geometries, or points.
+        - Provides methods to convert H3 hexagons to pandas DataFrames and GeoPandas GeoDataFrames.
+        - Includes functionalities for filtering, getting k-ring neighbors, compacting hexagons, and getting children/parents at different resolutions.
+        - Allows saving H3Hexagons to JSON, Parquet, or GeoJSON files.
+    - **Country-Specific H3 Hexagons (`CountryH3Hexagons`):**
+        - Extends `H3Hexagons` for generating H3 grids constrained by country boundaries.
+        - Integrates with `AdminBoundaries` to fetch country geometries for precise H3 cell generation.
+
+- **Documentation**
+    - Improved `tif.md` example to showcase multi-raster initialization, explicit reprojection, and graph conversion.
+
+### Changed
+
+- **TifProcessor**
+  - **Improved Temporary File Management:** Refactored temporary file handling for merging and reprojection using `tempfile.mkdtemp()` and `shutil.rmtree` for more robust and reliable cleanup. Integrated with context manager (`__enter__`, `__exit__`) and added a dedicated `cleanup()` method.
+  - **Reprojection during Initialization:** Implemented automatic reprojection of single rasters to a specified `target_crs` during `TifProcessor` initialization.
+  - **Enhanced `open_dataset` Context Manager:** The `open_dataset` context manager now intelligently opens the most up-to-date (merged or reprojected) version of the dataset.
+  - **More Flexible Multi-Dataset Validation:** Modified `_validate_multiple_datasets` to issue a warning instead of raising an error for CRS mismatches when `target_crs` is not set.
+  - **Optimized `_get_reprojection_profile`:** Dynamically calculates transform and dimensions based on `reprojection_resolution` and added LZW compression to reprojected TIFF files to reduce file size.
+
+- **ADLSDataStore Enhancements**
+    - **New `copy_file` method:** Implemented a new method for copying individual files within ADLS, with an option to overwrite existing files.
+    - **New `rename` method:** Added a new method to rename (move) files in ADLS, which internally uses `copy_file` and then deletes the source, with options for overwrite, waiting for copy completion, and polling.
+    - **Revamped `rmdir` method:** Modified `rmdir` to perform batch deletions of blobs, addressing the Azure Blob batch delete limit (256 sub-requests) and improving efficiency for large directories.
+
+- **LocalDataStore Enhancements**
+    - **New `copy_file` method:** Implemented a new method for copying individual files.
+
+### Removed
+
+- Removed deprecated `tabular` property and `get_zoned_geodataframe` method from `TifProcessor`. Users should now use `to_dataframe()` and `to_geodataframe()` respectively.
+
+### Dependencies
+
+- Added `networkx` and `h3` as new dependencies.
+
+### Fixed
+
+- Several small fixes and improvements to aggregation methods.
+
 ## [v0.6.9] - 2025-07-26
 
 ### Fixed

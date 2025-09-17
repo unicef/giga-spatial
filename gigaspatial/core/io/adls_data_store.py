@@ -1,4 +1,5 @@
 from azure.storage.blob import BlobServiceClient
+import time
 import io
 import contextlib
 import logging
@@ -151,20 +152,45 @@ class ADLSDataStore(DataStore):
                     "\\", "/"
                 )
 
-                # Create a source blob client
-                source_blob_client = self.container_client.get_blob_client(blob.name)
-
-                # Create a destination blob client
-                destination_blob_client = self.container_client.get_blob_client(
-                    new_blob_path
-                )
-
-                # Start the copy operation
-                destination_blob_client.start_copy_from_url(source_blob_client.url)
+                # Use copy_file method to copy each file
+                self.copy_file(blob.name, new_blob_path, overwrite=True)
 
             print(f"Copied directory from {source_dir} to {destination_dir}")
         except Exception as e:
             print(f"Failed to copy directory {source_dir}: {e}")
+
+    def copy_file(
+        self, source_path: str, destination_path: str, overwrite: bool = False
+    ):
+        """
+        Copies a single file from source to destination within the same container.
+
+        :param source_path: The source file path in the blob storage
+        :param destination_path: The destination file path in the blob storage
+        :param overwrite: If True, overwrite the destination file if it already exists
+        """
+        try:
+            if not self.file_exists(source_path):
+                raise FileNotFoundError(f"Source file not found: {source_path}")
+
+            if self.file_exists(destination_path) and not overwrite:
+                raise FileExistsError(
+                    f"Destination file already exists and overwrite is False: {destination_path}"
+                )
+
+            # Create source and destination blob clients
+            source_blob_client = self.container_client.get_blob_client(source_path)
+            destination_blob_client = self.container_client.get_blob_client(
+                destination_path
+            )
+
+            # Start the server-side copy operation
+            destination_blob_client.start_copy_from_url(source_blob_client.url)
+
+            print(f"Copied file from {source_path} to {destination_path}")
+        except Exception as e:
+            print(f"Failed to copy file {source_path}: {e}")
+            raise
 
     def exists(self, path: str) -> bool:
         blob_client = self.blob_service_client.get_blob_client(
@@ -285,8 +311,20 @@ class ADLSDataStore(DataStore):
         return False
 
     def rmdir(self, dir: str) -> None:
-        blobs = self.list_files(dir)
-        self.container_client.delete_blobs(*blobs)
+        # Normalize directory path to ensure it targets all children
+        dir_path = dir.rstrip("/") + "/"
+
+        # Azure Blob batch delete has a hard limit on number of sub-requests
+        # per batch (currently 256). Delete in chunks to avoid
+        # ExceedsMaxBatchRequestCount errors.
+        blobs = list(self.list_files(dir_path))
+        if not blobs:
+            return
+
+        BATCH_LIMIT = 256
+        for start_idx in range(0, len(blobs), BATCH_LIMIT):
+            batch = blobs[start_idx : start_idx + BATCH_LIMIT]
+            self.container_client.delete_blobs(*batch)
 
     def mkdir(self, path: str, exist_ok: bool = False) -> None:
         """
@@ -323,3 +361,58 @@ class ADLSDataStore(DataStore):
         )
         if blob_client.exists():
             blob_client.delete_blob()
+
+    def rename(
+        self,
+        source_path: str,
+        destination_path: str,
+        overwrite: bool = False,
+        delete_source: bool = True,
+        wait: bool = True,
+        timeout_seconds: int = 300,
+        poll_interval_seconds: int = 1,
+    ) -> None:
+        """
+        Rename (move) a single file by copying to the new path and deleting the source.
+
+        :param source_path: Existing blob path
+        :param destination_path: Target blob path
+        :param overwrite: Overwrite destination if it already exists
+        :param delete_source: Delete original after successful copy
+        :param wait: Wait for the copy operation to complete
+        :param timeout_seconds: Max time to wait for copy to succeed
+        :param poll_interval_seconds: Polling interval while waiting
+        """
+
+        if not self.file_exists(source_path):
+            raise FileNotFoundError(f"Source file not found: {source_path}")
+
+        if self.file_exists(destination_path) and not overwrite:
+            raise FileExistsError(
+                f"Destination already exists and overwrite is False: {destination_path}"
+            )
+
+        # Use copy_file method to copy the file
+        self.copy_file(source_path, destination_path, overwrite=overwrite)
+
+        if wait:
+            # Wait for copy to complete if requested
+            dest_client = self.container_client.get_blob_client(destination_path)
+            deadline = time.time() + timeout_seconds
+            while True:
+                props = dest_client.get_blob_properties()
+                status = getattr(props.copy, "status", None)
+                if status == "success":
+                    break
+                if status in {"aborted", "failed"}:
+                    raise IOError(
+                        f"Copy failed with status {status} from {source_path} to {destination_path}"
+                    )
+                if time.time() > deadline:
+                    raise TimeoutError(
+                        f"Timed out waiting for copy to complete for {destination_path}"
+                    )
+                time.sleep(poll_interval_seconds)
+
+        if delete_source:
+            self.remove(source_path)

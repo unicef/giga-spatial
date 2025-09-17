@@ -77,7 +77,7 @@ class MercatorTiles(BaseModel):
                 geometry=source, zoom_level=zoom_level, predicate=predicate, **kwargs
             )
         elif isinstance(source, Iterable) and all(
-            len(pt) == 2 or isinstance(pt, Point) for pt in source
+            isinstance(pt, Point) or len(pt) == 2 for pt in source
         ):
             return cls.from_points(geometry=source, zoom_level=zoom_level, **kwargs)
         else:

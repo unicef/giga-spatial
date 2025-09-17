@@ -145,11 +145,18 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             gpd.GeoDataFrame: A GeoDataFrame with 'zone_id' and 'geometry' columns.
                 The zone_id column is renamed from the original zone_id_column if different.
         """
-        # If we already have a GeoDataFrame, just rename the ID column if needed
-        result = self._zone_gdf.copy()
-        if self.zone_id_column != "zone_id":
-            result = result.rename(columns={self.zone_id_column: "zone_id"})
-        return result
+        # Since _zone_gdf is already created with 'zone_id' column in the constructor,
+        # we just need to return a copy of it
+        return self._zone_gdf.copy()
+
+    @property
+    def zone_gdf(self) -> gpd.GeoDataFrame:
+        """Override the base class zone_gdf property to ensure correct column names.
+
+        Returns:
+            gpd.GeoDataFrame: A GeoDataFrame with 'zone_id' and 'geometry' columns.
+        """
+        return self._zone_gdf.copy()
 
     def map_built_s(
         self,

@@ -5,6 +5,14 @@
 
 # GigaSpatial
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-brightgreen.svg)](https://opensource.org/license/agpl-v3)
+[![PyPI version](https://badge.fury.io/py/giga-spatial.svg)](https://badge.fury.io/py/giga-spatial)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/giga-spatial.svg?color=dark-green)](https://pypi.org/project/giga-spatial/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![PyPI Downloads](https://static.pepy.tech/badge/giga-spatial)](https://pepy.tech/projects/giga-spatial)
+[![GitHub commit activity](https://img.shields.io/github/commit-activity/y/unicef/giga-spatial.svg?color=dark-green)](https://github.com/unicef/giga-spatial/graphs/contributors)
+
+
 ## About Giga
 
 [Giga](https://giga.global/) is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice. 

@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import shutil
 from typing import Any, List, Generator, Tuple, Union, IO
 
 from .data_store import DataStore
@@ -78,6 +79,13 @@ class LocalDataStore(DataStore):
         full_path = self._resolve_path(path)
         if full_path.is_file():
             os.remove(full_path)
+
+    def copy_file(self, src: str, dst: str) -> None:
+        """Copy a file from src to dst."""
+        src_path = self._resolve_path(src)
+        dst_path = self._resolve_path(dst)
+        self.mkdir(str(dst_path.parent), exist_ok=True)
+        shutil.copy2(src_path, dst_path)
 
     def rmdir(self, directory: str) -> None:
         full_path = self._resolve_path(directory)

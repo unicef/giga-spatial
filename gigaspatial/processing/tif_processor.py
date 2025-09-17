@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from typing import List, Optional, Tuple, Union, Literal, Callable
+import networkx as nx
+import scipy.sparse as sp
+from typing import List, Optional, Tuple, Union, Literal, Callable, Dict, Any
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 from contextlib import contextmanager
@@ -15,6 +17,7 @@ from functools import partial
 import multiprocessing
 from tqdm import tqdm
 import tempfile
+import shutil
 import os
 
 from gigaspatial.core.io.data_store import DataStore
@@ -35,25 +38,39 @@ class TifProcessor:
     merge_method: Literal["first", "last", "min", "max", "mean"] = "first"
     target_crs: Optional[str] = None  # For reprojection if needed
     resampling_method: Resampling = Resampling.nearest
+    reprojection_resolution: Optional[Tuple[float, float]] = None
 
     def __post_init__(self):
         """Validate inputs, merge rasters if needed, and set up logging."""
         self.data_store = self.data_store or LocalDataStore()
         self.logger = config.get_logger(self.__class__.__name__)
         self._cache = {}
+        self._temp_dir = tempfile.mkdtemp()
         self._merged_file_path = None
-        self._temp_dir = None
+        self._reprojected_file_path = None
 
         # Handle multiple dataset paths
         if isinstance(self.dataset_path, list):
-            self.dataset_paths = [Path(p) for p in self.dataset_path]
-            self._validate_multiple_datasets()
-            self._merge_rasters()
-            self.dataset_path = self._merged_file_path
+            if len(self.dataset_path) > 1:
+                self.dataset_paths = [Path(p) for p in self.dataset_path]
+                self._validate_multiple_datasets()
+                self._merge_rasters()
+                self.dataset_path = self._merged_file_path
         else:
             self.dataset_paths = [Path(self.dataset_path)]
-            if not self.data_store.file_exists(self.dataset_path):
+            if not self.data_store.file_exists(str(self.dataset_path)):
                 raise FileNotFoundError(f"Dataset not found at {self.dataset_path}")
+
+            # Reproject single raster during initialization if target_crs is set
+            if self.target_crs:
+                self.logger.info(f"Reprojecting single raster to {self.target_crs}...")
+                with self.data_store.open(str(self.dataset_path), "rb") as f:
+                    with rasterio.MemoryFile(f.read()) as memfile:
+                        with memfile.open() as src:
+                            self._reprojected_file_path = self._reproject_to_temp_file(
+                                src, self.target_crs
+                            )
+                self.dataset_path = self._reprojected_file_path
 
         self._load_metadata()
 
@@ -67,18 +84,124 @@ class TifProcessor:
         if self.mode == "multi" and self.count < 2:
             raise ValueError("Multi mode requires a TIF file with 2 or more bands")
 
+    @contextmanager
+    def open_dataset(self):
+        """Context manager for accessing the dataset, handling temporary reprojected files."""
+        if self._merged_file_path:
+            with rasterio.open(self._merged_file_path) as src:
+                yield src
+        elif self._reprojected_file_path:
+            with rasterio.open(self._reprojected_file_path) as src:
+                yield src
+        else:
+            with self.data_store.open(str(self.dataset_path), "rb") as f:
+                with rasterio.MemoryFile(f.read()) as memfile:
+                    with memfile.open() as src:
+                        yield src
+
+    def reproject_to(
+        self,
+        target_crs: str,
+        output_path: Optional[Union[str, Path]] = None,
+        resampling_method: Optional[Resampling] = None,
+        resolution: Optional[Tuple[float, float]] = None,
+    ):
+        """
+        Reprojects the current raster to a new CRS and optionally saves it.
+
+        Args:
+            target_crs: The CRS to reproject to (e.g., "EPSG:4326").
+            output_path: The path to save the reprojected raster. If None,
+                         it is saved to a temporary file.
+            resampling_method: The resampling method to use.
+            resolution: The target resolution (pixel size) in the new CRS.
+        """
+        self.logger.info(f"Reprojecting raster to {target_crs}...")
+
+        # Use provided or default values
+        resampling_method = resampling_method or self.resampling_method
+        resolution = resolution or self.reprojection_resolution
+
+        with self.open_dataset() as src:
+            if src.crs.to_string() == target_crs:
+                self.logger.info(
+                    "Raster is already in the target CRS. No reprojection needed."
+                )
+                # If output_path is specified, copy the file
+                if output_path:
+                    self.data_store.copy_file(str(self.dataset_path), output_path)
+                return self.dataset_path
+
+            dst_path = output_path or os.path.join(
+                self._temp_dir, f"reprojected_single_{os.urandom(8).hex()}.tif"
+            )
+
+            with rasterio.open(
+                dst_path,
+                "w",
+                **self._get_reprojection_profile(src, target_crs, resolution),
+            ) as dst:
+                for band_idx in range(1, src.count + 1):
+                    reproject(
+                        source=rasterio.band(src, band_idx),
+                        destination=rasterio.band(dst, band_idx),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=dst.transform,
+                        dst_crs=dst.crs,
+                        resampling=resampling_method,
+                        num_threads=multiprocessing.cpu_count(),
+                    )
+
+            self.logger.info(f"Reprojection complete. Output saved to {dst_path}")
+            return Path(dst_path)
+
+    def get_raster_info(self) -> Dict[str, Any]:
+        """Get comprehensive raster information."""
+        return {
+            "count": self.count,
+            "width": self.width,
+            "height": self.height,
+            "crs": self.crs,
+            "bounds": self.bounds,
+            "transform": self.transform,
+            "dtypes": self.dtype,
+            "nodata": self.nodata,
+            "mode": self.mode,
+            "is_merged": self.is_merged,
+            "source_count": self.source_count,
+        }
+
+    def _reproject_to_temp_file(
+        self, src: rasterio.DatasetReader, target_crs: str
+    ) -> str:
+        """Helper to reproject a raster and save it to a temporary file."""
+        dst_path = os.path.join(
+            self._temp_dir, f"reprojected_temp_{os.urandom(8).hex()}.tif"
+        )
+        profile = self._get_reprojection_profile(
+            src, target_crs, self.reprojection_resolution
+        )
+
+        with rasterio.open(dst_path, "w", **profile) as dst:
+            for band_idx in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, band_idx),
+                    destination=rasterio.band(dst, band_idx),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=dst.transform,
+                    dst_crs=dst.crs,
+                    resampling=self.resampling_method,
+                )
+        return dst_path
+
     def _validate_multiple_datasets(self):
         """Validate that all datasets exist and have compatible properties."""
         if len(self.dataset_paths) < 2:
             raise ValueError("Multiple dataset paths required for merging")
 
-        # Check if all files exist
-        for path in self.dataset_paths:
-            if not self.data_store.file_exists(path):
-                raise FileNotFoundError(f"Dataset not found at {path}")
-
-        # Load first dataset to get reference properties
-        with self.data_store.open(self.dataset_paths[0], "rb") as f:
+        with self.data_store.open(str(self.dataset_paths[0]), "rb") as f:
             with rasterio.MemoryFile(f.read()) as memfile:
                 with memfile.open() as ref_src:
                     ref_count = ref_src.count
@@ -87,9 +210,8 @@ class TifProcessor:
                     ref_transform = ref_src.transform
                     ref_nodata = ref_src.nodata
 
-        # Validate all other datasets against reference
         for i, path in enumerate(self.dataset_paths[1:], 1):
-            with self.data_store.open(path, "rb") as f:
+            with self.data_store.open(str(path), "rb") as f:
                 with rasterio.MemoryFile(f.read()) as memfile:
                     with memfile.open() as src:
                         if src.count != ref_count:
@@ -100,9 +222,10 @@ class TifProcessor:
                             raise ValueError(
                                 f"Dataset {i} has dtype {src.dtypes[0]}, expected {ref_dtype}"
                             )
-                        if self.target_crs is None and src.crs != ref_crs:
-                            raise ValueError(
-                                f"Dataset {i} has CRS {src.crs}, expected {ref_crs}. Consider setting target_crs parameter."
+                        if not self.target_crs and src.crs != ref_crs:
+                            self.logger.warning(
+                                f"Dataset {i} has CRS {src.crs}, expected {ref_crs}. "
+                                "Consider setting target_crs parameter for reprojection before merging."
                             )
                         if self.target_crs is None and not self._transforms_compatible(
                             src.transform, ref_transform
@@ -115,6 +238,46 @@ class TifProcessor:
                                 f"Dataset {i} has different nodata value: {src.nodata} vs {ref_nodata}"
                             )
 
+    def _get_reprojection_profile(
+        self,
+        src: rasterio.DatasetReader,
+        target_crs: str,
+        resolution: Optional[Tuple[float, float]],
+        compression: str = "lzw",
+    ):
+        """Calculates and returns the profile for a reprojected raster."""
+        if resolution:
+            src_res = (abs(src.transform.a), abs(src.transform.e))
+            self.logger.info(
+                f"Using target resolution: {resolution}. Source resolution: {src_res}."
+            )
+            # Calculate transform and dimensions based on the new resolution
+            dst_transform, width, height = calculate_default_transform(
+                src.crs,
+                target_crs,
+                src.width,
+                src.height,
+                *src.bounds,
+                resolution=resolution,
+            )
+        else:
+            # Keep original resolution but reproject
+            dst_transform, width, height = calculate_default_transform(
+                src.crs, target_crs, src.width, src.height, *src.bounds
+            )
+
+        profile = src.profile.copy()
+        profile.update(
+            {
+                "crs": target_crs,
+                "transform": dst_transform,
+                "width": width,
+                "height": height,
+                "compress": compression,  # Add compression to save space
+            }
+        )
+        return profile
+
     def _transforms_compatible(self, transform1, transform2, tolerance=1e-6):
         """Check if two transforms have compatible pixel sizes."""
         return (
@@ -126,151 +289,77 @@ class TifProcessor:
         """Merge multiple rasters into a single raster."""
         self.logger.info(f"Merging {len(self.dataset_paths)} rasters...")
 
-        # Create temporary directory for merged file
-        self._temp_dir = tempfile.mkdtemp()
-        merged_filename = "merged_raster.tif"
-        self._merged_file_path = os.path.join(self._temp_dir, merged_filename)
-
         # Open all datasets and handle reprojection if needed
-        src_files = []
-        reprojected_files = []
-
+        datasets_to_merge = []
+        temp_reprojected_files = []
         try:
             for path in self.dataset_paths:
-                with self.data_store.open(path, "rb") as f:
-                    # Create temporary file for each dataset
-                    temp_file = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
-                    temp_file.write(f.read())
-                    temp_file.close()
-                    src_files.append(rasterio.open(temp_file.name))
+                with self.data_store.open(str(path), "rb") as f:
+                    with rasterio.MemoryFile(f.read()) as memfile:
+                        with memfile.open() as src:
+                            if self.target_crs and src.crs != self.target_crs:
+                                self.logger.info(
+                                    f"Reprojecting {path.name} to {self.target_crs} before merging."
+                                )
+                                reprojected_path = self._reproject_to_temp_file(
+                                    src, self.target_crs
+                                )
+                                temp_reprojected_files.append(reprojected_path)
+                                datasets_to_merge.append(
+                                    rasterio.open(reprojected_path)
+                                )
+                            else:
+                                temp_path = os.path.join(
+                                    self._temp_dir,
+                                    f"temp_{path.stem}_{os.urandom(4).hex()}.tif",
+                                )
+                                temp_reprojected_files.append(temp_path)
 
-            # Handle reprojection if target_crs is specified
-            if self.target_crs:
-                self.logger.info(f"Reprojecting rasters to {self.target_crs}...")
-                processed_files = self._reproject_rasters(src_files, self.target_crs)
-                reprojected_files = processed_files
-            else:
-                processed_files = src_files
+                                profile = src.profile
+                                with rasterio.open(temp_path, "w", **profile) as dst:
+                                    dst.write(src.read())
+                                datasets_to_merge.append(rasterio.open(temp_path))
+
+            self._merged_file_path = os.path.join(self._temp_dir, "merged_raster.tif")
 
             if self.merge_method == "mean":
-                # For mean, we need to handle it manually
-                merged_array, merged_transform = self._merge_with_mean(src_files)
-
-                # Use first source as reference for metadata
-                ref_src = src_files[0]
-                profile = ref_src.profile.copy()
-                profile.update(
-                    {
-                        "height": merged_array.shape[-2],
-                        "width": merged_array.shape[-1],
-                        "transform": merged_transform,
-                    }
+                merged_array, merged_transform = self._merge_with_mean(
+                    datasets_to_merge
                 )
-
-                # Write merged raster
-                with rasterio.open(self._merged_file_path, "w", **profile) as dst:
-                    dst.write(merged_array)
-
             else:
-                # Use rasterio's merge function
                 merged_array, merged_transform = merge(
-                    src_files,
+                    datasets_to_merge,
                     method=self.merge_method,
                     resampling=self.resampling_method,
                 )
 
-                # Use first source as reference for metadata
-                ref_src = src_files[0]
-                profile = ref_src.profile.copy()
-                profile.update(
-                    {
-                        "height": merged_array.shape[-2],
-                        "width": merged_array.shape[-1],
-                        "transform": merged_transform,
-                    }
-                )
-
-                if self.target_crs:
-                    profile["crs"] = self.target_crs
-
-                # Write merged raster
-                with rasterio.open(self._merged_file_path, "w", **profile) as dst:
-                    dst.write(merged_array)
-
-        finally:
-            # Clean up source files
-            for src in src_files:
-                temp_path = src.name
-                src.close()
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
-
-            # Clean up reprojected files
-            for src in reprojected_files:
-                if src not in src_files:  # Don't double-close
-                    temp_path = src.name
-                    src.close()
-                    try:
-                        os.unlink(temp_path)
-                    except:
-                        pass
-
-        self.logger.info("Raster merging completed!")
-
-    def _reproject_rasters(self, src_files, target_crs):
-        """Reproject all rasters to a common CRS before merging."""
-        reprojected_files = []
-
-        for i, src in enumerate(src_files):
-            if src.crs.to_string() == target_crs:
-                # No reprojection needed
-                reprojected_files.append(src)
-                continue
-
-            # Calculate transform and dimensions for reprojection
-            transform, width, height = calculate_default_transform(
-                src.crs,
-                target_crs,
-                src.width,
-                src.height,
-                *src.bounds,
-                resolution=self.resolution if hasattr(self, "resolution") else None,
-            )
-
-            # Create temporary file for reprojected raster
-            temp_file = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
-            temp_file.close()
-
-            # Set up profile for reprojected raster
-            profile = src.profile.copy()
+            # Get profile from the first file in the list (all should be compatible now)
+            ref_src = datasets_to_merge[0]
+            profile = ref_src.profile.copy()
             profile.update(
                 {
-                    "crs": target_crs,
-                    "transform": transform,
-                    "width": width,
-                    "height": height,
+                    "height": merged_array.shape[-2],
+                    "width": merged_array.shape[-1],
+                    "transform": merged_transform,
+                    "crs": self.target_crs if self.target_crs else ref_src.crs,
                 }
             )
 
-            # Reproject and write to temporary file
-            with rasterio.open(temp_file.name, "w", **profile) as dst:
-                for band_idx in range(1, src.count + 1):
-                    reproject(
-                        source=rasterio.band(src, band_idx),
-                        destination=rasterio.band(dst, band_idx),
-                        src_transform=src.transform,
-                        src_crs=src.crs,
-                        dst_transform=transform,
-                        dst_crs=target_crs,
-                        resampling=self.resampling_method,
-                    )
+            with rasterio.open(self._merged_file_path, "w", **profile) as dst:
+                dst.write(merged_array)
+        finally:
+            for dataset in datasets_to_merge:
+                if hasattr(dataset, "close"):
+                    dataset.close()
 
-            # Open reprojected file
-            reprojected_files.append(rasterio.open(temp_file.name))
+            # Clean up temporary files immediately
+            for temp_file in temp_reprojected_files:
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
 
-        return reprojected_files
+        self.logger.info("Raster merging completed!")
 
     def _merge_with_mean(self, src_files):
         """Merge rasters using mean aggregation."""
@@ -294,6 +383,12 @@ class TifProcessor:
         merged_transform = rasterio.transform.from_bounds(
             bounds.left, bounds.bottom, bounds.right, bounds.top, width, height
         )
+
+        estimated_memory = height * width * src_files[0].count * 8  # float64
+        if estimated_memory > 1e9:  # 1GB threshold
+            self.logger.warning(
+                f"Large memory usage expected: {estimated_memory/1e9:.1f}GB"
+            )
 
         # Initialize arrays for sum and count
         sum_array = np.zeros((src_files[0].count, height, width), dtype=np.float64)
@@ -336,33 +431,9 @@ class TifProcessor:
 
         return mean_array.astype(src_files[0].dtypes[0]), merged_transform
 
-    def __del__(self):
-        """Cleanup temporary files."""
-        if self._temp_dir and os.path.exists(self._temp_dir):
-            try:
-                import shutil
-
-                shutil.rmtree(self._temp_dir)
-            except:
-                pass
-
-    @contextmanager
-    def open_dataset(self):
-        """Context manager for accessing the dataset"""
-        if self._merged_file_path:
-            # Open merged file directly
-            with rasterio.open(self._merged_file_path) as src:
-                yield src
-        else:
-            # Original single file logic
-            with self.data_store.open(self.dataset_path, "rb") as f:
-                with rasterio.MemoryFile(f.read()) as memfile:
-                    with memfile.open() as src:
-                        yield src
-
     def _load_metadata(self):
         """Load metadata from the TIF file if not already cached"""
-        if not self._cache:
+        try:
             with self.open_dataset() as src:
                 self._cache["transform"] = src.transform
                 self._cache["crs"] = src.crs.to_string()
@@ -375,6 +446,10 @@ class TifProcessor:
                 self._cache["nodata"] = src.nodata
                 self._cache["count"] = src.count
                 self._cache["dtype"] = src.dtypes[0]
+        except (rasterio.errors.RasterioIOError, FileNotFoundError) as e:
+            raise FileNotFoundError(f"Could not read raster metadata: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error loading metadata: {e}")
 
     @property
     def is_merged(self) -> bool:
@@ -386,7 +461,6 @@ class TifProcessor:
         """Get the number of source rasters."""
         return len(self.dataset_paths)
 
-    # All other methods remain the same...
     @property
     def transform(self):
         """Get the transform from the TIF file"""
@@ -428,39 +502,17 @@ class TifProcessor:
         return self._cache["nodata"]
 
     @property
-    def tabular(self) -> pd.DataFrame:
-        """Get the data from the TIF file"""
-        self.logger.warning(
-            "The `tabular` property is deprecated, use `to_dataframe` instead"
-        )
-        if not hasattr(self, "_tabular"):
-            try:
-                if self.mode == "single":
-                    self._tabular = self._to_band_dataframe(
-                        drop_nodata=True, drop_values=[]
-                    )
-                elif self.mode == "rgb":
-                    self._tabular = self._to_rgb_dataframe(drop_nodata=True)
-                elif self.mode == "rgba":
-                    self._tabular = self._to_rgba_dataframe(drop_transparent=True)
-                elif self.mode == "multi":
-                    self._tabular = self._to_multi_band_dataframe(
-                        drop_nodata=True,
-                        drop_values=[],
-                        band_names=None,  # Use default band naming
-                    )
-                else:
-                    raise ValueError(
-                        f"Invalid mode: {self.mode}. Must be one of: single, rgb, rgba, multi"
-                    )
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to process TIF file in mode '{self.mode}'. "
-                    f"Please ensure the file is valid and matches the selected mode. "
-                    f"Original error: {str(e)}"
-                )
+    def dtype(self):
+        """Get the data types from the TIF file"""
+        return self._cache.get("dtype", [])
 
-        return self._tabular
+    @property
+    def width(self):
+        return self._cache["width"]
+
+    @property
+    def height(self):
+        return self._cache["height"]
 
     def to_dataframe(self, drop_nodata=True, **kwargs) -> pd.DataFrame:
         try:
@@ -504,30 +556,115 @@ class TifProcessor:
 
         return gdf
 
-    def get_zoned_geodataframe(self) -> gpd.GeoDataFrame:
+    def to_graph(
+        self,
+        connectivity: Literal[4, 8] = 4,
+        band: Optional[int] = None,
+        include_coordinates: bool = False,
+        graph_type: Literal["networkx", "sparse"] = "networkx",
+        chunk_size: Optional[int] = None,
+    ) -> Union[nx.Graph, sp.csr_matrix]:
         """
-        Convert the processed TIF data into a GeoDataFrame, where each row represents a pixel zone.
-        Each zone is defined by its bounding box, based on pixel resolution and coordinates.
+        Convert raster to graph based on pixel adjacency.
         """
-        self.logger.warning(
-            "The `get_zoned_geodataframe` method is deprecated, use `to_geodataframe` instead"
-        )
-        self.logger.info("Converting data to GeoDataFrame with zones...")
+        if chunk_size is not None:
+            raise NotImplementedError("Chunked processing is not yet implemented.")
 
-        df = self.tabular
+        with self.open_dataset() as src:
+            band_idx = band - 1 if band is not None else 0
+            if band_idx < 0 or band_idx >= src.count:
+                raise ValueError(
+                    f"Band {band} not available. Raster has {src.count} bands"
+                )
 
-        x_res, y_res = self.resolution
+            data = src.read(band_idx + 1)
+            nodata = src.nodata if src.nodata is not None else self.nodata
+            valid_mask = (
+                data != nodata if nodata is not None else np.ones_like(data, dtype=bool)
+            )
 
-        # create bounding box for each pixel
-        geometries = [
-            box(lon - x_res / 2, lat - y_res / 2, lon + x_res / 2, lat + y_res / 2)
-            for lon, lat in zip(df["lon"], df["lat"])
-        ]
+            height, width = data.shape
 
-        gdf = gpd.GeoDataFrame(df, geometry=geometries, crs=self.crs)
+            # Find all valid pixels
+            valid_rows, valid_cols = np.where(valid_mask)
+            num_valid_pixels = len(valid_rows)
 
-        self.logger.info("Conversion to GeoDataFrame complete!")
-        return gdf
+            # Create a sequential mapping from (row, col) to a node ID
+            node_map = np.full(data.shape, -1, dtype=int)
+            node_map[valid_rows, valid_cols] = np.arange(num_valid_pixels)
+
+            # Define neighborhood offsets
+            if connectivity == 4:
+                # von Neumann neighborhood (4-connectivity)
+                offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            else:  # connectivity == 8
+                # Moore neighborhood (8-connectivity)
+                offsets = [
+                    (-1, -1),
+                    (-1, 0),
+                    (-1, 1),
+                    (0, -1),
+                    (0, 1),
+                    (1, -1),
+                    (1, 0),
+                    (1, 1),
+                ]
+
+            # Collect nodes and edges
+            nodes_to_add = []
+            edges_to_add = []
+
+            for i in range(num_valid_pixels):
+                row, col = valid_rows[i], valid_cols[i]
+                current_node_id = node_map[row, col]
+
+                # Prepare node attributes
+                node_attrs = {"value": float(data[row, col])}
+                if include_coordinates:
+                    x, y = src.xy(row, col)
+                    node_attrs["x"] = x
+                    node_attrs["y"] = y
+                nodes_to_add.append((current_node_id, node_attrs))
+
+                # Find neighbors and collect edges
+                for dy, dx in offsets:
+                    neighbor_row, neighbor_col = row + dy, col + dx
+
+                    # Check if neighbor is within bounds and is a valid pixel
+                    if (
+                        0 <= neighbor_row < height
+                        and 0 <= neighbor_col < width
+                        and valid_mask[neighbor_row, neighbor_col]
+                    ):
+                        neighbor_node_id = node_map[neighbor_row, neighbor_col]
+
+                        # Ensure each edge is added only once
+                        if current_node_id < neighbor_node_id:
+                            neighbor_value = float(data[neighbor_row, neighbor_col])
+                            edges_to_add.append(
+                                (current_node_id, neighbor_node_id, neighbor_value)
+                            )
+
+            if graph_type == "networkx":
+                G = nx.Graph()
+                G.add_nodes_from(nodes_to_add)
+                G.add_weighted_edges_from(edges_to_add)
+                return G
+            else:  # sparse matrix
+                edges_array = np.array(edges_to_add)
+                row_indices = edges_array[:, 0]
+                col_indices = edges_array[:, 1]
+                weights = edges_array[:, 2]
+
+                # Add reverse edges for symmetric matrix
+                row_indices.extend(col_indices)
+                col_indices.extend(row_indices)
+                weights.extend(weights)
+
+                return sp.coo_matrix(
+                    (weights, (row_indices, col_indices)),
+                    shape=(num_valid_pixels, num_valid_pixels),
+                ).tocsr()
 
     def sample_by_coordinates(
         self, coordinate_list: List[Tuple[float, float]], **kwargs
@@ -701,10 +838,10 @@ class TifProcessor:
         Opens the raster dataset and stores it in a process-local variable.
         This function runs once per worker, not for every task.
         """
-        global src_handle
-        with self.data_store.open(self.dataset_path, "rb") as f:
-            with rasterio.MemoryFile(f.read()) as memfile:
-                src_handle = memfile.open()
+        global src_handle, memfile_handle
+        with self.data_store.open(str(self.dataset_path), "rb") as f:
+            memfile_handle = rasterio.MemoryFile(f.read())
+            src_handle = memfile_handle.open()
 
     def _process_single_polygon(self, polygon, stat_func):
         """
@@ -990,6 +1127,25 @@ class TifProcessor:
             )
 
         return self._cache["pixel_coords"]
+
+    def __enter__(self):
+        return self
+
+    def __del__(self):
+        """Clean up temporary files and directories."""
+        if hasattr(self, "_temp_dir") and os.path.exists(self._temp_dir):
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+
+    def cleanup(self):
+        """Explicit cleanup method for better control."""
+        if hasattr(self, "_temp_dir") and os.path.exists(self._temp_dir):
+            shutil.rmtree(self._temp_dir)
+            self.logger.info("Cleaned up temporary files")
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Proper context manager exit with cleanup."""
+        self.cleanup()
+        return False
 
 
 def sample_multiple_tifs_by_coordinates(

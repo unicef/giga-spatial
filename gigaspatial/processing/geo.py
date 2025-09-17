@@ -232,7 +232,7 @@ def convert_to_geodataframe(
 
 def buffer_geodataframe(
     gdf: gpd.GeoDataFrame,
-    buffer_distance_meters: float,
+    buffer_distance_meters: Union[float, np.array, pd.Series],
     cap_style: Literal["round", "square", "flat"] = "round",
     copy=True,
 ) -> gpd.GeoDataFrame:
@@ -255,9 +255,6 @@ def buffer_geodataframe(
     # Input validation
     if not isinstance(gdf, gpd.GeoDataFrame):
         raise TypeError("Input must be a GeoDataFrame")
-
-    if not isinstance(buffer_distance_meters, (float, int)):
-        raise TypeError("Buffer distance must be a number")
 
     if cap_style not in ["round", "square", "flat"]:
         raise ValueError("cap_style must be round, flat or square.")
@@ -283,7 +280,7 @@ def buffer_geodataframe(
         # Transform to UTM, create buffer, and transform back
         gdf_work = gdf_work.to_crs(utm_crs)
         gdf_work["geometry"] = gdf_work["geometry"].buffer(
-            buffer_distance_meters, cap_style=cap_style
+            distance=buffer_distance_meters, cap_style=cap_style
         )
         gdf_work = gdf_work.to_crs(input_crs)
 
@@ -994,6 +991,14 @@ def aggregate_polygons_to_zones(
     missing_cols = [col for col in value_columns if col not in polygons_gdf.columns]
     if missing_cols:
         raise ValueError(f"Value columns not found in polygons data: {missing_cols}")
+
+    # Check for column name conflicts with zone_id_column
+    if zone_id_column in polygons_gdf.columns:
+        raise ValueError(
+            f"Column name conflict: polygons DataFrame contains column '{zone_id_column}' "
+            f"which conflicts with the zone identifier column. Please rename this column "
+            f"in the polygons data to avoid confusion."
+        )
 
     # Ensure CRS match
     if polygons_gdf.crs != zones.crs:
