@@ -8,6 +8,7 @@ from shapely.geometry import Point
 import pycountry
 from typing import Optional, Union
 import logging
+import geopandas as gpd
 
 from gigaspatial.config import config as global_config
 
@@ -40,11 +41,14 @@ class GigaSchoolLocationFetcher:
         if self.logger is None:
             self.logger = global_config.get_logger(self.__class__.__name__)
 
-    def fetch_locations(self, **kwargs) -> pd.DataFrame:
+    def fetch_locations(
+        self, process_geospatial: bool = False, **kwargs
+    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
         Fetch and process school locations.
 
         Args:
+            process_geospatial (bool): Whether to process geospatial data and return a GeoDataFrame. Defaults to False.
             **kwargs: Additional parameters for customization
                 - page_size: Override default page size
                 - sleep_time: Override default sleep time between requests
@@ -122,11 +126,12 @@ class GigaSchoolLocationFetcher:
 
         df = pd.DataFrame(all_data)
 
-        df = self._process_geospatial_data(df)
+        if process_geospatial:
+            df = self._process_geospatial_data(df)
 
         return df
 
-    def _process_geospatial_data(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _process_geospatial_data(self, df: pd.DataFrame) -> gpd.GeoDataFrame:
         """
         Process and enhance the DataFrame with geospatial information.
 
@@ -144,7 +149,7 @@ class GigaSchoolLocationFetcher:
         )
         self.logger.info(f"Created geometry for all {len(df)} records")
 
-        return df
+        return gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))

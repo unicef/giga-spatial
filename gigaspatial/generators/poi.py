@@ -18,14 +18,11 @@ from gigaspatial.processing.geo import (
     convert_to_geodataframe,
     buffer_geodataframe,
     detect_coordinate_columns,
+    aggregate_points_to_zones,
     aggregate_polygons_to_zones,
     get_centroids,
 )
-from gigaspatial.processing.tif_processor import (
-    sample_multiple_tifs_by_polygons,
-    sample_multiple_tifs_by_coordinates,
-    TifProcessor,
-)
+from gigaspatial.processing.tif_processor import TifProcessor
 from scipy.spatial import cKDTree
 
 
@@ -165,7 +162,9 @@ class PoiViewGenerator:
                         raise ValueError(
                             f"Column '{poi_id_column}' provided as 'poi_id_column' contains duplicate values."
                         )
-                return convert_to_geodataframe(points)
+                return convert_to_geodataframe(
+                    points, lat_col="latitude", lon_col="longitude"
+                )
             except ValueError as e:
                 raise ValueError(
                     f"Could not detect coordinate columns in DataFrame: {str(e)}"
@@ -202,7 +201,9 @@ class PoiViewGenerator:
                             raise ValueError(
                                 f"Column '{poi_id_column}' provided as 'poi_id_column' contains duplicate values."
                             )
-                    return convert_to_geodataframe(df)
+                    return convert_to_geodataframe(
+                        df, lat_col="latitude", lon_col="longitude"
+                    )
                 except ValueError as e:
                     raise ValueError(
                         f"Could not detect coordinate columns in dictionary list: {str(e)}"
@@ -365,11 +366,11 @@ class PoiViewGenerator:
                 f"{output_prefix}_distance": dist,
             }
         )
-        self._update_view(temp_result_df)
+        # self._update_view(temp_result_df) # Removed direct view update
         self.logger.info(
             f"Nearest points mapping complete with prefix '{output_prefix}'"
         )
-        return self.view
+        return temp_result_df  # Return the DataFrame
 
     def map_google_buildings(
         self,
@@ -405,12 +406,14 @@ class PoiViewGenerator:
             self.logger.info("No Google buildings data found for the provided POIs")
             return self.view
 
-        return self.map_nearest_points(
+        mapped_data = self.map_nearest_points(
             points_df=buildings_df,
             id_column="full_plus_code",
             output_prefix="nearest_google_building",
             **kwargs,
         )
+        self._update_view(mapped_data)
+        return self.view
 
     def map_ms_buildings(
         self,
@@ -455,12 +458,14 @@ class PoiViewGenerator:
                 axis=1,
             )
 
-        return self.map_nearest_points(
+        mapped_data = self.map_nearest_points(
             points_df=building_centroids,
             id_column="building_id",
             output_prefix="nearest_ms_building",
             **kwargs,
         )
+        self._update_view(mapped_data)
+        return self.view
 
     def map_zonal_stats(
         self,
@@ -481,9 +486,10 @@ class PoiViewGenerator:
         3. Polygon aggregation: Aggregates polygon data to POI buffers with optional area weighting
 
         Args:
-            data (Union[List[TifProcessor], gpd.GeoDataFrame]):
-                Either a list of TifProcessor objects containing raster data to sample,
-                or a GeoDataFrame containing polygon data to aggregate.
+            data (Union[TifProcessor, List[TifProcessor], gpd.GeoDataFrame]):
+                Either a TifProcessor object, a list of TifProcessor objects (which will be merged
+                into a single TifProcessor for processing), or a GeoDataFrame containing polygon
+                data to aggregate.
             stat (str, optional):
                 For raster data: Statistic to calculate ("sum", "mean", "median", "min", "max").
                 For polygon data: Aggregation method to use.
@@ -512,20 +518,32 @@ class PoiViewGenerator:
                       or if required parameters (value_column) are missing for polygon data.
         """
 
-        if isinstance(data, list) and all(isinstance(x, TifProcessor) for x in data):
-            results_df = pd.DataFrame({"poi_id": self.points_gdf["poi_id"]})
+        raster_processor: Optional[TifProcessor] = None
 
-            # Handle raster data
+        if isinstance(data, TifProcessor):
+            raster_processor = data
+        elif isinstance(data, list) and all(isinstance(x, TifProcessor) for x in data):
             if not data:
-                self.logger.info("No valid raster data found for the provided POIs")
+                self.logger.info("No valid raster data provided")
                 return self.view
 
-            raster_crs = data[0].crs
+            if len(data) > 1:
+                all_source_paths = [tp.dataset_path for tp in data]
 
-            if not all(tp.crs == raster_crs for tp in data):
-                raise ValueError(
-                    "All TifProcessors must have the same CRS for zonal statistics."
+                self.logger.info(
+                    f"Merging {len(all_source_paths)} rasters into a single TifProcessor for zonal statistics."
                 )
+                raster_processor = TifProcessor(
+                    dataset_path=all_source_paths,
+                    data_store=self.data_store,
+                    **kwargs,
+                )
+            else:
+                raster_processor = data[0]
+
+        if raster_processor:
+            results_df = pd.DataFrame({"poi_id": self.points_gdf["poi_id"]})
+            raster_crs = raster_processor.crs
 
             if map_radius_meters is not None:
                 self.logger.info(
@@ -539,11 +557,9 @@ class PoiViewGenerator:
                 )
 
                 # Calculate zonal statistics
-                sampled_values = sample_multiple_tifs_by_polygons(
-                    tif_processors=data,
+                sampled_values = raster_processor.sample_by_polygons(
                     polygon_list=buffers_gdf.to_crs(raster_crs).geometry,
                     stat=stat,
-                    **kwargs,
                 )
             else:
                 self.logger.info(f"Sampling {stat} at POI locations")
@@ -551,8 +567,8 @@ class PoiViewGenerator:
                 coord_list = (
                     self.points_gdf.to_crs(raster_crs).get_coordinates().to_numpy()
                 )
-                sampled_values = sample_multiple_tifs_by_coordinates(
-                    tif_processors=data, coordinate_list=coord_list, **kwargs
+                sampled_values = raster_processor.sample_by_coordinates(
+                    coordinate_list=coord_list, **kwargs
                 )
 
             results_df[output_column] = sampled_values
@@ -560,23 +576,15 @@ class PoiViewGenerator:
         elif isinstance(data, gpd.GeoDataFrame):
             # Handle polygon data
             if data.empty:
-                self.logger.info("No valid polygon data found for the provided POIs")
-                return self.points_gdf.copy()
+                self.logger.info("No valid GeoDataFrame data provided")
+                return pd.DataFrame(
+                    columns=["poi_id", output_column]
+                )  # Return empty DataFrame
 
             if map_radius_meters is None:
-                raise ValueError("map_radius_meters must be provided for polygon data")
-
-            if value_column is None:
-                raise ValueError("value_column must be provided for polygon data")
-
-            if value_column not in data.columns:
                 raise ValueError(
-                    f"Value column '{value_column}' not found in input polygon GeoDataFrame."
+                    "map_radius_meters must be provided for for GeoDataFrame data"
                 )
-
-            self.logger.info(
-                f"Aggregating {value_column} within {map_radius_meters}m buffers around POIs using predicate '{predicate}'"
-            )
 
             # Create buffers around POIs
             buffer_gdf = buffer_geodataframe(
@@ -585,34 +593,92 @@ class PoiViewGenerator:
                 cap_style="round",
             )
 
-            # Aggregate polygons to buffers
-            aggregation_result_gdf = aggregate_polygons_to_zones(
-                polygons=data,
-                zones=buffer_gdf,
-                value_columns=value_column,
-                aggregation=stat,
-                predicate=predicate,
-                zone_id_column="poi_id",
-                output_suffix="",
-                drop_geometry=True,
-                **kwargs,
-            )
+            if any(data.geom_type.isin(["MultiPoint", "Point"])):
 
-            results_df = aggregation_result_gdf[["poi_id", value_column]]
+                self.logger.info(
+                    f"Aggregating point data within {map_radius_meters}m buffers around POIs using predicate '{predicate}'"
+                )
+
+                # If no value_column, default to 'count'
+                if value_column is None:
+                    actual_stat = "count"
+                    self.logger.warning(
+                        "No value_column provided for point data. Defaulting to 'count' aggregation."
+                    )
+                else:
+                    actual_stat = stat
+                    if value_column not in data.columns:
+                        raise ValueError(
+                            f"Value column '{value_column}' not found in input GeoDataFrame."
+                        )
+
+                aggregation_result_gdf = aggregate_points_to_zones(
+                    points=data,
+                    zones=buffer_gdf,
+                    value_columns=value_column,
+                    aggregation=actual_stat,
+                    point_zone_predicate=predicate,  # can't be `fractional``
+                    zone_id_column="poi_id",
+                    output_suffix="",
+                    drop_geometry=True,
+                    **kwargs,
+                )
+
+                output_col_from_agg = (
+                    f"{value_column}_{actual_stat}" if value_column else "point_count"
+                )
+                results_df = aggregation_result_gdf[["poi_id", output_col_from_agg]]
+
+                if output_column != "zonal_stat":
+                    results_df = results_df.rename(
+                        columns={output_col_from_agg: output_column}
+                    )
+
+            else:
+                if value_column is None:
+                    raise ValueError(
+                        "value_column must be provided for polygon data aggregation."
+                    )
+                if value_column not in data.columns:
+                    raise ValueError(
+                        f"Value column '{value_column}' not found in input GeoDataFrame."
+                    )
+                self.logger.info(
+                    f"Aggregating polygon data within {map_radius_meters}m buffers around POIs using predicate '{predicate}'"
+                )
+
+                # Aggregate polygons to buffers
+                aggregation_result_gdf = aggregate_polygons_to_zones(
+                    polygons=data,
+                    zones=buffer_gdf,
+                    value_columns=value_column,
+                    aggregation=stat,
+                    predicate=predicate,
+                    zone_id_column="poi_id",
+                    output_suffix="",
+                    drop_geometry=True,
+                    **kwargs,
+                )
+
+                output_col_from_agg = value_column
+
+            results_df = aggregation_result_gdf[["poi_id", output_col_from_agg]]
 
             if output_column != "zonal_stat":
-                results_df = results_df.rename(columns={value_column: output_column})
+                results_df = results_df.rename(
+                    columns={output_col_from_agg: output_column}
+                )
 
         else:
             raise ValueError(
                 "data must be either a list of TifProcessor objects or a GeoDataFrame"
             )
 
-        self._update_view(results_df)
+        # self._update_view(results_df) # Removed direct view update
         self.logger.info(
             f"Zonal statistics mapping complete for column(s) derived from '{output_column}' or '{value_column}'"
         )
-        return self.view
+        return results_df  # Return the DataFrame
 
     def map_built_s(
         self,
@@ -654,16 +720,20 @@ class PoiViewGenerator:
         )
         self.logger.info("Loading GHSL Built Surface raster tiles")
         tif_processors = handler.load_data(
-            self.points_gdf.copy(), ensure_available=self.config.ensure_available
+            self.points_gdf.copy(),
+            ensure_available=self.config.ensure_available,
+            merge_rasters=True,
         )
 
-        return self.map_zonal_stats(
+        mapped_data = self.map_zonal_stats(
             data=tif_processors,
             stat=stat,
             map_radius_meters=map_radius_meters,
             output_column=output_column,
             **kwargs,
         )
+        self._update_view(mapped_data)
+        return self.view
 
     def map_smod(
         self,
@@ -702,14 +772,18 @@ class PoiViewGenerator:
 
         self.logger.info("Loading GHSL SMOD raster tiles")
         tif_processors = handler.load_data(
-            self.points_gdf.copy(), ensure_available=self.config.ensure_available
+            self.points_gdf.copy(),
+            ensure_available=self.config.ensure_available,
+            merge_rasters=True,
         )
 
-        return self.map_zonal_stats(
+        mapped_data = self.map_zonal_stats(
             data=tif_processors,
             output_column=output_column,
             **kwargs,
         )
+        self._update_view(mapped_data)
+        return self.view
 
     def map_wp_pop(
         self,
@@ -718,16 +792,24 @@ class PoiViewGenerator:
         resolution=1000,
         predicate: Literal[
             "centroid_within", "intersects", "fractional", "within"
-        ] = "fractional",
+        ] = "intersects",
         output_column: str = "population",
         **kwargs,
     ):
-        if isinstance(country, str):
-            country = [country]
+        # Ensure country is always a list for consistent handling
+        countries_list = [country] if isinstance(country, str) else country
 
         handler = WPPopulationHandler(
-            project="pop", resolution=resolution, data_store=self.data_store, **kwargs
+            resolution=resolution,
+            data_store=self.data_store,
+            **kwargs,
         )
+
+        # Restrict to single country for age_structures project
+        if handler.config.project == "age_structures" and len(countries_list) > 1:
+            raise ValueError(
+                "For 'age_structures' project, only a single country can be processed at a time."
+            )
 
         self.logger.info(
             f"Mapping WorldPop Population data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
@@ -738,35 +820,97 @@ class PoiViewGenerator:
                 "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
             )
             predicate = "intersects"
-        
+
+        data_to_process: Union[List[TifProcessor], gpd.GeoDataFrame, pd.DataFrame]
+
         if predicate == "centroid_within":
-            data = []
-            for c in country:
-                data.extend(
-                    handler.load_data(c, ensure_available=self.config.ensure_available)
+            if handler.config.project == "age_structures":
+                # Load individual tif processors for the single country
+                all_tif_processors = handler.load_data(
+                    countries_list[0],
+                    ensure_available=self.config.ensure_available,
+                    **kwargs,
                 )
+
+                # Sum results from each tif_processor separately
+                summed_results_by_poi = {
+                    poi_id: 0.0 for poi_id in self.points_gdf["poi_id"].unique()
+                }
+
+                self.logger.info(
+                    f"Sampling individual age_structures rasters using 'sum' statistic and summing per POI."
+                )
+                for tif_processor in all_tif_processors:
+                    single_raster_df = self.map_zonal_stats(
+                        data=tif_processor,
+                        stat="sum",
+                        map_radius_meters=map_radius_meters,
+                        value_column="pixel_value",
+                        predicate=predicate,
+                        output_column=output_column,  # This output_column will be in the temporary DF
+                        **kwargs,
+                    )
+                    # Add values from this single raster to the cumulative sum
+                    for _, row in single_raster_df.iterrows():
+                        summed_results_by_poi[row["poi_id"]] += row[output_column]
+
+                # Convert the summed dictionary back to a DataFrame
+                data_to_process = pd.DataFrame(
+                    list(summed_results_by_poi.items()),
+                    columns=["poi_id", output_column],
+                )
+
+            else:
+                # Existing behavior for non-age_structures projects or if merging is fine
+                # 'data_to_process' will be a list of TifProcessor objects, which map_zonal_stats will merge
+                data_to_process = []
+                for c in countries_list:
+                    data_to_process.extend(
+                        handler.load_data(
+                            c, ensure_available=self.config.ensure_available, **kwargs
+                        )
+                    )
         else:
-            data = pd.concat(
+            # 'data_to_process' will be a GeoDataFrame
+            data_to_process = pd.concat(
                 [
                     handler.load_into_geodataframe(
-                        c, ensure_available=self.config.ensure_available
+                        c, ensure_available=self.config.ensure_available, **kwargs
                     )
-                    for c in country
+                    for c in countries_list  # Original iteration over countries_list
                 ],
                 ignore_index=True,
             )
 
-        self.logger.info(f"Mapping WorldPop Population data into {map_radius_meters}m zones around POIs using 'sum' statistic")
-
-        return self.map_zonal_stats(
-            data,
-            stat="sum",
-            map_radius_meters=map_radius_meters,
-            value_column="pixel_value",
-            predicate=predicate,
-            output_column=output_column,
-            **kwargs
+        self.logger.info(
+            f"Mapping WorldPop Population data into {map_radius_meters}m zones around POIs using 'sum' statistic"
         )
+
+        final_mapped_df: pd.DataFrame
+
+        # If 'data_to_process' is already the summed DataFrame (from age_structures/centroid_within branch),
+        # use it directly.
+        if (
+            isinstance(data_to_process, pd.DataFrame)
+            and output_column in data_to_process.columns
+            and "poi_id" in data_to_process.columns
+        ):
+            final_mapped_df = data_to_process
+        else:
+            # For other cases, proceed with the original call to map_zonal_stats
+            final_mapped_df = self.map_zonal_stats(
+                data=data_to_process,
+                stat="sum",
+                map_radius_meters=map_radius_meters,
+                value_column="pixel_value",
+                predicate=predicate,
+                output_column=output_column,
+                **kwargs,
+            )
+        self._update_view(
+            final_mapped_df
+        )  # Update the view with the final mapped DataFrame
+        return self.view
 
     def save_view(
         self,

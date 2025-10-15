@@ -261,13 +261,16 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             f"Mapping {handler.config.product} data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
         )
         tif_processors = handler.load_data(
-            self.zone_gdf, ensure_available=self.config.ensure_available
+            self.zone_gdf,
+            ensure_available=self.config.ensure_available,
+            merge_rasters=True,
+            **kwargs,
         )
 
         self.logger.info(
             f"Sampling {handler.config.product} data using '{stat}' statistic"
         )
-        sampled_values = self.map_rasters(tif_processors=tif_processors, stat=stat)
+        sampled_values = self.map_rasters(raster_data=tif_processors, stat=stat)
 
         column_name = (
             output_column
@@ -488,57 +491,97 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self,
         country: Union[str, List[str]],
         resolution=1000,
-        predicate: Literal["intersects", "fractional"] = "intersects",
+        predicate: Literal[
+            "centroid_within", "intersects", "fractional"
+        ] = "intersects",
         output_column: str = "population",
         **kwargs,
     ):
-        if isinstance(country, str):
-            country = [country]
+
+        # Ensure country is always a list for consistent handling
+        countries_list = [country] if isinstance(country, str) else country
 
         handler = WPPopulationHandler(
-            project="pop", resolution=resolution, data_store=self.data_store, **kwargs
+            resolution=resolution,
+            data_store=self.data_store,
+            **kwargs,
         )
+
+        # Restrict to single country for age_structures project
+        if handler.config.project == "age_structures" and len(countries_list) > 1:
+            raise ValueError(
+                "For 'age_structures' project, only a single country can be processed at a time."
+            )
 
         self.logger.info(
             f"Mapping WorldPop Population data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
         )
 
-        if predicate == "fractional":
-            if resolution == 100:
-                self.logger.warning(
-                    "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
+        if predicate == "fractional" and resolution == 100:
+            self.logger.warning(
+                "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
+            )
+            predicate = "intersects"
+
+        if predicate == "centroid_within":
+            if handler.config.project == "age_structures":
+                # Load individual tif processors for the single country
+                all_tif_processors = handler.load_data(
+                    countries_list[0],
+                    ensure_available=self.config.ensure_available,
+                    **kwargs,
                 )
-                predicate = "intersects"
+
+                # Sum results from each tif_processor separately
+                all_results_by_zone = {
+                    zone_id: 0 for zone_id in self.get_zone_identifiers()
+                }
+                self.logger.info(
+                    f"Sampling individual age_structures rasters using 'sum' statistic and summing per zone."
+                )
+                for tif_processor in all_tif_processors:
+                    single_raster_result = self.map_rasters(
+                        raster_data=tif_processor, stat="sum"
+                    )
+                    for zone_id, value in single_raster_result.items():
+                        all_results_by_zone[zone_id] += value
+                result = all_results_by_zone
             else:
-                gdf_pop = pd.concat(
-                    [
-                        handler.load_into_geodataframe(
-                            c, ensure_available=self.config.ensure_available
+                # Existing behavior for non-age_structures projects or if merging is fine
+                tif_processors = []
+                for c in countries_list:
+                    tif_processors.extend(
+                        handler.load_data(
+                            c,
+                            ensure_available=self.config.ensure_available,
+                            **kwargs,
                         )
-                        for c in country
-                    ],
-                    ignore_index=True,
+                    )
+                self.logger.info(
+                    f"Sampling WorldPop Population data using 'sum' statistic"
                 )
-
-                result = self.map_polygons(
-                    gdf_pop,
-                    value_columns="pixel_value",
-                    aggregation="sum",
-                    predicate=predicate,
-                )
-
-                self.add_variable_to_view(result, output_column)
-                return self.view
-
-        tif_processors = []
-        for c in country:
-            tif_processors.extend(
-                handler.load_data(c, ensure_available=self.config.ensure_available)
+                result = self.map_rasters(raster_data=tif_processors, stat="sum")
+        else:
+            gdf_pop = pd.concat(
+                [
+                    handler.load_into_geodataframe(
+                        c,
+                        ensure_available=self.config.ensure_available,
+                        **kwargs,
+                    )
+                    for c in countries_list
+                ],
+                ignore_index=True,
             )
 
-        self.logger.info(f"Sampling WorldPop Population data using 'sum' statistic")
-        sampled_values = self.map_rasters(tif_processors=tif_processors, stat="sum")
+            self.logger.info(f"Aggregating WorldPop Population data to the zones.")
+            result = self.map_polygons(
+                gdf_pop,
+                value_columns="pixel_value",
+                aggregation="sum",
+                predicate=predicate,
+            )
 
-        self.add_variable_to_view(sampled_values, output_column)
+        self.add_variable_to_view(result, output_column)
 
         return self.view

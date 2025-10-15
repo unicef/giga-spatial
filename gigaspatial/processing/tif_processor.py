@@ -24,6 +24,10 @@ from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.config import config
 
+# Global variables for multiprocessing workers
+src_handle = None
+memfile_handle = None
+
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class TifProcessor:
@@ -73,16 +77,7 @@ class TifProcessor:
                 self.dataset_path = self._reprojected_file_path
 
         self._load_metadata()
-
-        # Validate mode and band count
-        if self.mode == "rgba" and self.count != 4:
-            raise ValueError("RGBA mode requires a 4-band TIF file")
-        if self.mode == "rgb" and self.count != 3:
-            raise ValueError("RGB mode requires a 3-band TIF file")
-        if self.mode == "single" and self.count != 1:
-            raise ValueError("Single mode requires a 1-band TIF file")
-        if self.mode == "multi" and self.count < 2:
-            raise ValueError("Multi mode requires a TIF file with 2 or more bands")
+        self._validate_mode_band_compatibility()
 
     @contextmanager
     def open_dataset(self):
@@ -92,6 +87,9 @@ class TifProcessor:
                 yield src
         elif self._reprojected_file_path:
             with rasterio.open(self._reprojected_file_path) as src:
+                yield src
+        elif isinstance(self.data_store, LocalDataStore):
+            with rasterio.open(str(self.dataset_path)) as src:
                 yield src
         else:
             with self.data_store.open(str(self.dataset_path), "rb") as f:
@@ -514,19 +512,36 @@ class TifProcessor:
     def height(self):
         return self._cache["height"]
 
-    def to_dataframe(self, drop_nodata=True, **kwargs) -> pd.DataFrame:
+    def to_dataframe(
+        self, drop_nodata=True, check_memory=True, **kwargs
+    ) -> pd.DataFrame:
+        """
+        Convert raster to DataFrame.
+
+        Args:
+            drop_nodata: Whether to drop nodata values
+            check_memory: Whether to check memory before operation (default True)
+            **kwargs: Additional arguments
+
+        Returns:
+            pd.DataFrame with raster data
+        """
+        # Memory guard check
+        if check_memory:
+            self._memory_guard("conversion", threshold_percent=80.0)
+
         try:
             if self.mode == "single":
-                df = self._to_band_dataframe(drop_nodata=drop_nodata, **kwargs)
-            elif self.mode == "rgb":
-                df = self._to_rgb_dataframe(drop_nodata=drop_nodata)
-            elif self.mode == "rgba":
-                df = self._to_rgba_dataframe(drop_transparent=drop_nodata)
-            elif self.mode == "multi":
-                df = self._to_multi_band_dataframe(drop_nodata=drop_nodata, **kwargs)
+                return self._to_dataframe(
+                    band_number=kwargs.get("band_number", 1),
+                    drop_nodata=drop_nodata,
+                    band_names=kwargs.get("band_names", None),
+                )
             else:
-                raise ValueError(
-                    f"Invalid mode: {self.mode}. Must be one of: single, rgb, rgba, multi"
+                return self._to_dataframe(
+                    band_number=None,  # All bands
+                    drop_nodata=drop_nodata,
+                    band_names=kwargs.get("band_names", None),
                 )
         except Exception as e:
             raise ValueError(
@@ -537,12 +552,23 @@ class TifProcessor:
 
         return df
 
-    def to_geodataframe(self, **kwargs) -> gpd.GeoDataFrame:
+    def to_geodataframe(self, check_memory=True, **kwargs) -> gpd.GeoDataFrame:
         """
         Convert the processed TIF data into a GeoDataFrame, where each row represents a pixel zone.
         Each zone is defined by its bounding box, based on pixel resolution and coordinates.
+
+        Args:
+            check_memory: Whether to check memory before operation
+            **kwargs: Additional arguments passed to to_dataframe()
+
+        Returns:
+            gpd.GeoDataFrame with raster data
         """
-        df = self.to_dataframe(**kwargs)
+        # Memory guard check
+        if check_memory:
+            self._memory_guard("conversion", threshold_percent=80.0)
+
+        df = self.to_dataframe(check_memory=False, **kwargs)
 
         x_res, y_res = self.resolution
 
@@ -556,19 +582,204 @@ class TifProcessor:
 
         return gdf
 
+    def to_dataframe_chunked(
+        self, drop_nodata=True, chunk_size=None, target_memory_mb=500, **kwargs
+    ):
+        """
+        Convert raster to DataFrame using chunked processing for memory efficiency.
+
+        Automatically routes to the appropriate chunked method based on mode.
+        Chunk size is automatically calculated based on target memory usage.
+
+        Args:
+            drop_nodata: Whether to drop nodata values
+            chunk_size: Number of rows per chunk (auto-calculated if None)
+            target_memory_mb: Target memory per chunk in MB (default 500)
+            **kwargs: Additional arguments (band_number, band_names, etc.)
+        """
+
+        if chunk_size is None:
+            chunk_size = self._calculate_optimal_chunk_size(
+                "conversion", target_memory_mb
+            )
+
+        windows = self._get_chunk_windows(chunk_size)
+
+        # SIMPLE ROUTING
+        if self.mode == "single":
+            return self._to_dataframe_chunked(
+                windows,
+                band_number=kwargs.get("band_number", 1),
+                drop_nodata=drop_nodata,
+                band_names=kwargs.get("band_names", None),
+            )
+        else:  # rgb, rgba, multi
+            return self._to_dataframe_chunked(
+                windows,
+                band_number=None,
+                drop_nodata=drop_nodata,
+                band_names=kwargs.get("band_names", None),
+            )
+
+    def clip_to_geometry(
+        self,
+        geometry: Union[
+            Polygon, MultiPolygon, gpd.GeoDataFrame, gpd.GeoSeries, List[dict], dict
+        ],
+        crop: bool = True,
+        all_touched: bool = True,
+        invert: bool = False,
+        nodata: Optional[Union[int, float]] = None,
+        pad: bool = False,
+        pad_width: float = 0.5,
+        return_clipped_processor: bool = True,
+    ) -> Union["TifProcessor", tuple]:
+        """
+        Clip raster to geometry boundaries.
+
+        Parameters:
+        -----------
+        geometry : various
+            Geometry to clip to. Can be:
+            - Shapely Polygon or MultiPolygon
+            - GeoDataFrame or GeoSeries
+            - List of GeoJSON-like dicts
+            - Single GeoJSON-like dict
+        crop : bool, default True
+            Whether to crop the raster to the extent of the geometry
+        all_touched : bool, default True
+            Include pixels that touch the geometry boundary
+        invert : bool, default False
+            If True, mask pixels inside geometry instead of outside
+        nodata : int or float, optional
+            Value to use for masked pixels. If None, uses raster's nodata value
+        pad : bool, default False
+            Pad geometry by half pixel before clipping
+        pad_width : float, default 0.5
+            Width of padding in pixels if pad=True
+        return_clipped_processor : bool, default True
+            If True, returns new TifProcessor with clipped data
+            If False, returns (clipped_array, transform, metadata)
+
+        Returns:
+        --------
+        TifProcessor or tuple
+            Either new TifProcessor instance or (array, transform, metadata) tuple
+        """
+        # Handle different geometry input types
+        shapes = self._prepare_geometry_for_clipping(geometry)
+
+        # Validate CRS compatibility
+        self._validate_geometry_crs(geometry)
+
+        # Perform the clipping
+        with self.open_dataset() as src:
+            try:
+                clipped_data, clipped_transform = mask(
+                    dataset=src,
+                    shapes=shapes,
+                    crop=crop,
+                    all_touched=all_touched,
+                    invert=invert,
+                    nodata=nodata,
+                    pad=pad,
+                    pad_width=pad_width,
+                    filled=True,
+                )
+
+                # Update metadata for the clipped raster
+                clipped_meta = src.meta.copy()
+                clipped_meta.update(
+                    {
+                        "height": clipped_data.shape[1],
+                        "width": clipped_data.shape[2],
+                        "transform": clipped_transform,
+                        "nodata": nodata if nodata is not None else src.nodata,
+                    }
+                )
+
+            except ValueError as e:
+                if "Input shapes do not overlap raster" in str(e):
+                    raise ValueError(
+                        "The geometry does not overlap with the raster. "
+                        "Check that both are in the same coordinate reference system."
+                    ) from e
+                else:
+                    raise e
+
+        if return_clipped_processor:
+            # Create a new TifProcessor with the clipped data
+            return self._create_clipped_processor(clipped_data, clipped_meta)
+        else:
+            return clipped_data, clipped_transform, clipped_meta
+
+    def clip_to_bounds(
+        self,
+        bounds: tuple,
+        bounds_crs: Optional[str] = None,
+        return_clipped_processor: bool = True,
+    ) -> Union["TifProcessor", tuple]:
+        """
+        Clip raster to rectangular bounds.
+
+        Parameters:
+        -----------
+        bounds : tuple
+            Bounding box as (minx, miny, maxx, maxy)
+        bounds_crs : str, optional
+            CRS of the bounds. If None, assumes same as raster CRS
+        return_clipped_processor : bool, default True
+            If True, returns new TifProcessor, else returns (array, transform, metadata)
+
+        Returns:
+        --------
+        TifProcessor or tuple
+            Either new TifProcessor instance or (array, transform, metadata) tuple
+        """
+        # Create bounding box geometry
+        bbox_geom = box(*bounds)
+
+        # If bounds_crs is specified and different from raster CRS, create GeoDataFrame for reprojection
+        if bounds_crs is not None:
+            raster_crs = self.crs
+
+            if not self.crs == bounds_crs:
+                # Create GeoDataFrame with bounds CRS and reproject
+                bbox_gdf = gpd.GeoDataFrame([1], geometry=[bbox_geom], crs=bounds_crs)
+                bbox_gdf = bbox_gdf.to_crs(raster_crs)
+                bbox_geom = bbox_gdf.geometry.iloc[0]
+
+        return self.clip_to_geometry(
+            geometry=bbox_geom,
+            crop=True,
+            return_clipped_processor=return_clipped_processor,
+        )
+
     def to_graph(
         self,
         connectivity: Literal[4, 8] = 4,
         band: Optional[int] = None,
         include_coordinates: bool = False,
         graph_type: Literal["networkx", "sparse"] = "networkx",
-        chunk_size: Optional[int] = None,
+        check_memory: bool = True,
     ) -> Union[nx.Graph, sp.csr_matrix]:
         """
         Convert raster to graph based on pixel adjacency.
+
+        Args:
+            connectivity: 4 or 8-connectivity
+            band: Band number (1-indexed)
+            include_coordinates: Include x,y coordinates in nodes
+            graph_type: 'networkx' or 'sparse'
+            check_memory: Whether to check memory before operation
+
+        Returns:
+            Graph representation of raster
         """
-        if chunk_size is not None:
-            raise NotImplementedError("Chunked processing is not yet implemented.")
+
+        # Memory guard check
+        if check_memory:
+            self._memory_guard("graph", threshold_percent=80.0)
 
         with self.open_dataset() as src:
             band_idx = band - 1 if band is not None else 0
@@ -657,12 +868,12 @@ class TifProcessor:
                 weights = edges_array[:, 2]
 
                 # Add reverse edges for symmetric matrix
-                row_indices.extend(col_indices)
-                col_indices.extend(row_indices)
-                weights.extend(weights)
+                from_idx = np.append(row_indices, col_indices)
+                to_idx = np.append(col_indices, row_indices)
+                weights = np.append(weights, weights)
 
                 return sp.coo_matrix(
-                    (weights, (row_indices, col_indices)),
+                    (weights, (from_idx, to_idx)),
                     shape=(num_valid_pixels, num_valid_pixels),
                 ).tocsr()
 
@@ -798,11 +1009,63 @@ class TifProcessor:
         stat: Union[str, Callable] = "mean",
         batch_size: int = 100,
         n_workers: int = 4,
+        show_progress: bool = True,
+        check_memory: bool = True,
         **kwargs,
     ) -> np.ndarray:
         """
         Sample raster values by polygons in parallel using batching.
+
+        Args:
+            polygon_list: List of Shapely Polygon or MultiPolygon objects
+            stat: Statistic to compute
+            batch_size: Number of polygons per batch
+            n_workers: Number of worker processes
+            show_progress: Whether to display progress bar
+            check_memory: Whether to check memory before operation
+            **kwargs: Additional arguments
+
+        Returns:
+            np.ndarray of statistics for each polygon
         """
+        import sys
+
+        # Memory guard check with n_workers consideration
+        if check_memory:
+            is_safe = self._memory_guard(
+                "batched_sampling",
+                threshold_percent=85.0,
+                n_workers=n_workers,
+                raise_error=False,
+            )
+
+            if not is_safe:
+                # Suggest reducing n_workers
+                memory_info = self._check_available_memory()
+                estimates = self._estimate_memory_usage("batched_sampling", n_workers=1)
+
+                # Calculate optimal workers
+                suggested_workers = max(
+                    1, int(memory_info["available"] * 0.7 / estimates["per_worker"])
+                )
+
+                warnings.warn(
+                    f"Consider reducing n_workers from {n_workers} to {suggested_workers} "
+                    f"to reduce memory pressure.",
+                    ResourceWarning,
+                )
+
+        # Platform check
+        if sys.platform in ["win32", "darwin"]:
+            import warnings
+            import multiprocessing as mp
+
+            if mp.get_start_method(allow_none=True) != "fork":
+                warnings.warn(
+                    "Batched sampling may not work on Windows/macOS. "
+                    "Use sample_by_polygons() if you encounter errors.",
+                    RuntimeWarning,
+                )
 
         def _chunk_list(data_list, chunk_size):
             """Yield successive chunks from data_list."""
@@ -813,20 +1076,22 @@ class TifProcessor:
             return np.array([])
 
         stat_func = stat if callable(stat) else getattr(np, stat)
-
         polygon_chunks = list(_chunk_list(polygon_list, batch_size))
 
         with multiprocessing.Pool(
             initializer=self._initializer_worker, processes=n_workers
         ) as pool:
             process_func = partial(self._process_polygon_batch, stat_func=stat_func)
-            batched_results = list(
-                tqdm(
-                    pool.imap(process_func, polygon_chunks),
-                    total=len(polygon_chunks),
-                    desc=f"Sampling polygons",
+            if show_progress:
+                batched_results = list(
+                    tqdm(
+                        pool.imap(process_func, polygon_chunks),
+                        total=len(polygon_chunks),
+                        desc=f"Sampling polygons",
+                    )
                 )
-            )
+            else:
+                batched_results = list(pool.imap(process_func, polygon_chunks))
 
             results = [item for sublist in batched_results for item in sublist]
 
@@ -839,23 +1104,45 @@ class TifProcessor:
         This function runs once per worker, not for every task.
         """
         global src_handle, memfile_handle
-        with self.data_store.open(str(self.dataset_path), "rb") as f:
-            memfile_handle = rasterio.MemoryFile(f.read())
-            src_handle = memfile_handle.open()
+
+        # Priority: merged > reprojected > original (same as open_dataset)
+        local_file_path = None
+        if self._merged_file_path:
+            # Merged file is a local temp file
+            local_file_path = self._merged_file_path
+        elif self._reprojected_file_path:
+            # Reprojected file is a local temp file
+            local_file_path = self._reprojected_file_path
+        elif isinstance(self.data_store, LocalDataStore):
+            # Local file - can open directly
+            local_file_path = str(self.dataset_path)
+
+        if local_file_path:
+            # Open local file directly
+            with open(local_file_path, "rb") as f:
+                memfile_handle = rasterio.MemoryFile(f.read())
+                src_handle = memfile_handle.open()
+        else:
+            # Custom DataStore
+            with self.data_store.open(str(self.dataset_path), "rb") as f:
+                memfile_handle = rasterio.MemoryFile(f.read())
+                src_handle = memfile_handle.open()
+
+    def _get_worker_dataset(self):
+        """Get dataset handle for worker process."""
+        global src_handle
+        if src_handle is None:
+            raise RuntimeError("Raster dataset not initialized in this process.")
+        return src_handle
 
     def _process_single_polygon(self, polygon, stat_func):
         """
         Helper function to process a single polygon.
         This will be run in a separate process.
         """
-        global src_handle
-        if src_handle is None:
-            # This should not happen if the initializer is set up correctly,
-            # but it's a good defensive check.
-            raise RuntimeError("Raster dataset not initialized in this process.")
-
         try:
-            out_image, _ = mask(src_handle, [polygon], crop=True, filled=False)
+            src = self._get_worker_dataset()
+            out_image, _ = mask(src, [polygon], crop=True, filled=False)
 
             if hasattr(out_image, "mask"):
                 valid_data = out_image.compressed()
@@ -866,11 +1153,12 @@ class TifProcessor:
                     else out_image.flatten()
                 )
 
-            if len(valid_data) == 0:
-                return np.nan
-            else:
-                return stat_func(valid_data)
-        except Exception:
+            return stat_func(valid_data) if len(valid_data) > 0 else np.nan
+        except RuntimeError as e:
+            self.logger.error(f"Worker not initialized: {e}")
+            return np.nan
+        except Exception as e:
+            self.logger.debug(f"Error processing polygon: {e}")
             return np.nan
 
     def _process_polygon_batch(self, polygon_batch, stat_func):
@@ -882,226 +1170,226 @@ class TifProcessor:
             for polygon in polygon_batch
         ]
 
-    def _to_rgba_dataframe(self, drop_transparent: bool = False) -> pd.DataFrame:
-        """
-        Convert RGBA TIF to DataFrame with separate columns for R, G, B, A values.
-        """
-        self.logger.info("Processing RGBA dataset...")
-
-        with self.open_dataset() as src:
-            if self.count != 4:
-                raise ValueError("RGBA mode requires a 4-band TIF file")
-
-            # Read all four bands
-            red, green, blue, alpha = src.read()
-
-            x_coords, y_coords = self._get_pixel_coordinates()
-
-            if drop_transparent:
-                mask = alpha > 0
-                red = np.extract(mask, red)
-                green = np.extract(mask, green)
-                blue = np.extract(mask, blue)
-                alpha = np.extract(mask, alpha)
-                lons = np.extract(mask, x_coords)
-                lats = np.extract(mask, y_coords)
-            else:
-                lons = x_coords.flatten()
-                lats = y_coords.flatten()
-                red = red.flatten()
-                green = green.flatten()
-                blue = blue.flatten()
-                alpha = alpha.flatten()
-
-            # Create DataFrame with RGBA values
-            data = pd.DataFrame(
-                {
-                    "lon": lons,
-                    "lat": lats,
-                    "red": red,
-                    "green": green,
-                    "blue": blue,
-                    "alpha": alpha,
-                }
-            )
-
-            # Normalize alpha values if they're not in [0, 1] range
-            if data["alpha"].max() > 1:
-                data["alpha"] = data["alpha"] / data["alpha"].max()
-
-        self.logger.info("RGBA dataset is processed!")
-        return data
-
-    def _to_rgb_dataframe(self, drop_nodata: bool = True) -> pd.DataFrame:
-        """Convert RGB TIF to DataFrame with separate columns for R, G, B values."""
-        if self.mode != "rgb":
-            raise ValueError("Use appropriate method for current mode")
-
-        self.logger.info("Processing RGB dataset...")
-
-        with self.open_dataset() as src:
-            if self.count != 3:
-                raise ValueError("RGB mode requires a 3-band TIF file")
-
-            # Read all three bands
-            red, green, blue = src.read()
-
-            x_coords, y_coords = self._get_pixel_coordinates()
-
-            if drop_nodata:
-                nodata_value = src.nodata
-                if nodata_value is not None:
-                    mask = ~(
-                        (red == nodata_value)
-                        | (green == nodata_value)
-                        | (blue == nodata_value)
-                    )
-                    red = np.extract(mask, red)
-                    green = np.extract(mask, green)
-                    blue = np.extract(mask, blue)
-                    lons = np.extract(mask, x_coords)
-                    lats = np.extract(mask, y_coords)
-                else:
-                    lons = x_coords.flatten()
-                    lats = y_coords.flatten()
-                    red = red.flatten()
-                    green = green.flatten()
-                    blue = blue.flatten()
-            else:
-                lons = x_coords.flatten()
-                lats = y_coords.flatten()
-                red = red.flatten()
-                green = green.flatten()
-                blue = blue.flatten()
-
-            data = pd.DataFrame(
-                {
-                    "lon": lons,
-                    "lat": lats,
-                    "red": red,
-                    "green": green,
-                    "blue": blue,
-                }
-            )
-
-        self.logger.info("RGB dataset is processed!")
-        return data
-
-    def _to_band_dataframe(
-        self, band_number: int = 1, drop_nodata: bool = True, drop_values: list = []
-    ) -> pd.DataFrame:
-        """Process single-band TIF to DataFrame."""
-        if self.mode != "single":
-            raise ValueError("Use appropriate method for current mode")
-
-        self.logger.info("Processing single-band dataset...")
-
-        if band_number <= 0 or band_number > self.count:
-            self.logger.error(
-                f"Error: Band number {band_number} is out of range. The file has {self.count} bands."
-            )
-            return None
-
-        with self.open_dataset() as src:
-
-            band = src.read(band_number)
-
-            x_coords, y_coords = self._get_pixel_coordinates()
-
-            values_to_mask = []
-            if drop_nodata:
-                nodata_value = src.nodata
-                if nodata_value is not None:
-                    values_to_mask.append(nodata_value)
-
-            if drop_values:
-                values_to_mask.extend(drop_values)
-
-            if values_to_mask:
-                data_mask = ~np.isin(band, values_to_mask)
-                pixel_values = np.extract(data_mask, band)
-                lons = np.extract(data_mask, x_coords)
-                lats = np.extract(data_mask, y_coords)
-            else:
-                pixel_values = band.flatten()
-                lons = x_coords.flatten()
-                lats = y_coords.flatten()
-
-            data = pd.DataFrame({"lon": lons, "lat": lats, "pixel_value": pixel_values})
-
-        self.logger.info("Dataset is processed!")
-        return data
-
-    def _to_multi_band_dataframe(
+    def _to_dataframe(
         self,
+        band_number: Optional[int] = None,
         drop_nodata: bool = True,
-        drop_values: list = [],
-        band_names: Optional[List[str]] = None,
+        band_names: Optional[Union[str, List[str]]] = None,
     ) -> pd.DataFrame:
         """
-        Process multi-band TIF to DataFrame with all bands included.
+        Process TIF to DataFrame - handles both single-band and multi-band.
 
         Args:
-            drop_nodata (bool): Whether to drop nodata values. Defaults to True.
-            drop_values (list): Additional values to drop from the dataset. Defaults to empty list.
-            band_names (Optional[List[str]]): Custom names for the bands. If None, bands will be named using
-                                            the band descriptions from the GeoTIFF metadata if available,
-                                            otherwise 'band_1', 'band_2', etc.
+            band_number: Specific band to read (1-indexed). If None, reads all bands.
+            drop_no Whether to drop nodata values
+            band_names: Custom names for bands (multi-band only)
 
         Returns:
-            pd.DataFrame: DataFrame containing coordinates and all band values
+            pd.DataFrame with lon, lat, and band value(s)
         """
-        self.logger.info("Processing multi-band dataset...")
+        with self.open_dataset() as src:
+            if band_number is not None:
+                # SINGLE BAND MODE
+                band = src.read(band_number)
+                mask = self._build_data_mask(band, drop_nodata, src.nodata)
+                lons, lats = self._extract_coordinates_with_mask(mask)
+                pixel_values = (
+                    np.extract(mask, band) if mask is not None else band.flatten()
+                )
+                band_name = band_names if isinstance(band_names, str) else "pixel_value"
+
+                return pd.DataFrame({"lon": lons, "lat": lats, band_name: pixel_values})
+            else:
+                # MULTI-BAND MODE (all bands)
+                stack = src.read()
+
+                # Auto-detect band names by mode
+                if band_names is None:
+                    if self.mode == "rgb":
+                        band_names = ["red", "green", "blue"]
+                    elif self.mode == "rgba":
+                        band_names = ["red", "green", "blue", "alpha"]
+                    else:
+                        band_names = [
+                            src.descriptions[i] or f"band_{i+1}"
+                            for i in range(self.count)
+                        ]
+
+                # Build mask (checks ALL bands!)
+                mask = self._build_multi_band_mask(stack, drop_nodata, src.nodata)
+
+                # Create DataFrame
+                data_dict = self._bands_to_dict(stack, self.count, band_names, mask)
+                df = pd.DataFrame(data_dict)
+
+                # RGBA: normalize alpha if needed
+                if (
+                    self.mode == "rgba"
+                    and "alpha" in df.columns
+                    and df["alpha"].max() > 1
+                ):
+                    df["alpha"] = df["alpha"] / 255.0
+
+            return df
+
+    def _to_dataframe_chunked(
+        self,
+        windows: List[rasterio.windows.Window],
+        band_number: Optional[int] = None,
+        drop_nodata: bool = True,
+        band_names: Optional[Union[str, List[str]]] = None,
+        show_progress: bool = True,
+    ) -> pd.DataFrame:
+        """Universal chunked converter for ALL modes."""
+
+        chunks = []
+        iterator = tqdm(windows, desc="Processing chunks") if show_progress else windows
 
         with self.open_dataset() as src:
-            # Read all bands
-            stack = src.read()
+            # Auto-detect band names ONCE (before loop)
+            if band_number is None and band_names is None:
+                if self.mode == "rgb":
+                    band_names = ["red", "green", "blue"]
+                elif self.mode == "rgba":
+                    band_names = ["red", "green", "blue", "alpha"]
+                else:  # multi
+                    band_names = [
+                        src.descriptions[i] or f"band_{i+1}" for i in range(self.count)
+                    ]
 
-            x_coords, y_coords = self._get_pixel_coordinates()
+            for window in iterator:
+                if band_number is not None:
+                    # SINGLE BAND
+                    band_chunk = src.read(band_number, window=window)
+                    mask = self._build_data_mask(band_chunk, drop_nodata, src.nodata)
+                    lons, lats = self._get_chunk_coordinates(window, src)
+                    band_name = (
+                        band_names if isinstance(band_names, str) else "pixel_value"
+                    )
 
-            # Initialize dictionary with coordinates
-            data_dict = {"lon": x_coords.flatten(), "lat": y_coords.flatten()}
-
-            # Get band descriptions from metadata if available
-            if band_names is None and hasattr(src, "descriptions") and src.descriptions:
-                band_names = [
-                    desc if desc else f"band_{i+1}"
-                    for i, desc in enumerate(src.descriptions)
-                ]
-
-            # Process each band
-            for band_idx in range(self.count):
-                band_data = stack[band_idx]
-
-                # Handle nodata and other values to drop
-                if drop_nodata or drop_values:
-                    values_to_mask = []
-                    if drop_nodata and src.nodata is not None:
-                        values_to_mask.append(src.nodata)
-                    if drop_values:
-                        values_to_mask.extend(drop_values)
-
-                    if values_to_mask:
-                        data_mask = ~np.isin(band_data, values_to_mask)
-                        band_values = np.extract(data_mask, band_data)
-                        if band_idx == 0:  # Only need to mask coordinates once
-                            data_dict["lon"] = np.extract(data_mask, x_coords)
-                            data_dict["lat"] = np.extract(data_mask, y_coords)
+                    # Build chunk DataFrame (could use helper but simple enough)
+                    if mask is not None:
+                        mask_flat = mask.flatten()
+                        chunk_df = pd.DataFrame(
+                            {
+                                "lon": lons[mask_flat],
+                                "lat": lats[mask_flat],
+                                band_name: band_chunk.flatten()[mask_flat],
+                            }
+                        )
                     else:
-                        band_values = band_data.flatten()
+                        chunk_df = pd.DataFrame(
+                            {"lon": lons, "lat": lats, band_name: band_chunk.flatten()}
+                        )
                 else:
-                    band_values = band_data.flatten()
+                    # MULTI-BAND (includes RGB/RGBA)
+                    stack_chunk = src.read(window=window)
+                    mask = self._build_multi_band_mask(
+                        stack_chunk, drop_nodata, src.nodata
+                    )
+                    lons, lats = self._get_chunk_coordinates(window, src)
 
-                # Use custom band names if provided, otherwise use descriptions or default naming
-                band_name = (
-                    band_names[band_idx]
-                    if band_names and len(band_names) > band_idx
-                    else f"band_{band_idx + 1}"
+                    # Build DataFrame using helper
+                    band_dict = {
+                        band_names[i]: stack_chunk[i] for i in range(self.count)
+                    }
+                    chunk_df = self._build_chunk_dataframe(lons, lats, band_dict, mask)
+
+                    # RGBA: normalize alpha
+                    if self.mode == "rgba" and "alpha" in chunk_df.columns:
+                        if chunk_df["alpha"].max() > 1:
+                            chunk_df["alpha"] = chunk_df["alpha"] / 255.0
+
+                chunks.append(chunk_df)
+
+        result = pd.concat(chunks, ignore_index=True)
+        return result
+
+    def _prepare_geometry_for_clipping(
+        self,
+        geometry: Union[
+            Polygon, MultiPolygon, gpd.GeoDataFrame, gpd.GeoSeries, List[dict], dict
+        ],
+    ) -> List[dict]:
+        """Convert various geometry formats to list of GeoJSON-like dicts for rasterio.mask"""
+
+        if isinstance(geometry, (Polygon, MultiPolygon)):
+            # Shapely geometry
+            return [geometry.__geo_interface__]
+
+        elif isinstance(geometry, gpd.GeoDataFrame):
+            # GeoDataFrame - use all geometries
+            return [
+                geom.__geo_interface__ for geom in geometry.geometry if geom is not None
+            ]
+
+        elif isinstance(geometry, gpd.GeoSeries):
+            # GeoSeries
+            return [geom.__geo_interface__ for geom in geometry if geom is not None]
+
+        elif isinstance(geometry, dict):
+            # Single GeoJSON-like dict
+            return [geometry]
+
+        elif isinstance(geometry, list):
+            # List of GeoJSON-like dicts
+            return geometry
+
+        else:
+            raise TypeError(
+                f"Unsupported geometry type: {type(geometry)}. "
+                "Supported types: Shapely geometries, GeoDataFrame, GeoSeries, "
+                "GeoJSON-like dict, or list of GeoJSON-like dicts."
+            )
+
+    def _validate_geometry_crs(
+        self,
+        original_geometry: Any,
+    ) -> None:
+        """Validate that geometry CRS matches raster CRS"""
+
+        # Get raster CRS
+        raster_crs = self.crs
+
+        # Try to get geometry CRS
+        geometry_crs = None
+
+        if isinstance(original_geometry, (gpd.GeoDataFrame, gpd.GeoSeries)):
+            geometry_crs = original_geometry.crs
+        elif hasattr(original_geometry, "crs"):
+            geometry_crs = original_geometry.crs
+
+        # Warn if CRS mismatch detected
+        if geometry_crs is not None and raster_crs is not None:
+            if not raster_crs == geometry_crs:
+                self.logger.warning(
+                    f"CRS mismatch detected! Raster CRS: {raster_crs}, "
+                    f"Geometry CRS: {geometry_crs}. "
+                    "Consider reprojecting geometry to match raster CRS for accurate clipping."
                 )
-                data_dict[band_name] = band_values
 
-        self.logger.info("Multi-band dataset is processed!")
-        return pd.DataFrame(data_dict)
+    def _create_clipped_processor(
+        self, clipped_data: np.ndarray, clipped_meta: dict
+    ) -> "TifProcessor":
+        """
+        Helper to create a new TifProcessor instance from clipped data.
+        Saves the clipped data to a temporary file and initializes a new TifProcessor.
+        """
+        clipped_file_path = os.path.join(
+            self._temp_dir, f"clipped_temp_{os.urandom(8).hex()}.tif"
+        )
+        with rasterio.open(clipped_file_path, "w", **clipped_meta) as dst:
+            dst.write(clipped_data)
+
+        self.logger.info(f"Clipped raster saved to temporary file: {clipped_file_path}")
+
+        # Create a new TifProcessor instance with the clipped data
+        # Pass relevant parameters from the current instance to maintain consistency
+        return TifProcessor(
+            dataset_path=clipped_file_path,
+            data_store=self.data_store,
+            mode=self.mode,
+        )
 
     def _get_pixel_coordinates(self):
         """Helper method to generate coordinate arrays for all pixels"""
@@ -1128,6 +1416,307 @@ class TifProcessor:
 
         return self._cache["pixel_coords"]
 
+    def _get_chunk_coordinates(self, window, src):
+        """Get coordinates for a specific window chunk."""
+        transform = src.window_transform(window)
+        rows, cols = np.meshgrid(
+            np.arange(window.height), np.arange(window.width), indexing="ij"
+        )
+        xs, ys = rasterio.transform.xy(transform, rows.flatten(), cols.flatten())
+        return np.array(xs), np.array(ys)
+
+    def _extract_coordinates_with_mask(self, mask=None):
+        """Extract flattened coordinates, optionally applying a mask."""
+        x_coords, y_coords = self._get_pixel_coordinates()
+
+        if mask is not None:
+            return np.extract(mask, x_coords), np.extract(mask, y_coords)
+
+        return x_coords.flatten(), y_coords.flatten()
+
+    def _build_data_mask(self, data, drop_nodata=True, nodata_value=None):
+        """Build a boolean mask for filtering data based on nodata values."""
+        if not drop_nodata or nodata_value is None:
+            return None
+
+        return data != nodata_value
+
+    def _build_multi_band_mask(
+        self,
+        bands: np.ndarray,
+        drop_nodata: bool = True,
+        nodata_value: Optional[float] = None,
+    ) -> Optional[np.ndarray]:
+        """
+        Build mask for multi-band data - drops pixels where ANY band has nodata.
+
+        Args:
+            bands: 3D array of shape (n_bands, height, width)
+            drop_nodata Whether to drop nodata values
+            nodata_value: The nodata value to check
+
+        Returns:
+            Boolean mask or None if no masking needed
+        """
+        if not drop_nodata or nodata_value is None:
+            return None
+
+        # Check if ANY band has nodata at each pixel location
+        has_nodata = np.any(bands == nodata_value, axis=0)
+
+        # Return True where ALL bands are valid
+        valid_mask = ~has_nodata
+
+        return valid_mask if not valid_mask.all() else None
+
+    def _bands_to_dict(self, bands, band_count, band_names, mask=None):
+        """Read specified bands and return as a dictionary with optional masking."""
+
+        lons, lats = self._extract_coordinates_with_mask(mask)
+        data_dict = {"lon": lons, "lat": lats}
+
+        for idx, name in enumerate(band_names[:band_count]):
+            band_data = bands[idx]
+            data_dict[name] = (
+                np.extract(mask, band_data) if mask is not None else band_data.flatten()
+            )
+
+        return data_dict
+
+    def _calculate_optimal_chunk_size(
+        self, operation: str = "conversion", target_memory_mb: int = 500
+    ) -> int:
+        """
+        Calculate optimal chunk size (number of rows) based on target memory usage.
+
+        Args:
+            operation: Type of operation ('conversion', 'graph')
+            target_memory_mb: Target memory per chunk in megabytes
+
+        Returns:
+            Number of rows per chunk
+        """
+        bytes_per_element = np.dtype(self.dtype).itemsize
+        n_bands = self.count
+        width = self.width
+
+        # Adjust for operation type
+        if operation == "conversion":
+            # DataFrame overhead is roughly 2x
+            bytes_per_row = width * n_bands * bytes_per_element * 2
+        elif operation == "graph":
+            # Graph needs additional space for edges
+            bytes_per_row = width * bytes_per_element * 4  # Estimate
+        else:
+            bytes_per_row = width * n_bands * bytes_per_element
+
+        target_bytes = target_memory_mb * 1024 * 1024
+        chunk_rows = max(1, int(target_bytes / bytes_per_row))
+
+        # Ensure chunk size doesn't exceed total height
+        chunk_rows = min(chunk_rows, self.height)
+
+        self.logger.info(
+            f"Calculated chunk size: {chunk_rows} rows "
+            f"(~{self._format_bytes(chunk_rows * bytes_per_row)} per chunk)"
+        )
+
+        return chunk_rows
+
+    def _get_chunk_windows(self, chunk_size: int) -> List[rasterio.windows.Window]:
+        """
+        Generate window objects for chunked reading.
+
+        Args:
+            chunk_size: Number of rows per chunk
+
+        Returns:
+            List of rasterio.windows.Window objects
+        """
+        windows = []
+        for row_start in range(0, self.height, chunk_size):
+            row_end = min(row_start + chunk_size, self.height)
+            window = rasterio.windows.Window(
+                col_off=0,
+                row_off=row_start,
+                width=self.width,
+                height=row_end - row_start,
+            )
+            windows.append(window)
+
+        return windows
+
+    def _format_bytes(self, bytes_value: int) -> str:
+        """Convert bytes to human-readable format."""
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if bytes_value < 1024.0:
+                return f"{bytes_value:.2f} {unit}"
+            bytes_value /= 1024.0
+        return f"{bytes_value:.2f} PB"
+
+    def _check_available_memory(self) -> dict:
+        """
+        Check available system memory.
+
+        Returns:
+            Dict with total, available, and used memory info
+        """
+        import psutil
+
+        memory = psutil.virtual_memory()
+        return {
+            "total": memory.total,
+            "available": memory.available,
+            "used": memory.used,
+            "percent": memory.percent,
+            "available_human": self._format_bytes(memory.available),
+        }
+
+    def _estimate_memory_usage(
+        self, operation: str = "conversion", n_workers: int = 1
+    ) -> dict:
+        """
+        Estimate memory usage for various operations.
+
+        Args:
+            operation: Type of operation ('conversion', 'batched_sampling', 'merge', 'graph')
+            n_workers: Number of workers (for batched_sampling)
+
+        Returns:
+            Dict with estimated memory usage in bytes and human-readable format
+        """
+        bytes_per_element = np.dtype(self.dtype).itemsize
+        n_pixels = self.width * self.height
+        n_bands = self.count
+
+        estimates = {}
+
+        if operation == "conversion":
+            # to_dataframe/to_geodataframe: full raster + DataFrame overhead
+            raster_memory = n_pixels * n_bands * bytes_per_element
+            # DataFrame overhead (roughly 2x for storage + processing)
+            dataframe_memory = (
+                n_pixels * n_bands * 16
+            )  # 16 bytes per value in DataFrame
+            total = raster_memory + dataframe_memory
+            estimates["raster"] = raster_memory
+            estimates["dataframe"] = dataframe_memory
+            estimates["total"] = total
+
+        elif operation == "batched_sampling":
+            # Each worker loads full raster into MemoryFile
+            # Need to get file size
+            if self._merged_file_path:
+                file_path = self._merged_file_path
+            elif self._reprojected_file_path:
+                file_path = self._reprojected_file_path
+            else:
+                file_path = str(self.dataset_path)
+
+            try:
+                import os
+
+                file_size = os.path.getsize(file_path)
+            except:
+                # Estimate if can't get file size
+                file_size = n_pixels * n_bands * bytes_per_element * 1.2  # Add overhead
+
+            estimates["per_worker"] = file_size
+            estimates["total"] = file_size * n_workers
+
+        elif operation == "merge":
+            # _merge_with_mean uses float64 arrays
+            raster_memory = n_pixels * n_bands * 8  # float64
+            estimates["sum_array"] = raster_memory
+            estimates["count_array"] = n_pixels * 4  # int32
+            estimates["total"] = raster_memory + n_pixels * 4
+
+        elif operation == "graph":
+            # to_graph: data + node_map + edges
+            data_memory = n_pixels * bytes_per_element
+            node_map_memory = n_pixels * 4  # int32
+            # Estimate edges (rough: 4-connectivity = 4 edges per pixel)
+            edges_memory = n_pixels * 4 * 3 * 8  # 3 values per edge, float64
+            total = data_memory + node_map_memory + edges_memory
+            estimates["data"] = data_memory
+            estimates["node_map"] = node_map_memory
+            estimates["edges"] = edges_memory
+            estimates["total"] = total
+
+        # Add human-readable format
+        estimates["human_readable"] = self._format_bytes(estimates["total"])
+
+        return estimates
+
+    def _memory_guard(
+        self,
+        operation: str,
+        threshold_percent: float = 80.0,
+        n_workers: Optional[int] = None,
+        raise_error: bool = False,
+    ) -> bool:
+        """
+        Check if operation is safe to perform given memory constraints.
+
+        Args:
+            operation: Type of operation to check
+            threshold_percent: Maximum % of available memory to use (default 80%)
+            n_workers: Number of workers (for batched operations)
+            raise_error: If True, raise MemoryError instead of warning
+
+        Returns:
+            True if operation is safe, False otherwise
+
+        Raises:
+            MemoryError: If raise_error=True and memory insufficient
+        """
+        import warnings
+
+        estimates = self._estimate_memory_usage(operation, n_workers=n_workers or 1)
+        memory_info = self._check_available_memory()
+
+        estimated_usage = estimates["total"]
+        available = memory_info["available"]
+        threshold = available * (threshold_percent / 100.0)
+
+        is_safe = estimated_usage <= threshold
+
+        if not is_safe:
+            usage_str = self._format_bytes(estimated_usage)
+            available_str = memory_info["available_human"]
+
+            message = (
+                f"Memory warning: {operation} operation may require {usage_str} "
+                f"but only {available_str} is available. "
+                f"Current memory usage: {memory_info['percent']:.1f}%"
+            )
+
+            if raise_error:
+                raise MemoryError(message)
+            else:
+                warnings.warn(message, ResourceWarning)
+                if hasattr(self, "logger"):
+                    self.logger.warning(message)
+
+        return is_safe
+
+    def _validate_mode_band_compatibility(self):
+        """Validate that mode matches band count."""
+        mode_requirements = {
+            "single": (1, "1-band"),
+            "rgb": (3, "3-band"),
+            "rgba": (4, "4-band"),
+        }
+
+        if self.mode in mode_requirements:
+            required_count, description = mode_requirements[self.mode]
+            if self.count != required_count:
+                raise ValueError(
+                    f"{self.mode.upper()} mode requires a {description} TIF file"
+                )
+        elif self.mode == "multi" and self.count < 2:
+            raise ValueError("Multi mode requires a TIF file with 2 or more bands")
+
     def __enter__(self):
         return self
 
@@ -1146,61 +1735,3 @@ class TifProcessor:
         """Proper context manager exit with cleanup."""
         self.cleanup()
         return False
-
-
-def sample_multiple_tifs_by_coordinates(
-    tif_processors: List[TifProcessor], coordinate_list: List[Tuple[float, float]]
-):
-    """
-    Sample raster values from multiple TIFF files for given coordinates.
-
-    Parameters:
-    - tif_processors: List of TifProcessor instances.
-    - coordinate_list: List of (x, y) coordinates.
-
-    Returns:
-    - A NumPy array of sampled values, taking the first non-nodata value encountered.
-    """
-    sampled_values = np.full(len(coordinate_list), np.nan, dtype=np.float32)
-
-    for tp in tif_processors:
-        values = tp.sample_by_coordinates(coordinate_list=coordinate_list)
-
-        if tp.nodata is not None:
-            mask = (np.isnan(sampled_values)) & (
-                values != tp.nodata
-            )  # Replace only NaNs
-        else:
-            mask = np.isnan(sampled_values)  # No explicit nodata, replace all NaNs
-
-        sampled_values[mask] = values[mask]  # Update only missing values
-
-    return sampled_values
-
-
-def sample_multiple_tifs_by_polygons(
-    tif_processors: List[TifProcessor],
-    polygon_list: List[Union[Polygon, MultiPolygon]],
-    stat: str = "mean",
-) -> np.ndarray:
-    """
-    Sample raster values from multiple TIFF files for polygons in a list and join the results.
-
-    Parameters:
-    - tif_processors: List of TifProcessor instances.
-    - polygon_list: List of polygon geometries (can include MultiPolygons).
-    - stat: Aggregation statistic to compute within each polygon (mean, median, sum, min, max).
-
-    Returns:
-    - A NumPy array of sampled values, taking the first non-nodata value encountered.
-    """
-    sampled_values = np.full(len(polygon_list), np.nan, dtype=np.float32)
-
-    for tp in tif_processors:
-        values = tp.sample_by_polygons(polygon_list=polygon_list, stat=stat)
-
-        mask = np.isnan(sampled_values)  # replace all NaNs
-
-        sampled_values[mask] = values[mask]  # Update only values with samapled value
-
-    return sampled_values

@@ -604,7 +604,7 @@ def aggregate_points_to_zones(
             - Single string: Use same method for all columns ("count", "mean", "sum", "min", "max")
             - Dict: Map column names to aggregation methods
         point_zone_predicate (str): Spatial predicate for point-to-zone relationship
-            Options: "within", "intersects", "contains"
+            Options: "within", "intersects"
         zone_id_column (str): Column in zones containing zone identifiers
         output_suffix (str): Suffix to add to output column names
         drop_geometry (bool): Whether to drop the geometry column from output

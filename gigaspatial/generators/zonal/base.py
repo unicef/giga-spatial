@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Callable, TypeVar, Generic
+from typing import Dict, List, Optional, Union, TypeVar, Generic
 from shapely.geometry import Polygon
 
 import geopandas as gpd
@@ -16,10 +16,8 @@ from gigaspatial.processing.geo import (
     aggregate_polygons_to_zones,
     aggregate_points_to_zones,
 )
-from gigaspatial.processing.tif_processor import (
-    TifProcessor,
-    sample_multiple_tifs_by_polygons,
-)
+from gigaspatial.processing.tif_processor import TifProcessor
+
 from functools import lru_cache
 import logging
 
@@ -209,8 +207,6 @@ class ZonalViewGenerator(ABC, Generic[T]):
         aggregation: Union[str, Dict[str, str]] = "count",
         predicate: str = "within",
         output_suffix: str = "",
-        mapping_function: Optional[Callable] = None,
-        **mapping_kwargs,
     ) -> Dict:
         """Map point data to zones with spatial aggregation.
 
@@ -228,18 +224,12 @@ class ZonalViewGenerator(ABC, Generic[T]):
             predicate (str): Spatial predicate for point-to-zone relationship.
                 Options include "within", "intersects", "contains". Defaults to "within".
             output_suffix (str): Suffix to add to output column names. Defaults to empty string.
-            mapping_function (Callable, optional): Custom function for mapping points to zones.
-                If provided, signature should be mapping_function(self, points, **mapping_kwargs).
-                When used, all other parameters except mapping_kwargs are ignored.
-            **mapping_kwargs: Additional keyword arguments passed to the mapping function.
 
         Returns:
             Dict: Dictionary with zone IDs as keys and aggregated values as values.
                 If value_columns is None, returns point counts per zone.
                 If value_columns is specified, returns aggregated values per zone.
         """
-        if mapping_function is not None:
-            return mapping_function(self, points, **mapping_kwargs)
 
         self.logger.warning(
             "Using default points mapping implementation. Consider creating a specialized mapping function."
@@ -382,40 +372,63 @@ class ZonalViewGenerator(ABC, Generic[T]):
 
     def map_rasters(
         self,
-        tif_processors: List[TifProcessor],
-        mapping_function: Optional[Callable] = None,
+        raster_data: Union[TifProcessor, List[TifProcessor]],
         stat: str = "mean",
-        **mapping_kwargs,
-    ) -> Union[np.ndarray, Dict]:
+        **kwargs,
+    ) -> Dict:
         """Map raster data to zones using zonal statistics.
 
         Samples raster values within each zone and computes statistics. Automatically
         handles coordinate reference system transformations between raster and zone data.
 
         Args:
-            tif_processors (List[TifProcessor]): List of TifProcessor objects for
-                accessing raster data. All processors should have the same CRS.
+            raster_data (Union[TifProcessor, List[TifProcessor]]):
+                Either a TifProcessor object or a list of TifProcessor objects (which will be merged
+                into a single TifProcessor for processing).
             mapping_function (Callable, optional): Custom function for mapping rasters
                 to zones. If provided, signature should be mapping_function(self, tif_processors, **mapping_kwargs).
                 When used, stat and other parameters except mapping_kwargs are ignored.
             stat (str): Statistic to calculate when aggregating raster values within
                 each zone. Options include "mean", "sum", "min", "max", "std", etc.
                 Defaults to "mean".
-            **mapping_kwargs: Additional keyword arguments passed to the mapping function.
+            **mapping_kwargs: Additional keyword arguments for raster data.
 
         Returns:
-            Union[np.ndarray, Dict]: By default, returns a NumPy array of sampled values
-                with shape (n_zones, 1), taking the first non-nodata value encountered.
-                Custom mapping functions may return different data structures.
+            Dict: By default, returns a dictionary of sampled values
+                with zone IDs as keys.
 
         Note:
             If the coordinate reference system of the rasters differs from the zones,
             the zone geometries will be automatically transformed to match the raster CRS.
         """
-        if mapping_function is not None:
-            return mapping_function(self, tif_processors, **mapping_kwargs)
+        raster_processor: Optional[TifProcessor] = None
 
-        raster_crs = tif_processors[0].crs
+        if isinstance(raster_data, TifProcessor):
+            raster_processor = raster_data
+        elif isinstance(raster_data, list) and all(
+            isinstance(x, TifProcessor) for x in raster_data
+        ):
+            if not raster_data:
+                self.logger.info("No valid raster data provided")
+                return self.view
+
+            if len(raster_data) > 1:
+                all_source_paths = [tp.dataset_path for tp in raster_data]
+
+                self.logger.info(
+                    f"Merging {len(all_source_paths)} rasters into a single TifProcessor for zonal statistics."
+                )
+                raster_processor = TifProcessor(
+                    dataset_path=all_source_paths, data_store=self.data_store, **kwargs
+                )
+            else:
+                raster_processor = raster_data[0]
+        else:
+            raise ValueError(
+                "raster_data must be a TifProcessor object or a list of TifProcessor objects."
+            )
+
+        raster_crs = raster_processor.crs
 
         if raster_crs != self.zone_gdf.crs:
             self.logger.info(f"Projecting zones to raster CRS: {raster_crs}")
@@ -424,8 +437,8 @@ class ZonalViewGenerator(ABC, Generic[T]):
             zone_geoms = self.get_zonal_geometries()
 
         # Sample raster values
-        sampled_values = sample_multiple_tifs_by_polygons(
-            tif_processors=tif_processors, polygon_list=zone_geoms, stat=stat
+        sampled_values = raster_processor.sample_by_polygons(
+            polygon_list=zone_geoms, stat=stat
         )
 
         zone_ids = self.get_zone_identifiers()

@@ -19,6 +19,8 @@ from shapely.geometry.base import BaseGeometry
 from shapely.geometry import Point
 from tqdm import tqdm
 import logging
+import zipfile
+import tempfile
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.processing.tif_processor import TifProcessor
@@ -563,6 +565,132 @@ class WPPopulationConfig(BaseHandlerConfig):
         """
         return self.base_path / unit.split("GIS/")[1]
 
+    def get_data_unit_paths(self, units: Union[List[str], str], **kwargs) -> list:
+        """
+        Given WP file url(s), return the corresponding local file paths.
+
+        - For school_age age_structures (zip resources), if extracted .tif files are present
+        in the target directory, return those; otherwise, return the zip path(s) to allow
+        the downloader to fetch and extract them.
+        - For non-school_age age_structures (individual .tif URLs), you can filter by sex and age
+        using kwargs: sex, ages, min_age, max_age.
+        """
+        if not isinstance(units, list):
+            units = [units]
+
+        # Extract optional filters
+        sex = kwargs.get("sex")
+        education_level = kwargs.get("education_level") or kwargs.get("level")
+
+        def _to_set(v):
+            if v is None:
+                return None
+            if isinstance(v, (list, tuple, set)):
+                return {str(x).upper() for x in v}
+            return {str(v).upper()}
+
+        sex_filters = _to_set(sex)
+        level_filters = _to_set(education_level)
+
+        # 1) School-age branch (zip → extracted tifs)
+        if self.project == "age_structures" and self.school_age:
+            resolved_paths: List[Path] = []
+            for url in units:
+                output_dir = self.get_data_unit_path(url).parent
+
+                if self.data_store.is_dir(str(output_dir)):
+                    try:
+                        for f in self.data_store.list_files(str(output_dir)):
+                            if f.lower().endswith(".tif"):
+                                p = Path(f)
+                                name = p.name.upper()
+                                # Apply filters on extracted tif names
+                                if sex_filters:
+                                    # Explicit matching: F matches only F-only; M matches only M-only;
+                                    # F_M matches only combined. No implicit inclusion of combined for F or M.
+                                    is_combined = "_F_M_" in name
+                                    is_f_only = ("_F_" in name) and not is_combined
+                                    is_m_only = ("_M_" in name) and not is_combined
+
+                                    wants_f = "F" in sex_filters
+                                    wants_m = "M" in sex_filters
+                                    wants_both = "F_M" in sex_filters
+
+                                    sex_ok = (
+                                        (wants_both and is_combined)
+                                        or (wants_f and is_f_only)
+                                        or (wants_m and is_m_only)
+                                    )
+                                    if not sex_ok:
+                                        continue
+                                if level_filters:
+                                    if not any(lvl in name for lvl in level_filters):
+                                        continue
+                                resolved_paths.append(p)
+                    except Exception:
+                        resolved_paths.append(self.get_data_unit_path(url))
+                else:
+                    resolved_paths.append(self.get_data_unit_path(url))
+
+            return resolved_paths
+
+        # 2) Non-school_age age_structures (individual tif URLs) with sex/age filters
+        if self.project == "age_structures" and not self.school_age:
+            # optional filters
+            sex_filters = _to_set(kwargs.get("sex"))
+            ages_filter = kwargs.get("ages")
+            min_age = kwargs.get("min_age")
+            max_age = kwargs.get("max_age")
+
+            if ages_filter is not None and not isinstance(
+                ages_filter, (list, tuple, set)
+            ):
+                ages_filter = {int(ages_filter)}
+            elif isinstance(ages_filter, (list, tuple, set)):
+                ages_filter = {int(x) for x in ages_filter}
+
+            def _parse_meta(u: str):
+                # Expected basename pattern: ISO3_SEX_AGE_YEAR.tif
+                # e.g., RWA_F_25_2020.tif (case-insensitive possible)
+                bn = os.path.basename(u)
+                stem = os.path.splitext(bn)[0]
+                parts = stem.split("_")
+                # Be defensive about various casings/orderings
+                # Heuristic: country(0), sex(1), age(2), year(3+)
+                if len(parts) >= 4:
+                    sex_val = parts[1].upper()
+                    try:
+                        age_val = int(parts[2])
+                    except Exception:
+                        age_val = None
+                else:
+                    sex_val, age_val = None, None
+                return sex_val, age_val
+
+            filtered_units = []
+            for u in units:
+                sex_val, age_val = _parse_meta(u)
+
+                # sex filter
+                if sex_filters and sex_val not in sex_filters:
+                    continue
+
+                # age filters: ages exact, or min/max bounds
+                if age_val is not None:
+                    if ages_filter is not None and age_val not in ages_filter:
+                        continue
+                    if min_age is not None and age_val < int(min_age):
+                        continue
+                    if max_age is not None and age_val > int(max_age):
+                        continue
+
+                filtered_units.append(u)
+
+            return [self.get_data_unit_path(unit) for unit in filtered_units]
+
+        # Default behavior
+        return [self.get_data_unit_path(unit) for unit in units]
+
     def __repr__(self) -> str:
 
         return (
@@ -601,7 +729,70 @@ class WPPopulationDownloader(BaseHandlerDownloader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def download_data_unit(self, url, **kwargs):
-        """Download data file for a url."""
+        """Download data file for a url. If a zip, extract contained .tif files."""
+        # If the resource is a zip (e.g., school age datasets), download to temp and extract .tif files
+        if url.lower().endswith(".zip"):
+            temp_downloaded_path: Optional[Path] = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".zip"
+                ) as temp_file:
+                    temp_downloaded_path = Path(temp_file.name)
+                    response = self.config.client.session.get(
+                        url, stream=True, timeout=self.config.client.timeout
+                    )
+                    response.raise_for_status()
+
+                    total_size = int(response.headers.get("content-length", 0))
+
+                    with tqdm(
+                        total=total_size,
+                        unit="B",
+                        unit_scale=True,
+                        desc=f"Downloading {os.path.basename(temp_downloaded_path)}",
+                    ) as pbar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                temp_file.write(chunk)
+                                pbar.update(len(chunk))
+
+                extracted_files: List[Path] = []
+                output_dir = self.config.get_data_unit_path(url).parent
+                with zipfile.ZipFile(str(temp_downloaded_path), "r") as zip_ref:
+                    members = [
+                        m for m in zip_ref.namelist() if m.lower().endswith(".tif")
+                    ]
+                    for member in members:
+                        extracted_path = output_dir / Path(member).name
+                        with zip_ref.open(member) as source:
+                            file_content = source.read()
+                            self.data_store.write_file(
+                                str(extracted_path), file_content
+                            )
+                        extracted_files.append(extracted_path)
+                        self.logger.info(f"Extracted {member} to {extracted_path}")
+
+                return extracted_files
+
+            except requests.RequestException as e:
+                self.logger.error(f"Failed to download {url}: {e}")
+                return None
+            except zipfile.BadZipFile:
+                self.logger.error("Downloaded file is not a valid zip archive.")
+                return None
+            except Exception as e:
+                self.logger.error(f"Unexpected error processing zip for {url}: {e}")
+                return None
+            finally:
+                if temp_downloaded_path and temp_downloaded_path.exists():
+                    try:
+                        temp_downloaded_path.unlink()
+                    except OSError as e:
+                        self.logger.warning(
+                            f"Could not delete temporary file {temp_downloaded_path}: {e}"
+                        )
+
+        # Otherwise, download as a regular file (e.g., .tif)
         try:
             response = self.config.client.session.get(
                 url, stream=True, timeout=self.config.client.timeout
@@ -636,12 +827,13 @@ class WPPopulationDownloader(BaseHandlerDownloader):
     def download_data_units(
         self,
         urls: List[str],
+        **kwargs,
     ) -> List[str]:
         """Download data files for multiple urls."""
 
         with multiprocessing.Pool(self.config.n_workers) as pool:
             download_func = functools.partial(self.download_data_unit)
-            file_paths = list(
+            results = list(
                 tqdm(
                     pool.imap(download_func, urls),
                     total=len(urls),
@@ -649,7 +841,17 @@ class WPPopulationDownloader(BaseHandlerDownloader):
                 )
             )
 
-        return [path for path in file_paths if path is not None]
+        # Flatten results and filter out None
+        flattened: List[Path] = []
+        for item in results:
+            if item is None:
+                continue
+            if isinstance(item, list):
+                flattened.extend(item)
+            else:
+                flattened.append(item)
+
+        return flattened
 
     def download(self, source: str, **kwargs) -> List[str]:
         """Download data for a source"""
@@ -681,16 +883,27 @@ class WPPopulationReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
-    ) -> List[TifProcessor]:
+        self,
+        source_data_path: List[Union[str, Path]],
+        merge_rasters: bool = False,
+        **kwargs,
+    ) -> Union[List[TifProcessor], TifProcessor]:
         """
         Load TifProcessors of WP datasets.
         Args:
             source_data_path: List of file paths to load
+            merge_rasters: If True, all rasters will be merged into a single TifProcessor.
+                           Defaults to False.
         Returns:
-            List[TifProcessor]: List of TifProcessor objects for accessing the raster data.
+            Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects for accessing the raster data or a single
+                                                    TifProcessor if merge_rasters is True.
         """
-        return self._load_raster_data(raster_paths=source_data_path)
+        return self._load_raster_data(
+            raster_paths=source_data_path, merge_rasters=merge_rasters
+        )
+
+    def load(self, source, merge_rasters: bool = False, **kwargs):
+        return super().load(source=source, merge_rasters=merge_rasters, **kwargs)
 
 
 class WPPopulationHandler(BaseHandler):
@@ -822,8 +1035,11 @@ class WPPopulationHandler(BaseHandler):
         tif_processors = self.load_data(
             source=source, ensure_available=ensure_available, **kwargs
         )
+        if isinstance(tif_processors, TifProcessor):
+            return tif_processors.to_dataframe(**kwargs)
+
         return pd.concat(
-            [tp.to_dataframe() for tp in tif_processors], ignore_index=True
+            [tp.to_dataframe(**kwargs) for tp in tif_processors], ignore_index=True
         )
 
     def load_into_geodataframe(
@@ -846,6 +1062,9 @@ class WPPopulationHandler(BaseHandler):
         tif_processors = self.load_data(
             source=source, ensure_available=ensure_available, **kwargs
         )
+        if isinstance(tif_processors, TifProcessor):
+            return tif_processors.to_geodataframe(**kwargs)
+
         return pd.concat(
-            [tp.to_geodataframe() for tp in tif_processors], ignore_index=True
+            [tp.to_geodataframe(**kwargs) for tp in tif_processors], ignore_index=True
         )

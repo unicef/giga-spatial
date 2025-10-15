@@ -328,21 +328,33 @@ class BaseHandlerReader(ABC):
                 )
 
     def _load_raster_data(
-        self, raster_paths: List[Union[str, Path]]
-    ) -> List[TifProcessor]:
+        self,
+        raster_paths: List[Union[str, Path]],
+        merge_rasters: bool = False,
+        **kwargs,
+    ) -> Union[List[TifProcessor], TifProcessor]:
         """
         Load raster data from file paths.
 
         Args:
             raster_paths (List[Union[str, Path]]): List of file paths to raster files.
+            merge_rasters (bool): If True, all rasters will be merged into a single TifProcessor.
+                                  Defaults to False.
 
         Returns:
-            List[TifProcessor]: List of TifProcessor objects for accessing the raster data.
+            Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects or a single
+                                                    TifProcessor if merge_rasters is True.
         """
-        return [
-            TifProcessor(data_path, self.data_store, mode="single")
-            for data_path in raster_paths
-        ]
+        if merge_rasters and len(raster_paths) > 1:
+            self.logger.info(
+                f"Merging {len(raster_paths)} rasters into a single TifProcessor."
+            )
+            return TifProcessor(raster_paths, self.data_store, **kwargs)
+        else:
+            return [
+                TifProcessor(data_path, self.data_store, **kwargs)
+                for data_path in raster_paths
+            ]
 
     def _load_tabular_data(
         self, file_paths: List[Union[str, Path]], read_function: Callable = read_dataset
@@ -619,7 +631,9 @@ class BaseHandler(ABC):
             # Download logic
             if data_units is not None:
                 # Map data_units to their paths and select only those that are missing
-                unit_to_path = dict(zip(data_paths,data_units)) #units might be dicts, cannot be used as key
+                unit_to_path = dict(
+                    zip(data_paths, data_units)
+                )  # units might be dicts, cannot be used as key
                 if force_download:
                     # Download all units if force_download
                     self.downloader.download_data_units(data_units, **kwargs)

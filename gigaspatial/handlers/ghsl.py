@@ -610,19 +610,27 @@ class GHSLDataReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
-    ) -> List[TifProcessor]:
+        self,
+        source_data_path: List[Union[str, Path]],
+        merge_rasters: bool = False,
+        **kwargs,
+    ) -> Union[List[TifProcessor], TifProcessor]:
         """
         Load TifProcessors from GHSL dataset.
         Args:
             source_data_path: List of file paths to load
+            merge_rasters: If True, all rasters will be merged into a single TifProcessor.
+                           Defaults to False.
         Returns:
-            List[TifProcessor]: List of TifProcessor objects for accessing the raster data.
+            Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects for accessing the raster data or a single
+                                                    TifProcessor if merge_rasters is True.
         """
-        return self._load_raster_data(raster_paths=source_data_path)
+        return self._load_raster_data(
+            raster_paths=source_data_path, merge_rasters=merge_rasters
+        )
 
-    def load(self, source, **kwargs):
-        return super().load(source=source, file_ext=".tif")
+    def load(self, source, merge_rasters: bool = False, **kwargs):
+        return super().load(source=source, file_ext=".tif", merge_rasters=merge_rasters)
 
 
 class GHSLDataHandler(BaseHandler):
@@ -763,6 +771,7 @@ class GHSLDataHandler(BaseHandler):
             List[Union[str, Path]],  # list of paths
         ],
         ensure_available: bool = True,
+        merge_rasters: bool = False,
         **kwargs,
     ):
         return super().load_data(
@@ -771,6 +780,7 @@ class GHSLDataHandler(BaseHandler):
             file_ext=".tif",
             extract=True,
             file_pattern=r".*\.tif$",
+            merge_rasters=merge_rasters,
             **kwargs,
         )
 
@@ -801,8 +811,10 @@ class GHSLDataHandler(BaseHandler):
         tif_processors = self.load_data(
             source=source, ensure_available=ensure_available, **kwargs
         )
+        if isinstance(tif_processors, TifProcessor):
+            return tif_processors.to_dataframe(**kwargs)
         return pd.concat(
-            [tp.to_dataframe() for tp in tif_processors], ignore_index=True
+            [tp.to_dataframe(**kwargs) for tp in tif_processors], ignore_index=True
         )
 
     def load_into_geodataframe(
@@ -832,8 +844,10 @@ class GHSLDataHandler(BaseHandler):
         tif_processors = self.load_data(
             source=source, ensure_available=ensure_available, **kwargs
         )
+        if isinstance(tif_processors, TifProcessor):
+            return tif_processors.to_geodataframe(**kwargs)
         return pd.concat(
-            [tp.to_geodataframe() for tp in tif_processors], ignore_index=True
+            [tp.to_geodataframe(**kwargs) for tp in tif_processors], ignore_index=True
         )
 
     def get_available_data_info(

@@ -2,6 +2,131 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.1] - 2025-10-15
+
+### Added
+
+-   **Healthsites.io API Integration (`HealthSitesFetcher`):**
+    -   New class `HealthSitesFetcher` to fetch and process health facility data from the Healthsites.io API.
+    -   Supports filtering by country, bounding box extent, and date ranges (`from_date`, `to_date`).
+    -   Provides methods for:
+        -   `fetch_facilities()`: Retrieves health facility locations, returning a `pd.DataFrame` or `gpd.GeoDataFrame` based on output format.
+        -   `fetch_statistics()`: Fetches aggregated statistics for health facilities based on provided filters.
+        -   `fetch_facility_by_id()`: Retrieves details for a specific facility using its OSM type and ID.
+    -   Includes robust handling for API pagination, different output formats (JSON, GeoJSON), and nested data structures.
+    -   Integrates with `OSMLocationFetcher` and `pycountry` to standardize country names to OSM English names for consistent querying.
+    -   Configurable parameters for API URL, API key, page size, flat properties, tag format, output format, and request sleep time.
+
+-   **OSMLocationFetcher Enhancements:**
+    -   **Historical Data Fetching (`fetch_locations_changed_between`):**
+        -   New method `fetch_locations_changed_between()` to retrieve OSM objects that were created or modified within a specified date range. This enables historical analysis and change tracking.
+        -   Defaults `include_metadata` to `True` for this method, as it's typically used for change tracking.
+    -   **Comprehensive OSM Country Information (`get_osm_countries`):**
+        -   New static method `get_osm_countries()` to fetch country-level administrative boundaries directly from the OSM database.
+        -   Supports fetching all countries or a specific country by ISO 3166-1 alpha-3 code.
+        -   Option to include various name variants (e.g., `name:en`, `official_name`) and ISO codes.
+    -   **Metadata Inclusion in Fetched Locations:**
+        -   Added `include_metadata` parameter to `fetch_locations()` to optionally retrieve change tracking metadata (timestamp, version, changeset, user, uid) for each fetched OSM element.
+        -   This metadata is now extracted and included in the DataFrame for nodes, relations, and ways.
+    -   **Flexible Date Filtering in Overpass Queries:**
+        -   Introduced `date_filter_type` (`newer`, `changed`) and `start_date`/`end_date` parameters to `_build_queries()` for more granular control over time-based filtering in Overpass QL.
+    -   **Date Normalization Utility:**
+        -   Added `_normalize_date()` helper method to convert various date inputs (string, datetime object) into a standardized ISO 8601 format for Overpass API queries.
+
+-   **TifProcessor**
+    -   **Comprehensive Memory Management:**
+        -   Introduced `_check_available_memory()`, `_estimate_memory_usage()`, and `_memory_guard()` methods for proactive memory assessment across various operations.
+        -   Added warnings (`ResourceWarning`) for potentially high memory usage in batched operations, with suggestions for optimizing `n_workers`.
+    -   **Chunked DataFrame Conversion:**
+        -   Implemented `to_dataframe_chunked()` for memory-efficient processing of large rasters by converting them to DataFrames in manageable chunks.
+        -   Automatic calculation of optimal `chunk_size` based on target memory usage via `_calculate_optimal_chunk_size()`.
+        -   New helper methods: `_get_chunk_windows()`, `_get_chunk_coordinates()`.
+    -   **Raster Clipping Functionality:**
+        -   `clip_to_geometry()`: New method to clip rasters to arbitrary geometries (Shapely, GeoDataFrame, GeoSeries, GeoJSON-like dicts).
+        -   `clip_to_bounds()`: New method to clip rasters to rectangular bounding boxes, supporting optional CRS transformation for the bounds.
+        -   New helper methods for clipping: `_prepare_geometry_for_clipping()`, `_validate_geometry_crs()`, `_create_clipped_processor()`.
+
+-   **WorldPopDownloader Zip Handling:**
+    -   Modified `download_data_unit` in `WPPopulationDownloader` to correctly handle `.zip` files (e.g., school age datasets) by downloading them to a temporary location and extracting the contained `.tif` files.
+    -   Updated `download_data_units` to correctly flatten the list of paths returned by `download_data_unit` when zip extraction results in multiple files.
+    -   Adjusted `WPPopulationConfig.get_data_unit_paths` to correctly identify and return paths for extracted `.tif` files from zip resources. It is now intelligently resolves paths. For school-age datasets, it returns paths to extracted `.tif` files if available; otherwise, it returns the original `.zip` path(s) to trigger download and extraction.
+    -   Added filter support to `WPPopulationConfig.get_data_unit_paths` hence to the `WPPopulationHandler` for:
+        -   School-age datasets: supports `sex` (e.g., "F", "M", "F_M") and `education_level` (e.g., "PRIMARY", "SECONDARY") filters on extracted `.tif` filenames.
+        -   Non-school-age age_structures: supports `sex`, `ages`, `min_age`, and `max_age` filters on `.tif` filenames.
+-   **WorldPop: Filtered aggregation in `GeometryBasedZonalViewGenerator.map_wp_pop`**:
+    -   `map_wp_pop` now enforces a single country input when `handler.config.project` is "age_structures".
+    -   When `predicate` is "centroid_within" and the project is "age_structures", individual `TifProcessor` objects (representing age/sex combinations) are loaded, sampled with `map_rasters(stat="sum")`, and their results are summed per zone, preventing unintended merging.
+
+-   **PoiViewGenerator: Filtered aggregation in `PoiViewGenerator.map_wp_pop`**:
+    -   `map_wp_pop` now enforces a single country input when `handler.config.project` is "age_structures".
+    -   When `predicate` is "centroid_within" and the project is "age_structures", individual `TifProcessor` objects (representing age/sex combinations) are loaded, sampled with `map_zonal_stats(stat="sum")`, and their results are summed per POI, preventing unintended merging.
+
+-   **TifProcessor Multi-Raster Merging in Handlers and Generators:**
+    -   Extended `_load_raster_data` in `BaseHandlerReader` to support an optional `merge_rasters` argument. When `True` and multiple raster paths are provided, `TifProcessor` now merges them into a single `TifProcessor` object during loading.
+    -   Integrated `merge_rasters` argument into `GHSLDataReader` and `WPPopulationReader`'s `load_from_paths` and `load` methods, enabling control over raster merging at the reader level.
+    -   Propagated `merge_rasters` to `GHSLDataHandler`'s `load_into_dataframe`, and `load_into_geodataframe` methods for consistent behavior across the handler interface.
+
+### Changed
+
+-   **TifProcessor**
+    -   **Unified DataFrame Conversion:**
+        -   Refactored `to_dataframe()` to act as a universal entry point, dynamically routing to internal, more efficient methods for single and multi-band processing.
+        -   Deprecated the individual `_to_band_dataframe()`, `_to_rgb_dataframe()`, `_to_rgba_dataframe()`, and `_to_multi_band_dataframe()` methods in favor of the new unified `_to_dataframe()`.
+        -   `to_dataframe()` now includes a `check_memory` parameter.
+    -   **Optimized `open_dataset` Context Manager:**
+        -   The `open_dataset` context manager now directly opens local files when `LocalDataStore` is used, avoiding unnecessary `rasterio.MemoryFile` creation for improved performance and reduced memory overhead.
+    -   **Enhanced `to_geodataframe` and `to_graph`:**
+        -   Added `check_memory` parameter to `to_geodataframe()` and `to_graph()` for memory pre-checks.
+    -   **Refined `sample_by_polygons_batched`:**
+        -   Included `check_memory` parameter for memory checks before batch processing.
+        -   Implemented platform-specific warnings for potential multiprocessing issues on Windows/macOS.
+    -   **Improved Multiprocessing Initialization:**
+        -   The `_initializer_worker()` method now prioritizes merged, reprojected, or original local file paths for opening, ensuring workers access the most relevant data.
+    -   **Modular Masking and Coordinate Extraction:**
+        -   Introduced new private helper methods: `_extract_coordinates_with_mask()`, `_build_data_mask()`, `_build_multi_band_mask()`, and `_bands_to_dict()` to centralize and improve data masking and coordinate extraction logic.
+    -   **Streamlined Band-Mode Validation:**
+        -   Moved the logic for validating `mode` and band count compatibility into a dedicated `_validate_mode_band_compatibility()` method for better code organization.
+
+-   **GigaSchoolLocationFetcher**
+    -   `fetch_locations()` method:
+        -   Added `process_geospatial` parameter (defaults to `False`) to optionally process geospatial data and return a `gpd.GeoDataFrame`.
+    -   `_process_geospatial_data()` method:
+        -   Modified to return a `gpd.GeoDataFrame` by converting the `pd.DataFrame` with a `geometry` column and `EPSG:4326` CRS.
+
+-   **OSMLocationFetcher Refactoring:**
+    -   **Unified Query Execution and Processing:** Refactored the core logic for executing Overpass queries and processing their results into a new private method `_execute_and_process_queries()`. This centralizes common steps and reduces code duplication between `fetch_locations()` and the new `fetch_locations_changed_between()`.
+    -   **Enhanced `_build_queries`:** Modified `_build_queries` to accept `date_filter_type`, `start_date`, `end_date`, and `include_metadata` to construct more dynamic and feature-rich Overpass QL queries.
+    -   **Updated `fetch_locations` Signature:**
+        -   Replaced `since_year` parameter with `since_date` (which can be a `str` or `datetime` object) for more precise time-based filtering.
+        -   Added `include_metadata` parameter.
+    -   **Improved Logging of Category Distribution:**
+        -   Modified the logging for category distribution to correctly handle cases where categories are combined into a list (when `handle_duplicates='combine'`).
+    -   **`since_year` Parameter:** Removed `since_year` from `fetch_locations()` as its functionality is now superseded by the more flexible `since_date` parameter and the `_build_queries` enhancements.
+
+-   **`PoiViewGenerator` Mapping Methods (`map_zonal_stats`, `map_nearest_points`, `map_google_buildings`, `map_ms_buildings`, `map_built_s`, `map_smod`):**
+    -   Changed `map_zonal_stats` and `map_nearest_points` to return `pd.DataFrame` results (including `'poi_id'` and new mapped columns) instead of directly updating the internal view.
+    -   Updated `map_google_buildings`, `map_ms_buildings`, `map_built_s`, and `map_smod` to capture the `pd.DataFrame` returned by their respective underlying mapping calls (`map_nearest_points` or `map_zonal_stats`) and then explicitly call `self._update_view()` with these results.
+    -   This enhances modularity and allows for more flexible result handling and accumulation.
+
+-   **`ZonalViewGenerator.map_rasters` Enhancements:**
+    -   Modified `map_rasters` to accept `raster_data` as either a single `TifProcessor` or a `List[TifProcessor]`.
+    -   Implemented internal merging of `List[TifProcessor]` into a single `TifProcessor` before performing zonal statistics.
+    -   Replaced `sample_multiple_tifs_by_polygons` with the `TifProcessor.sample_by_polygons` method.
+
+### Fixed
+
+-   **TifProcessor**:
+    -   **`to_graph()` Sparse Matrix Creation:**
+        -   Corrected the sparse matrix creation logic in `to_graph()` to ensure proper symmetric graph representation when `graph_type="sparse"`.
+    -   **Coordinate System Handling in `_initializer_worker`:**
+        -   Ensured that `_initializer_worker` correctly handles different data storage scenarios to provide the correct dataset handle to worker processes, preventing `RuntimeError` due to uninitialized raster datasets.
+
+### Removed
+
+-   **OSMLocationFetcher**
+    -   **Redundant Category Distribution Logging:** Removed the explicit category distribution logging for `handle_duplicates == "separate"` since the `value_counts()` method on the 'category' column already provides this.
+
+
 ## [v0.7.0] - 2025-09-17
 
 ### Added
