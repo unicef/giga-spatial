@@ -179,7 +179,7 @@ class HealthSitesFetcher:
 
         if output_format == "geojson":
             # Use GeoDataFrame.from_features for GeoJSON format
-            gdf = gpd.GeoDataFrame.from_features(all_data)
+            gdf = gpd.GeoDataFrame.from_features(all_data, crs="EPSG:4326")
             self.logger.info(f"Created GeoDataFrame with {len(gdf)} records")
             return gdf
         else:

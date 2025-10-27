@@ -3,81 +3,75 @@ import pandas as pd
 import geopandas as gpd
 from shapely import wkt
 from datetime import datetime
-import json
 import requests
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field
-from typing import List, Literal, Optional
+from pydantic import ConfigDict, Field
+from typing import List, Literal, Optional, Tuple, Union
+from pydantic.dataclasses import dataclass
+from shapely.geometry.base import BaseGeometry
+from shapely.geometry import Point
 
-from gigaspatial.grid.mercator_tiles import CountryMercatorTiles
-from gigaspatial.core.io.readers import read_dataset
+from gigaspatial.grid.mercator_tiles import MercatorTiles, CountryMercatorTiles
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.config import config
+from gigaspatial.handlers.base import BaseHandlerConfig
+from gigaspatial.handlers.base import BaseHandlerDownloader
+from gigaspatial.handlers.base import BaseHandlerReader
+from gigaspatial.handlers.base import BaseHandler
+
+import logging
+from tqdm import tqdm
 
 
-class OoklaSpeedtestTileConfig(BaseModel):
-    service_type: Literal["fixed", "mobile"]
-    year: int
-    quarter: int
-    data_store: DataStore = Field(default_factory=LocalDataStore, exclude=True)
-    base_path: Path = Field(
-        default=config.get_path("ookla_speedtest", "bronze"), exclude=True
-    )
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+class OoklaSpeedtestConfig(BaseHandlerConfig):
+    """
+    Configuration class for Ookla Speedtest data.
 
-    class Config:
-        arbitrary_types_allowed = True
+    This class defines the parameters for accessing and filtering Ookla Speedtest datasets,
+    including available years, quarters, and how dataset URLs are constructed.
+    """
 
-    @property
-    def quarter_start(self):
-        if not 1 <= self.quarter <= 4:
-            raise ValueError("Quarter must be within [1, 2, 3, 4]")
+    MIN_YEAR = 2019
+    MAX_YEAR = datetime.today().year
+    MAX_QUARTER = int(np.floor((datetime.today().month - 1) / 3))
+    if MAX_QUARTER == 0:
+        MAX_YEAR -= 1
+        MAX_QUARTER = 4
 
+    BASE_URL = "https://ookla-open-data.s3.amazonaws.com/parquet/performance"
+
+    base_path: Path = Field(default=config.get_path("ookla_speedtest", "bronze"))
+
+    type: Literal["fixed", "mobile"] = Field(...)
+    year: Optional[int] = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
+    quarter: Optional[int] = Field(default=None, ge=0, le=4)
+
+    def __post_init__(self):
+        if self.year is None:
+            self.year = self.MAX_YEAR
+            self.logger.warning(
+                "Year not provided. Using the latest available data year: %s", self.year
+            )
+        if self.quarter is None:
+            self.quarter = self.MAX_QUARTER
+            self.logger.warning(
+                "Quarter not provided. Using the latest available data quarter for year %s: %s",
+                self.year,
+                self.quarter,
+            )
+
+        super().__post_init__()
+        self.DATASET_URL = self._get_dataset_url(self.type, self.year, self.quarter)
+
+    def _get_dataset_url(self, type, year, quarter):
         month = [1, 4, 7, 10]
-        return datetime(self.year, month[self.quarter - 1], 1)
+        quarter_start = datetime(year, month[self.quarter - 1], 1)
+        return f"{self.BASE_URL}/type={type}/year={quarter_start:%Y}/quarter={quarter}/{quarter_start:%Y-%m-%d}_performance_{type}_tiles.parquet"
 
-    @property
-    def tile_name(self):
-        return f"{self.quarter_start:%Y-%m-%d}_performance_{self.service_type}_tiles.parquet"
-
-    @property
-    def tile_url(self):
-        base_url = "https://ookla-open-data.s3.amazonaws.com/parquet/performance"
-        qs_dt = self.quarter_start
-        return f"{base_url}/type={self.service_type}/year={qs_dt:%Y}/quarter={self.quarter}/{qs_dt:%Y-%m-%d}_performance_{self.service_type}_tiles.parquet"
-
-    def download_tile(self):
-        path = str(self.base_path / self.tile_name)
-        if not self.data_store.file_exists(path):
-            response = requests.get(self.tile_url)
-            response.raise_for_status()
-            self.data_store.write_file(path, response.content)
-
-    def read_tile(self):
-        path = str(self.base_path / self.tile_name)
-
-        if self.data_store.file_exists(path):
-            df = read_dataset(self.data_store, path)
-            return df
-        else:
-            self.download_tile()
-            df = self.read_tile()
-            return df
-
-
-class OoklaSpeedtestConfig(BaseModel):
-    tiles: List[OoklaSpeedtestTileConfig] = Field(default_factory=list)
-
-    @classmethod
-    def from_available_ookla_tiles(
-        cls, data_store: DataStore = None, base_path: Path = None
-    ):
-        data_store = data_store or LocalDataStore()
-        base_path = base_path or config.get_path("ookla_speedtest", "bronze")
-
-        # first data year
-        start_year = 2019
-        # max data year
+    @staticmethod
+    def get_available_datasets():
+        start_year = 2019  # first data year
         max_year = datetime.today().year
         max_quarter = np.floor((datetime.today().month - 1) / 3)
         if max_quarter == 0:
@@ -91,109 +85,285 @@ class OoklaSpeedtestConfig(BaseModel):
                     continue
                 for type in ["fixed", "mobile"]:
                     ookla_tiles.append(
-                        OoklaSpeedtestTileConfig(
-                            service_type=type,
-                            year=year,
-                            quarter=quarter,
-                            data_store=data_store,
-                            base_path=base_path,
-                        )
+                        {"service_type": type, "year": year, "quarter": quarter}
                     )
-        return cls(tiles=ookla_tiles)
+
+        return ookla_tiles
+
+    def get_relevant_data_units(self, source=None, **kwargs):
+        return [self.DATASET_URL]
+
+    def get_relevant_data_units_by_geometry(
+        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame] = None, **kwargs
+    ) -> List[str]:
+        return [self.DATASET_URL]
+
+    def get_relevant_data_units_by_points(
+        self, points: List[Union[Point, tuple]] = None, **kwargs
+    ) -> List[str]:
+        return [self.DATASET_URL]
+
+    def get_relevant_data_units_by_country(
+        self,
+        country: str = None,
+        **kwargs,
+    ) -> List[str]:
+        return [self.DATASET_URL]
+
+    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+        """
+        Given a Ookla Speedtest file url, return the corresponding path.
+        """
+        return self.base_path / unit.split("/")[-1]
 
 
-class OoklaSpeedtestTile(BaseModel):
-    quadkey: str
-    tile: str
-    avg_d_kbps: float
-    avg_u_kbps: float
-    avg_lat_ms: float
-    avg_lat_down_ms: Optional[float] = None
-    avg_lat_up_ms: Optional[float] = None
-    tests: int
-    devices: int
+class OoklaSpeedtestDownloader(BaseHandlerDownloader):
+    """
+    A class to handle the downloading of Ookla Speedtest data.
 
-    model_config = ConfigDict(extra="allow")
+    This downloader focuses on fetching parquet files based on the provided configuration
+    and data unit URLs.
+    """
+
+    def __init__(
+        self,
+        config: Union[OoklaSpeedtestConfig, dict[str, Union[str, int]]],
+        data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
+    ):
+        config = (
+            config
+            if isinstance(config, OoklaSpeedtestConfig)
+            else OoklaSpeedtestConfig(**config)
+        )
+        super().__init__(config=config, data_store=data_store, logger=logger)
+
+    def download_data_unit(self, url: str, **kwargs) -> Optional[Path]:
+        output_path = self.config.get_data_unit_path(url)
+
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get("content-length", 0))
+
+            with self.data_store.open(str(output_path), "wb") as file:
+                for chunk in tqdm(
+                    response.iter_content(chunk_size=8192),
+                    total=total_size // 8192,
+                    unit="KB",
+                    desc=f"Downloading {output_path.name}",
+                ):
+                    file.write(chunk)
+
+            self.logger.info(f"Successfully downloaded: {url} to {output_path}")
+            return output_path
+
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Failed to download {url}: {str(e)}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
+            return None
+
+    def download_data_units(self, urls: List[str], **kwargs) -> List[Optional[Path]]:
+        # Ookla data is not parallelizable in a meaningful way beyond single file, so just iterate.
+        results = [self.download_data_unit(url, **kwargs) for url in urls]
+        return [path for path in results if path is not None]
+
+    def download(
+        self, source: Optional[Union[str, List[str]]] = None, **kwargs
+    ) -> List[Optional[Path]]:
+        urls = self.config.get_relevant_data_units(source)
+        return self.download_data_units(urls, **kwargs)
 
 
-class CountryOoklaTiles(BaseModel):
-    country: str
-    service_type: str
-    year: int
-    quarter: int
-    quadkeys: List[OoklaSpeedtestTile]
+class OoklaSpeedtestReader(BaseHandlerReader):
+    """
+    A class to handle reading Ookla Speedtest data.
 
-    @staticmethod
-    def from_country(country, ookla_tile_config: OoklaSpeedtestTileConfig):
-        # load country zoom level 16 quadkeys
-        country_tiles = CountryMercatorTiles.create(country, 16)
+    It loads parquet files into a DataFrame.
+    """
 
-        # read ookla tiles for the config
-        ookla_tiles = ookla_tile_config.read_tile()
+    def __init__(
+        self,
+        config: Union[OoklaSpeedtestConfig, dict[str, Union[str, int]]],
+        data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
+    ):
+        config = (
+            config
+            if isinstance(config, OoklaSpeedtestConfig)
+            else OoklaSpeedtestConfig(**config)
+        )
+        super().__init__(config=config, data_store=data_store, logger=logger)
 
-        # filter country tiles by ookla tile quadkeys
-        country_ookla_tiles = country_tiles.filter_quadkeys(ookla_tiles.quadkey)
-        if len(country_ookla_tiles):
-            df_quadkeys = country_ookla_tiles.to_dataframe().merge(
-                ookla_tiles, on="quadkey", how="left"
-            )
-            return CountryOoklaTiles(
-                country=country,
-                service_type=ookla_tile_config.service_type,
-                year=ookla_tile_config.year,
-                quarter=ookla_tile_config.quarter,
-                quadkeys=[
-                    OoklaSpeedtestTile(**tile_dict)
-                    for tile_dict in df_quadkeys.to_dict("records")
-                ],
-            )
+    def load_from_paths(
+        self, source_data_path: List[Union[str, Path]], **kwargs
+    ) -> pd.DataFrame:
+        result = self._load_tabular_data(file_paths=source_data_path)
+        return result
+
+    def load(
+        self,
+        source: Optional[
+            Union[
+                str,  # country
+                List[Union[Tuple[float, float], Point]],  # points
+                BaseGeometry,  # geometry
+                gpd.GeoDataFrame,  # geodataframe
+                Path,  # path
+                str,  # path
+                List[Union[str, Path]],
+            ]
+        ] = None,
+        **kwargs,
+    ) -> pd.DataFrame:
+        return super().load(source=source, **kwargs)
+
+    def resolve_source_paths(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[Tuple[float, float], Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+            Path,  # path
+            str,  # path
+            List[Union[str, Path]],
+        ] = None,
+        **kwargs,
+    ) -> List[Union[str, Path]]:
+        if isinstance(source, (str, Path)) or (
+            isinstance(source, List) and all(isinstance(p, (str, Path)) for p in source)
+        ):
+            return super().resolve_by_paths(source, **kwargs)
         else:
-            return CountryOoklaTiles(
-                country=country,
-                service_type=ookla_tile_config.service_type,
-                year=ookla_tile_config.year,
-                quarter=ookla_tile_config.quarter,
-                quadkeys=[],
-            )
+            data_units = self.config.get_relevant_data_units(source, **kwargs)
+            return self.config.get_data_unit_paths(data_units, **kwargs)
 
-    def to_dataframe(self):
-        if len(self):
-            return pd.DataFrame([q.model_dump() for q in self.quadkeys])
+
+class OoklaSpeedtestHandler(BaseHandler):
+    """
+    Handler for Ookla Speedtest data.
+
+    This class orchestrates the configuration, downloading, and reading of Ookla Speedtest
+    data, allowing for filtering by geographical sources using Mercator tiles.
+    """
+
+    def __init__(
+        self,
+        type: Literal["fixed", "mobile"],
+        year: Optional[int] = None,
+        quarter: Optional[int] = None,
+        config: Optional[OoklaSpeedtestConfig] = None,
+        downloader: Optional[OoklaSpeedtestDownloader] = None,
+        reader: Optional[OoklaSpeedtestReader] = None,
+        data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
+        **kwargs,
+    ):
+        self._type = type
+        self._year = year
+        self._quarter = quarter
+
+        super().__init__(
+            config=config,
+            downloader=downloader,
+            reader=reader,
+            data_store=data_store,
+            logger=logger,
+        )
+
+    def create_config(
+        self, data_store: DataStore, logger: logging.Logger, **kwargs
+    ) -> OoklaSpeedtestConfig:
+        return OoklaSpeedtestConfig(
+            type=self._type,
+            year=self._year,
+            quarter=self._quarter,
+            data_store=data_store,
+            logger=logger,
+            **kwargs,
+        )
+
+    def create_downloader(
+        self,
+        config: OoklaSpeedtestConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> OoklaSpeedtestDownloader:
+        return OoklaSpeedtestDownloader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )
+
+    def create_reader(
+        self,
+        config: OoklaSpeedtestConfig,
+        data_store: DataStore,
+        logger: logging.Logger,
+        **kwargs,
+    ) -> OoklaSpeedtestReader:
+        return OoklaSpeedtestReader(
+            config=config, data_store=data_store, logger=logger, **kwargs
+        )
+
+    def load_data(
+        self,
+        source: Union[
+            str,  # country
+            List[Union[Tuple[float, float], Point]],  # points
+            BaseGeometry,  # geometry
+            gpd.GeoDataFrame,  # geodataframe
+            Path,  # path
+            str,  # path
+            List[Union[str, Path]],
+        ] = None,
+        process_geospatial: bool = False,
+        ensure_available: bool = True,
+        **kwargs,
+    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
+
+        if source is None or (
+            isinstance(source, (str, Path))
+            and (
+                self.data_store.file_exists(str(source))
+                or str(source).endswith(".parquet")
+            )
+            or (
+                isinstance(source, List)
+                and all(isinstance(p, (str, Path)) for p in source)
+            )
+        ):
+            # If no source or source is a direct path, load without filtering
+            result = super().load_data(source, ensure_available, **kwargs)
         else:
-            return pd.DataFrame(
-                columns=[
-                    "quadkey",
-                    "tile",
-                    "avg_d_kbps",
-                    "avg_u_kbps",
-                    "avg_lat_ms",
-                    "avg_lat_down_ms",
-                    "avg_lat_up_ms",
-                    "tests",
-                    "devices",
-                ]
-            )
+            # Load the entire dataset and then apply Mercator tile filtering
+            full_dataset = super().load_data(
+                None, ensure_available, **kwargs
+            )  # Load the full dataset (uses DATASET_URL)
 
-    def to_geodataframe(self):
-        if len(self):
-            df = self.to_dataframe()
-            df["geometry"] = df.tile.apply(wkt.loads)
-            df.drop(columns="tile", inplace=True)
-            return gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
-        else:
-            return gpd.GeoDataFrame(
-                columns=[
-                    "quadkey",
-                    "avg_d_kbps",
-                    "avg_u_kbps",
-                    "avg_lat_ms",
-                    "avg_lat_down_ms",
-                    "avg_lat_up_ms",
-                    "tests",
-                    "devices",
-                    "geometry",
-                ]
-            )
+            if isinstance(source, str):  # country
+                mercator_tiles = CountryMercatorTiles.create(
+                    source, zoom_level=16, **kwargs
+                )
+            elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame, List)):
+                mercator_tiles = MercatorTiles.from_spatial(
+                    source, zoom_level=16, **kwargs
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported source type for filtering: {type(source)}"
+                )
 
-    def __len__(self):
-        return len(self.quadkeys)
+            quadkeys = mercator_tiles.quadkeys
+
+            result = full_dataset[full_dataset["quadkey"].isin(quadkeys)]
+
+        if process_geospatial:
+            # Convert 'tile' column from WKT to geometry
+            result["geometry"] = result["tile"].apply(wkt.loads)
+            return gpd.GeoDataFrame(result, geometry="geometry", crs="EPSG:4326")
+
+        return result

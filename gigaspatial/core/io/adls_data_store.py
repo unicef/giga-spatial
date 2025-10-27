@@ -23,14 +23,26 @@ class ADLSDataStore(DataStore):
         self,
         container: str = config.ADLS_CONTAINER_NAME,
         connection_string: str = config.ADLS_CONNECTION_STRING,
+        account_url: str = config.ADLS_ACCOUNT_URL,
+        sas_token: str = config.ADLS_SAS_TOKEN,
     ):
         """
         Create a new instance of ADLSDataStore
         :param container: The name of the container in ADLS to interact with.
         """
-        self.blob_service_client = BlobServiceClient.from_connection_string(
-            connection_string
-        )
+        if connection_string:
+            self.blob_service_client = BlobServiceClient.from_connection_string(
+                connection_string
+            )
+        elif account_url and sas_token:
+            self.blob_service_client = BlobServiceClient(
+                account_url=account_url, credential=sas_token
+            )
+        else:
+            raise ValueError(
+                "Either connection_string or account_url and sas_token must be provided."
+            )
+
         self.container_client = self.blob_service_client.get_container_client(
             container=container
         )

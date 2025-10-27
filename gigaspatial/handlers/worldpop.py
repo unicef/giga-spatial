@@ -377,6 +377,108 @@ class WPPopulationConfig(BaseHandlerConfig):
     constrained: bool = Field(...)
     school_age: bool = Field(...)
 
+    def _filter_age_sex_paths(self, paths: List[Path], filters: Dict) -> List[Path]:
+        """
+        Helper to filter a list of WorldPop age_structures paths based on sex, age, and education level filters.
+        """
+        sex_filters = filters.get("sex_filters")
+        level_filters = filters.get("level_filters")  # For school_age=True
+        ages_filter = filters.get("ages_filter")
+        min_age = filters.get("min_age")
+        max_age = filters.get("max_age")
+
+        filtered_paths: List[Path] = []
+
+        for p in paths:
+            # Expected basename patterns:
+            # - School age: DJI_M_SECONDARY_2020_1km.tif (ISO3_SEX_EDUCATIONLEVEL_YEAR_RES.tif)
+            # - Non-school age: RWA_F_25_2020.tif (ISO3_SEX_AGE_YEAR.tif)
+            bn = p.name
+            stem = os.path.splitext(bn)[0]
+            parts = stem.split("_")
+
+            sex_val, age_val, education_level_val = None, None, None
+
+            # Simple heuristic to differentiate school_age vs non-school_age filenames
+            # Check for keywords related to education levels (assuming these are unique to school_age files)
+            is_school_age_filename = any(
+                lvl in stem.upper() for lvl in ["PRIMARY", "SECONDARY"]
+            )
+
+            if (
+                is_school_age_filename
+            ):  # Filenames like DJI_M_SECONDARY_2020_1km.tif, DJI_F_M_SECONDARY_2020_1km.tif
+                if len(parts) >= 4:
+                    # Determine sex_val and education_level_val based on patterns
+                    if (
+                        len(parts) > 2
+                        and parts[1].upper() == "F"
+                        and parts[2].upper() == "M"
+                    ):
+                        # Pattern: ISO3_F_M_EDUCATIONLEVEL_YEAR...
+                        sex_val = "F_M"
+                        if len(parts) > 3:  # Ensure index exists
+                            education_level_val = parts[3].upper()
+                    elif len(parts) > 1:
+                        # Pattern: ISO3_SEX_EDUCATIONLEVEL_YEAR... (SEX is F or M)
+                        sex_val = parts[1].upper()
+                        if len(parts) > 2:  # Ensure index exists
+                            education_level_val = parts[2].upper()
+            else:  # Filenames like RWA_F_25_2020.tif
+                if len(parts) >= 4:
+                    sex_val = parts[1].upper()
+                    try:
+                        age_val = int(parts[2])
+                    except (ValueError, IndexError):
+                        age_val = None
+
+            # --- Apply sex filter ---
+            if sex_filters:
+                # Explicit matching for all cases
+                sex_ok = False
+                if "F_M" in sex_filters and sex_val == "F_M":
+                    sex_ok = True
+                elif "F" in sex_filters and sex_val == "F":
+                    sex_ok = True
+                elif "M" in sex_filters and sex_val == "M":
+                    sex_ok = True
+
+                if not sex_ok:
+                    continue
+            elif self.project == "age_structures" and self.school_age:
+                # Default for school_age=True with no sex filter: only load F_M
+                if sex_val != "F_M":
+                    continue
+
+            # --- Apply education level filter (only relevant for school_age filenames) ---
+            if level_filters and is_school_age_filename:
+                if (
+                    education_level_val is None
+                    or education_level_val not in level_filters
+                ):
+                    continue
+
+            # --- Apply age filters (only relevant for non-school_age filenames) ---
+            if (
+                ages_filter is not None or min_age is not None or max_age is not None
+            ) and not is_school_age_filename:
+                if age_val is not None:
+                    if ages_filter is not None and age_val not in ages_filter:
+                        continue
+                    if min_age is not None and age_val < int(min_age):
+                        continue
+                    if max_age is not None and age_val > int(max_age):
+                        continue
+                else:  # If age filters are specified but age_val couldn't be parsed
+                    self.logger.warning(
+                        f"Could not parse age from filename {p.name} but age filters were applied. Skipping file."
+                    )
+                    continue
+
+            filtered_paths.append(p)
+
+        return filtered_paths
+
     @field_validator("year")
     def validate_year(cls, value: str) -> int:
         if value in cls.AVAILABLE_YEARS:
@@ -551,6 +653,13 @@ class WPPopulationConfig(BaseHandlerConfig):
             self.project, self.dataset_category, iso3, self.year
         )
 
+        if not datasets:
+            raise RuntimeError(
+                f"No WorldPop datasets found for country: {country} (ISO3: {iso3}), "
+                f"project: {self.project}, category: {self.dataset_category}, year: {self.year}. "
+                "Please check the configuration parameters."
+            )
+
         files = [
             file
             for file in datasets[0].get("files", [])
@@ -581,6 +690,9 @@ class WPPopulationConfig(BaseHandlerConfig):
         # Extract optional filters
         sex = kwargs.get("sex")
         education_level = kwargs.get("education_level") or kwargs.get("level")
+        ages_filter = kwargs.get("ages")
+        min_age = kwargs.get("min_age")
+        max_age = kwargs.get("max_age")
 
         def _to_set(v):
             if v is None:
@@ -600,95 +712,43 @@ class WPPopulationConfig(BaseHandlerConfig):
 
                 if self.data_store.is_dir(str(output_dir)):
                     try:
-                        for f in self.data_store.list_files(str(output_dir)):
-                            if f.lower().endswith(".tif"):
-                                p = Path(f)
-                                name = p.name.upper()
-                                # Apply filters on extracted tif names
-                                if sex_filters:
-                                    # Explicit matching: F matches only F-only; M matches only M-only;
-                                    # F_M matches only combined. No implicit inclusion of combined for F or M.
-                                    is_combined = "_F_M_" in name
-                                    is_f_only = ("_F_" in name) and not is_combined
-                                    is_m_only = ("_M_" in name) and not is_combined
-
-                                    wants_f = "F" in sex_filters
-                                    wants_m = "M" in sex_filters
-                                    wants_both = "F_M" in sex_filters
-
-                                    sex_ok = (
-                                        (wants_both and is_combined)
-                                        or (wants_f and is_f_only)
-                                        or (wants_m and is_m_only)
-                                    )
-                                    if not sex_ok:
-                                        continue
-                                if level_filters:
-                                    if not any(lvl in name for lvl in level_filters):
-                                        continue
-                                resolved_paths.append(p)
+                        all_extracted_tifs = [
+                            Path(f)
+                            for f in self.data_store.list_files(str(output_dir))
+                            if f.lower().endswith(".tif")
+                        ]
+                        # Apply filters to extracted tifs
+                        filtered_tifs = self._filter_age_sex_paths(
+                            all_extracted_tifs,
+                            {
+                                "sex_filters": sex_filters,
+                                "level_filters": level_filters,
+                            },
+                        )
+                        resolved_paths.extend(filtered_tifs)
                     except Exception:
-                        resolved_paths.append(self.get_data_unit_path(url))
+                        resolved_paths.append(self.get_data_unit_path(url))  # Fallback
                 else:
-                    resolved_paths.append(self.get_data_unit_path(url))
+                    resolved_paths.append(
+                        self.get_data_unit_path(url)
+                    )  # Fallback if not extracted yet
 
             return resolved_paths
 
-        # 2) Non-school_age age_structures (individual tif URLs) with sex/age filters
+        # 2) Non-school_age age_structures (individual tif URLs) with DEFERRED sex/age filters
         if self.project == "age_structures" and not self.school_age:
-            # optional filters
-            sex_filters = _to_set(kwargs.get("sex"))
-            ages_filter = kwargs.get("ages")
-            min_age = kwargs.get("min_age")
-            max_age = kwargs.get("max_age")
+            # Store filters in a way that the reader can access them if needed
+            self._temp_age_sex_filters = {
+                "sex_filters": sex_filters,
+                "ages_filter": ages_filter,
+                "min_age": min_age,
+                "max_age": max_age,
+            }
+            # Here, we don't apply the filters yet. We return all potential paths.
+            # The actual filtering will happen in the reader or during TifProcessor loading.
+            return [self.get_data_unit_path(unit) for unit in units]
 
-            if ages_filter is not None and not isinstance(
-                ages_filter, (list, tuple, set)
-            ):
-                ages_filter = {int(ages_filter)}
-            elif isinstance(ages_filter, (list, tuple, set)):
-                ages_filter = {int(x) for x in ages_filter}
-
-            def _parse_meta(u: str):
-                # Expected basename pattern: ISO3_SEX_AGE_YEAR.tif
-                # e.g., RWA_F_25_2020.tif (case-insensitive possible)
-                bn = os.path.basename(u)
-                stem = os.path.splitext(bn)[0]
-                parts = stem.split("_")
-                # Be defensive about various casings/orderings
-                # Heuristic: country(0), sex(1), age(2), year(3+)
-                if len(parts) >= 4:
-                    sex_val = parts[1].upper()
-                    try:
-                        age_val = int(parts[2])
-                    except Exception:
-                        age_val = None
-                else:
-                    sex_val, age_val = None, None
-                return sex_val, age_val
-
-            filtered_units = []
-            for u in units:
-                sex_val, age_val = _parse_meta(u)
-
-                # sex filter
-                if sex_filters and sex_val not in sex_filters:
-                    continue
-
-                # age filters: ages exact, or min/max bounds
-                if age_val is not None:
-                    if ages_filter is not None and age_val not in ages_filter:
-                        continue
-                    if min_age is not None and age_val < int(min_age):
-                        continue
-                    if max_age is not None and age_val > int(max_age):
-                        continue
-
-                filtered_units.append(u)
-
-            return [self.get_data_unit_path(unit) for unit in filtered_units]
-
-        # Default behavior
+        # Default behavior for all other datasets
         return [self.get_data_unit_path(unit) for unit in units]
 
     def __repr__(self) -> str:
@@ -898,6 +958,28 @@ class WPPopulationReader(BaseHandlerReader):
             Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects for accessing the raster data or a single
                                                     TifProcessor if merge_rasters is True.
         """
+        # Apply deferred age/sex filters if present and applicable
+        if (
+            hasattr(self.config, "_temp_age_sex_filters")
+            and self.config.project == "age_structures"
+            and not self.config.school_age
+        ):
+            # Ensure source_data_path is a list of Path objects for consistent filtering
+            source_data_path = [
+                Path(p) if isinstance(p, str) else p for p in source_data_path
+            ]
+            filtered_paths = self.config._filter_age_sex_paths(
+                source_data_path, self.config._temp_age_sex_filters
+            )
+            # Clear the temporary filter after use
+            del self.config._temp_age_sex_filters
+            if not filtered_paths:
+                self.logger.warning(
+                    "No WorldPop age_structures paths matched the applied filters."
+                )
+                return []  # Return empty list if no paths after filtering
+            source_data_path = filtered_paths
+
         return self._load_raster_data(
             raster_paths=source_data_path, merge_rasters=merge_rasters
         )

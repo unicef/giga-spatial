@@ -16,6 +16,8 @@ class Config(BaseSettings):
 
     ADLS_CONNECTION_STRING: str = Field(default="", alias="ADLS_CONNECTION_STRING")
     ADLS_CONTAINER_NAME: str = Field(default="", alias="ADLS_CONTAINER_NAME")
+    ADLS_ACCOUNT_URL: str = Field(default="", alias="ADLS_ACCOUNT_URL")
+    ADLS_SAS_TOKEN: str = Field(default="", alias="ADLS_SAS_TOKEN")
     GOOGLE_SERVICE_ACCOUNT: str = Field(default="", alias="GOOGLE_SERVICE_ACCOUNT")
     API_PROFILE_FILE_PATH: Path = Field(
         default=Path("profile.share"), alias="API_PROFILE_FILE_PATH"
@@ -26,6 +28,8 @@ class Config(BaseSettings):
     MAXAR_USERNAME: str = Field(default="", alias="MAXAR_USERNAME")
     MAXAR_PASSWORD: str = Field(default="", alias="MAXAR_PASSWORD")
     MAXAR_CONNECTION_STRING: str = Field(default="", alias="MAXAR_CONNECTION_STRING")
+    EARTHDATA_USERNAME: str = Field(default="", alias="EARTHDATA_USERNAME")
+    EARTHDATA_PASSWORD: str = Field(default="", alias="EARTHDATA_PASSWORD")
     OPENCELLID_ACCESS_TOKEN: str = Field(default="", alias="OPENCELLID_ACCESS_TOKEN")
     GEOREPO_API_KEY: str = Field(default="", alias="GEOREPO_API_KEY")
     GEOREPO_USER_EMAIL: str = Field(default="", alias="GEOREPO_USER_EMAIL")
@@ -91,6 +95,7 @@ class Config(BaseSettings):
             "hdx": "hdx",
             "poi": "poi",
             "zonal": "zonal",
+            "nasa_srtm": "nasa_srtm",
         },
         description="Mapping of data types to directory names",
     )

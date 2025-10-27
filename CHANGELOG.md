@@ -2,6 +2,110 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.2] - 2025-10-27
+
+### Added
+
+-   **Ookla Speedtest Handler Integration (`OoklaSpeedtestHandler`)**
+    -   New classes `OoklaSpeedtestHandler`, `OoklaSpeedtestConfig`, `OoklaSpeedtestDownloader`, and `OoklaSpeedtestReader` for managing Ookla Speedtest data.
+    -   `OoklaSpeedtestHandler.load_data` method supports Mercator tile filtering by country or spatial geometry and includes an optional `process_geospatial` parameter for WKT to GeoDataFrame conversion.
+    -  In `OoklaSpeedtestConfig`, `year` and `quarter` fields are optional (defaulting to `None`) and `__post_init__` logs warnings if they are not explicitly provided, using the latest available data.
+    -  In `OoklaSpeedtestReader`, `resolve_source_paths` method overridden to appropriately handle `None` or non-path sources by returning the `DATASET_URL`.
+    -  `OoklaSpeedtestHandler`, the `__init__` method requires `type` as a mandatory argument, with `year` and `quarter` being optional.
+
+-   **S2 Grid Generation Support (`S2Cells`)**
+    -   Introduced `S2Cells` class for managing Google S2 cell grids using the `s2sphere` library.
+    -   Supports S2 levels 0-30, providing finer granularity than H3 (30 levels vs 15).
+    -   Provides multiple creation methods:
+        -   `from_cells()`: Create from lists of S2 cell IDs (integers or tokens).
+        -   `from_bounds()`: Create from geographic bounding box coordinates.
+        -   `from_spatial()`: Create from various spatial sources (geometries, GeoDataFrames, points).
+        -   `from_json()`: Load S2Cells from JSON files via DataStore.
+    -   Includes methods for spatial operations:
+        -   `get_neighbors()`: Get edge neighbors (4 per cell) with optional corner neighbors (8 total).
+        -   `get_children()`: Navigate to higher resolution child cells.
+        -   `get_parents()`: Navigate to lower resolution parent cells.
+        -   `filter_cells()`: Filter cells by a given set of cell IDs.
+    -   Provides conversion methods:
+        -   `to_dataframe()`: Convert to pandas DataFrame with cell IDs, tokens, and centroid coordinates.
+        -   `to_geoms()`: Convert cells to shapely Polygon geometries (square cells).
+        -   `to_geodataframe()`: Convert to GeoPandas GeoDataFrame with geometry column.
+    -   Supports saving to JSON, Parquet, or GeoJSON files via `save()` method.
+    -   Includes `average_cell_area` property for approximate area calculation based on S2 level.
+    
+-   **Country-Specific S2 Cells (`CountryS2Cells`)**
+    -   Extends `S2Cells` for generating S2 grids constrained by country boundaries.
+    -   Integrates with `AdminBoundaries` to fetch country geometries for precise cell generation.
+    -   Factory method `create()` enforces proper instantiation with country code validation via `pycountry`.
+
+-   Expanded `write_dataset` to support generic JSON objects.
+    -   The `write_dataset` function can now write any serializable Python object (like a dict or list) directly to a `.json` file by leveraging the dedicated write_json helper.
+
+-   **NASA SRTM Elevation Data Handler (`NasaSRTMHandler`)**
+    -   New handler classes for downloading and processing NASA SRTM elevation data (30m and 90m resolution).
+    -   Supports Earthdata authentication via `EARTHDATA_USERNAME` and `EARTHDATA_PASSWORD` environment variables.
+    -   `NasaSRTMConfig` provides dynamic 1°x1° tile grid generation covering the global extent.
+    -   `NasaSRTMDownloader` supports parallel downloads of SRTM .hgt.zip tiles using multiprocessing.
+    -   `NasaSRTMReader` loads SRTM data with options to return as pandas DataFrame or list of `SRTMParser` objects.
+    -   Integrated with `BaseHandler` architecture for consistent data lifecycle management.
+
+-   **SRTM Parser (`SRTMParser`)**
+    -   Efficient parser for NASA SRTM .hgt.zip files using memory mapping.
+    -   Supports both SRTM-1 (3601x3601, 1 arc-second) and SRTM-3 (1201x1201, 3 arc-second) formats.
+    -   Provides methods for:
+        -   `get_elevation(latitude, longitude)`: Get interpolated elevation for specific coordinates.
+        -   `get_elevation_batch(coordinates)`: Batch elevation queries with NumPy array support.
+        -   `to_dataframe()`: Convert elevation data to pandas DataFrame with optional NaN filtering.
+        -   Automatic tile coordinate extraction from filename (e.g., N37E023, S10W120).
+
+-   **SRTM Manager (`SRTMManager`)**
+    -   Manager class for accessing elevation data across multiple SRTM tiles with lazy loading.
+    -   Implements LRU caching (default cache size: 10 tiles) for efficient memory usage.
+    -   Methods include:
+        -   `get_elevation(latitude, longitude)`: Get interpolated elevation for any coordinate.
+        -   `get_elevation_batch(coordinates)`: Batch elevation queries across multiple tiles.
+        -   `get_elevation_profile(latitudes, longitudes)`: Generate elevation profiles along paths.
+        -   `check_coverage(latitude, longitude)`: Check if a coordinate has SRTM coverage.
+        -   `get_available_tiles()`: List available SRTM tiles.
+        -   `clear_cache()` and `get_cache_info()`: Cache management utilities.
+    -   Automatically handles tile boundary crossings for elevation profiles.
+
+-   **Earthdata Session (`EarthdataSession`)**
+    -   Custom `requests.Session` subclass for NASA Earthdata authentication.
+    -   Maintains Authorization headers through redirects to/from Earthdata hosts.
+    -   Required for accessing NASA's SRTM data repository.
+
+### Changed
+
+-   **ADLSDataStore Enhancements**
+    -   Modified `__init__` method to support initialization using either `ADLS_CONNECTION_STRING` or a combination of `ADLS_ACCOUNT_URL` and `ADLS_SAS_TOKEN`.
+    -   Improved flexibility for authenticating with Azure Data Lake Storage.
+
+-   **Configuration**
+    -   Added `ADLS_ACCOUNT_URL` and `ADLS_SAS_TOKEN` to `gigaspatial/config.py` and `.env_sample` for alternative ADLS authentication.
+    -   Added `EARTHDATA_USERNAME` and `EARTHDATA_PASSWORD` to `gigaspatial/config.py` and `.env_sample` for NASA Earthdata authentication.
+
+### Fixed
+
+-   **WorldPop: `RuntimeError` during `school_age=True` data availability check:**
+    -   Resolved a `RuntimeError: Could not ensure data availability for loading` that occurred when `school_age=True` and WorldPop data was not yet present in the data store.
+    -   `WPPopulationConfig.get_data_unit_paths` now correctly returns the original `.zip` URLs to trigger the download/extraction process when filtered `.tif` files are missing.
+    -   After successful download and extraction, it now accurately identifies and returns the paths to the local `.tif` files, allowing `BaseHandler` to confirm availability and proceed with loading.
+-   **WorldPop: `list index out of range` when no datasets found**:
+    -   Added a `RuntimeError` in `WPPopulationConfig.get_relevant_data_units_by_country` when `self.client.search_datasets` returns no results, providing a clearer error message with the search parameters.
+
+-   **WorldPop: Incomplete downloads with `min_age`/`max_age` filters for non-school-age `age_structures`**:
+    -   Fixed an issue where `load_data` with `min_age` or `max_age` filters (when `school_age=False`) resulted in incomplete downloads.
+    -   `WPPopulationConfig.get_data_unit_paths` now returns all potential `.tif` URLs for non-school-age `age_structures` during the initial availability check, ensuring all necessary files are downloaded.
+    -   Age/sex filtering is now deferred and applied by `WPPopulationReader.load_from_paths` using `WPPopulationConfig._filter_age_sex_paths` *after* download, guaranteeing data integrity.
+
+-   **HealthSitesFetcher**
+    -   Ensured correct Coordinate Reference System (CRS) assignment (`EPSG:4326`) when returning `GeoDataFrame` from fetched health facility data.
+
+### Dependencies
+
+-   Added `s2sphere` as a new dependency for S2 geometry operations
+
 ## [v0.7.1] - 2025-10-15
 
 ### Added

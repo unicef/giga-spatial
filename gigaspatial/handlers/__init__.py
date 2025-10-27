@@ -30,8 +30,10 @@ from gigaspatial.handlers.worldpop import (
     WorldPopRestClient,
 )
 from gigaspatial.handlers.ookla_speedtest import (
-    OoklaSpeedtestTileConfig,
     OoklaSpeedtestConfig,
+    OoklaSpeedtestDownloader,
+    OoklaSpeedtestReader,
+    OoklaSpeedtestHandler,
 )
 from gigaspatial.handlers.opencellid import (
     OpenCellIDConfig,
@@ -48,4 +50,13 @@ from gigaspatial.handlers.giga import (
     GigaSchoolLocationFetcher,
     GigaSchoolProfileFetcher,
     GigaSchoolMeasurementsFetcher,
+)
+from gigaspatial.handlers.healthsites import HealthSitesFetcher
+from gigaspatial.handlers.srtm import (
+    NasaSRTMConfig,
+    NasaSRTMDownloader,
+    NasaSRTMReader,
+    NasaSRTMHandler,
+    SRTMParser,
+    SRTMManager,
 )

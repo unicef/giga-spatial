@@ -2,7 +2,6 @@ import pandas as pd
 import geopandas as gpd
 from pathlib import Path
 import json
-import io
 
 from .data_store import DataStore
 
@@ -14,12 +13,13 @@ def write_json(data, data_store: DataStore, path, **kwargs):
 
 def write_dataset(data, data_store: DataStore, path, **kwargs):
     """
-    Write DataFrame or GeoDataFrame to various file formats in Azure Blob Storage.
+    Write DataFrame, GeoDataFrame, or a generic object (for JSON)
+    to various file formats in DataStore.
 
     Parameters:
     ----------
-    data : pandas.DataFrame or geopandas.GeoDataFrame
-        The data to write to blob storage.
+    data : pandas.DataFrame, geopandas.GeoDataFrame, or any object
+        The data to write to data storage.
     data_store : DataStore
         Instance of DataStore for accessing data storage.
     path : str
@@ -32,7 +32,8 @@ def write_dataset(data, data_store: DataStore, path, **kwargs):
     ValueError
         If the file type is unsupported or if there's an error writing the file.
     TypeError
-        If input data is not a DataFrame or GeoDataFrame.
+            If input data is not a DataFrame, GeoDataFrame, AND not a generic object
+            intended for a .json file.
     """
 
     # Define supported file formats and their writers
@@ -52,13 +53,27 @@ def write_dataset(data, data_store: DataStore, path, **kwargs):
     }
 
     try:
-        # Input validation
-        if not isinstance(data, (pd.DataFrame, gpd.GeoDataFrame)):
-            raise TypeError("Input data must be a pandas DataFrame or GeoDataFrame")
-
         # Get file suffix and ensure it's lowercase
         suffix = Path(path).suffix.lower()
 
+        # 1. Handle generic JSON data
+        is_dataframe_like = isinstance(data, (pd.DataFrame, gpd.GeoDataFrame))
+        if not is_dataframe_like:
+            if suffix == ".json":
+                try:
+                    # Pass generic data directly to the write_json function
+                    write_json(data, data_store, path, **kwargs)
+                    return  # Successfully wrote JSON, so exit
+                except Exception as e:
+                    raise ValueError(f"Error writing generic JSON data: {str(e)}")
+            else:
+                # Raise an error if it's not a DataFrame/GeoDataFrame and not a .json file
+                raise TypeError(
+                    "Input data must be a pandas DataFrame or GeoDataFrame, "
+                    "or a generic object destined for a '.json' file."
+                )
+
+        # 2. Handle DataFrame/GeoDataFrame
         # Determine if we need binary mode based on file type
         mode = "wb" if suffix in BINARY_FORMATS else "w"
 

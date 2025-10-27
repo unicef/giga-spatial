@@ -108,7 +108,7 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         if isinstance(source, gpd.GeoDataFrame):
             if source.crs != "EPSG:4326":
                 source = source.to_crs("EPSG:4326")
-            search_geom = source.geometry.unary_union
+            search_geom = source.geometry.union_all()
         elif isinstance(source, BaseGeometry):
             search_geom = source
         elif isinstance(source, Iterable) and all(
