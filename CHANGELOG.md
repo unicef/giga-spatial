@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
     -   Integrated with `gigaspatial/config.py` for centralized configuration via environment variables.
     -   Provides directory-like operations (`mkdir`, `rmdir`, `walk`, `is_dir`, `is_file`) for conceptual directories in Snowflake stages.
     -   Includes context manager support and connection management.
-    -   Full compatibility with existing `DataStore` abstraction, enabling seamless integration with pipeline code.
+    -   Full compatibility with existing `DataStore` abstraction
 
 ### Changed
 
