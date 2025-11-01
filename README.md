@@ -41,7 +41,7 @@ We recommend using a virtual environment for installation. See the [installation
   - Support for raster point sampling and zonal statistics
   - Area-weighted aggregation for polygon-based statistics
 - **Grid System**: Create and manipulate grid-based geospatial data for analysis and modeling.
-- **Data Storage**: Flexible storage options with both local and cloud (ADLS) support.
+- **Data Storage**: Flexible storage options with local, cloud (ADLS), and Snowflake stage support.
 - **Configuration Management**: 
   - Centralized configuration via environment variables or `.env` file
   - Easy setup of API keys and paths
