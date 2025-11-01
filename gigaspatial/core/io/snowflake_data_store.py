@@ -241,6 +241,161 @@ class SnowflakeDataStore(DataStore):
         finally:
             cursor.close()
 
+    def upload_file(self, file_path: str, stage_path: str):
+        """
+        Uploads a single file from local filesystem to Snowflake stage.
+
+        :param file_path: Local file path
+        :param stage_path: Destination path in the stage
+        """
+        try:
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"Local file not found: {file_path}")
+
+            # Read the file
+            with open(file_path, "rb") as f:
+                data = f.read()
+
+            # Write to stage using write_file
+            self.write_file(stage_path, data)
+            self.logger.info(f"Uploaded {file_path} to {stage_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to upload {file_path}: {e}")
+            raise
+
+    def upload_directory(self, dir_path: str, stage_dir_path: str):
+        """
+        Uploads all files from a local directory to Snowflake stage.
+
+        :param dir_path: Local directory path
+        :param stage_dir_path: Destination directory path in the stage
+        """
+        if not os.path.isdir(dir_path):
+            raise NotADirectoryError(f"Local directory not found: {dir_path}")
+
+        for root, dirs, files in os.walk(dir_path):
+            for file in files:
+                local_file_path = os.path.join(root, file)
+                relative_path = os.path.relpath(local_file_path, dir_path)
+                # Normalize path separators for stage
+                stage_file_path = os.path.join(stage_dir_path, relative_path).replace("\\", "/")
+
+                self.upload_file(local_file_path, stage_file_path)
+
+    def download_directory(self, stage_dir_path: str, local_dir_path: str):
+        """
+        Downloads all files from a Snowflake stage directory to a local directory.
+
+        :param stage_dir_path: Source directory path in the stage
+        :param local_dir_path: Destination local directory path
+        """
+        try:
+            # Ensure the local directory exists
+            os.makedirs(local_dir_path, exist_ok=True)
+
+            # List all files in the stage directory
+            files = self.list_files(stage_dir_path)
+
+            for file_path in files:
+                # Get the relative path from the stage directory
+                if stage_dir_path:
+                    if file_path.startswith(stage_dir_path):
+                        relative_path = file_path[len(stage_dir_path):].lstrip("/")
+                    else:
+                        # If file_path doesn't start with stage_dir_path, use it as is
+                        relative_path = os.path.basename(file_path)
+                else:
+                    relative_path = file_path
+
+                # Construct the local file path
+                local_file_path = os.path.join(local_dir_path, relative_path)
+                # Create directories if needed
+                os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+
+                # Download the file
+                data = self.read_file(file_path)
+                with open(local_file_path, "wb") as f:
+                    if isinstance(data, str):
+                        f.write(data.encode("utf-8"))
+                    else:
+                        f.write(data)
+
+            self.logger.info(f"Downloaded directory {stage_dir_path} to {local_dir_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to download directory {stage_dir_path}: {e}")
+            raise
+
+    def copy_directory(self, source_dir: str, destination_dir: str):
+        """
+        Copies all files from a source directory to a destination directory within the stage.
+
+        :param source_dir: Source directory path in the stage
+        :param destination_dir: Destination directory path in the stage
+        """
+        try:
+            # Normalize directory paths
+            source_dir = source_dir.rstrip("/")
+            destination_dir = destination_dir.rstrip("/")
+
+            # List all files in the source directory
+            files = self.list_files(source_dir)
+
+            for file_path in files:
+                # Get relative path from source directory
+                if source_dir:
+                    if file_path.startswith(source_dir):
+                        relative_path = file_path[len(source_dir):].lstrip("/")
+                    else:
+                        relative_path = os.path.basename(file_path)
+                else:
+                    relative_path = file_path
+
+                # Construct the destination file path
+                if destination_dir:
+                    dest_file_path = f"{destination_dir}/{relative_path}".replace("//", "/")
+                else:
+                    dest_file_path = relative_path
+
+                # Copy each file
+                self.copy_file(file_path, dest_file_path, overwrite=True)
+
+            self.logger.info(f"Copied directory from {source_dir} to {destination_dir}")
+        except Exception as e:
+            self.logger.error(f"Failed to copy directory {source_dir}: {e}")
+            raise
+
+    def copy_file(
+            self, source_path: str, destination_path: str, overwrite: bool = False
+    ):
+        """
+        Copies a single file within the Snowflake stage.
+
+        :param source_path: Source file path in the stage
+        :param destination_path: Destination file path in the stage
+        :param overwrite: If True, overwrite the destination file if it already exists
+        """
+        try:
+            if not self.file_exists(source_path):
+                raise FileNotFoundError(f"Source file not found: {source_path}")
+
+            if self.file_exists(destination_path) and not overwrite:
+                raise FileExistsError(
+                    f"Destination file already exists and overwrite is False: {destination_path}"
+                )
+
+            # Read from source and write to destination
+            data = self.read_file(source_path)
+            self.write_file(destination_path, data)
+
+            self.logger.info(f"Copied file from {source_path} to {destination_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to copy file {source_path}: {e}")
+            raise
+
+    def exists(self, path: str) -> bool:
+        """Check if a path exists (file or directory)."""
+        return self.file_exists(path) or self.is_dir(path)
+
     def file_exists(self, path: str) -> bool:
         """
         Check if a file exists in the Snowflake stage.
@@ -270,6 +425,41 @@ class SnowflakeDataStore(DataStore):
         except Exception as e:
             self.logger.warning(f"Error checking file existence {path}: {e}")
             return False
+        finally:
+            cursor.close()
+
+    def file_size(self, path: str) -> float:
+        """
+        Get the size of a file in kilobytes.
+
+        :param path: File path in the stage
+        :return: File size in kilobytes
+        """
+        self._ensure_connection()
+        cursor = self.connection.cursor(DictCursor)
+
+        try:
+            normalized_path = self._normalize_path(path)
+            stage_path = self._get_stage_path(normalized_path)
+
+            # LIST command returns file metadata including size
+            list_command = f"LIST {stage_path}"
+            cursor.execute(list_command)
+            results = cursor.fetchall()
+
+            # Find the matching file and get its size
+            for result in results:
+                file_path = result["name"]
+                if normalized_path in file_path.lower() or file_path.endswith(normalized_path):
+                    # Size is in bytes, convert to kilobytes
+                    size_bytes = result.get("size", 0)
+                    size_kb = size_bytes / 1024.0
+                    return size_kb
+
+            raise FileNotFoundError(f"File not found: {path}")
+        except Exception as e:
+            self.logger.error(f"Error getting file size for {path}: {e}")
+            raise
         finally:
             cursor.close()
 
@@ -385,6 +575,40 @@ class SnowflakeDataStore(DataStore):
             self.logger.warning(f"Error walking directory {top}: {e}")
             yield (top, [], [])
 
+    def list_directories(self, path: str) -> List[str]:
+        """
+        List only directory names (not files) from a given path in the stage.
+
+        :param path: Directory path to list
+        :return: List of directory names
+        """
+        normalized_path = self._normalize_path(path)
+        files = self.list_files(normalized_path)
+
+        directories = set()
+
+        for file_path in files:
+            # Get relative path from the search path
+            if normalized_path:
+                if file_path.startswith(normalized_path):
+                    relative_path = file_path[len(normalized_path):].lstrip("/")
+                else:
+                    continue
+            else:
+                relative_path = file_path
+
+            # Skip if empty
+            if not relative_path:
+                continue
+
+            # If there's a "/" in the relative path, it means there's a subdirectory
+            if "/" in relative_path:
+                # Get the first directory name
+                dir_name = relative_path.split("/")[0]
+                directories.add(dir_name)
+
+        return sorted(list(directories))
+
     @contextlib.contextmanager
     def open(self, path: str, mode: str = "r"):
         """
@@ -416,6 +640,43 @@ class SnowflakeDataStore(DataStore):
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
+    def get_file_metadata(self, path: str) -> dict:
+        """
+        Retrieve comprehensive file metadata from Snowflake stage.
+
+        :param path: File path in the stage
+        :return: File metadata dictionary
+        """
+        self._ensure_connection()
+        cursor = self.connection.cursor(DictCursor)
+
+        try:
+            normalized_path = self._normalize_path(path)
+            stage_path = self._get_stage_path(normalized_path)
+
+            # LIST command returns file metadata
+            list_command = f"LIST {stage_path}"
+            cursor.execute(list_command)
+            results = cursor.fetchall()
+
+            # Find the matching file
+            for result in results:
+                file_path = result["name"]
+                if normalized_path in file_path.lower() or file_path.endswith(normalized_path):
+                    return {
+                        "name": path,
+                        "size_bytes": result.get("size", 0),
+                        "last_modified": result.get("last_modified"),
+                        "md5": result.get("md5"),
+                    }
+
+            raise FileNotFoundError(f"File not found: {path}")
+        except Exception as e:
+            self.logger.error(f"Error getting file metadata for {path}: {e}")
+            raise
+        finally:
+            cursor.close()
+
     def is_file(self, path: str) -> bool:
         """Check if path points to a file."""
         return self.file_exists(path)
@@ -437,27 +698,6 @@ class SnowflakeDataStore(DataStore):
             return False
             
         return len(files) > 0
-
-    def remove(self, path: str) -> None:
-        """
-        Remove a file from the Snowflake stage.
-
-        :param path: Path to the file to remove
-        """
-        self._ensure_connection()
-        cursor = self.connection.cursor()
-
-        try:
-            normalized_path = self._normalize_path(path)
-            stage_path = self._get_stage_path(normalized_path)
-
-            remove_command = f"REMOVE {stage_path}"
-            cursor.execute(remove_command)
-
-        except Exception as e:
-            raise IOError(f"Error removing file {path}: {e}")
-        finally:
-            cursor.close()
 
     def rmdir(self, dir: str) -> None:
         """
@@ -500,9 +740,56 @@ class SnowflakeDataStore(DataStore):
         if not self.file_exists(placeholder_path):
             self.write_file(placeholder_path, b"Placeholder file for directory")
 
-    def exists(self, path: str) -> bool:
-        """Check if a path exists (file or directory)."""
-        return self.file_exists(path) or self.is_dir(path)
+    def remove(self, path: str) -> None:
+        """
+        Remove a file from the Snowflake stage.
+
+        :param path: Path to the file to remove
+        """
+        self._ensure_connection()
+        cursor = self.connection.cursor()
+
+        try:
+            normalized_path = self._normalize_path(path)
+            stage_path = self._get_stage_path(normalized_path)
+
+            remove_command = f"REMOVE {stage_path}"
+            cursor.execute(remove_command)
+
+        except Exception as e:
+            raise IOError(f"Error removing file {path}: {e}")
+        finally:
+            cursor.close()
+
+    def rename(
+        self,
+        source_path: str,
+        destination_path: str,
+        overwrite: bool = False,
+        delete_source: bool = True,
+    ) -> None:
+        """
+        Rename (move) a single file by copying to the new path and deleting the source.
+        
+        :param source_path: Existing file path in the stage
+        :param destination_path: Target file path in the stage
+        :param overwrite: Overwrite destination if it already exists
+        :param delete_source: Delete original after successful copy
+        """
+        if not self.file_exists(source_path):
+            raise FileNotFoundError(f"Source file not found: {source_path}")
+        
+        if self.file_exists(destination_path) and not overwrite:
+            raise FileExistsError(
+                f"Destination already exists and overwrite is False: {destination_path}"
+            )
+        
+        # Copy file to new location
+        self.copy_file(source_path, destination_path, overwrite=overwrite)
+        
+        # Delete source if requested
+        if delete_source:
+            self.remove(source_path)
 
     def close(self):
         """Close the Snowflake connection."""
