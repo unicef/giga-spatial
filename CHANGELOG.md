@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.3] - TBD
+
+### Added
+
+-   **SnowflakeDataStore Support**
+    -   New `SnowflakeDataStore` class implementing the `DataStore` interface for Snowflake stages.
+    -   Supports file operations (read, write, list, delete) on Snowflake internal stages.
+    -   Integrated with `gigaspatial/config.py` for centralized configuration via environment variables.
+    -   Provides directory-like operations (`mkdir`, `rmdir`, `walk`, `is_dir`, `is_file`) for conceptual directories in Snowflake stages.
+    -   Includes context manager support and connection management.
+    -   Full compatibility with existing `DataStore` abstraction
+
+### Changed
+
+-   **Configuration**
+    -   Added Snowflake connection parameters to `gigaspatial/config.py`:
+        -   `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`
+        -   `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`
+        -   `SNOWFLAKE_STAGE_NAME`
+    -   Added Snowflake configuration variables to `.env_sample`
+
+### Dependencies
+
+-   Added `snowflake-connector-python>=3.0.0` as a new dependency
+
 ## [v0.7.2] - 2025-10-27
 
 ### Added
