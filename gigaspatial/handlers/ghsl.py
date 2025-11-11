@@ -187,14 +187,6 @@ class GHSLDataConfig(BaseHandlerConfig):
 
         return intersecting_tiles
 
-    # def get_relevant_data_units_by_points(
-    #     self, points: Iterable[Union[Point, tuple]], **kwargs
-    # ) -> List[dict]:
-    #     """
-    #     Return intersecting tiles f or a list of points.
-    #     """
-    #     return self._get_relevant_tiles(points)
-
     def get_data_unit_path(self, unit: str = None, file_ext=".zip", **kwargs) -> Path:
         """Construct and return the path for the configured dataset or dataset tile."""
         info = self._get_product_info()
@@ -227,69 +219,6 @@ class GHSLDataConfig(BaseHandlerConfig):
         ]
 
         return "/".join(path_segments)
-
-    # def _get_relevant_tiles(
-    #     self,
-    #     source: Union[
-    #         BaseGeometry,
-    #         gpd.GeoDataFrame,
-    #         Iterable[Union[Point, tuple]],
-    #     ],
-    #     crs="EPSG:4326",
-    # ) -> list:
-    #     """
-    #     Identify and return the GHSL tiles that spatially intersect with the given geometry.
-
-    #     The input geometry can be a Shapely geometry object, a GeoDataFrame,
-    #     or a list of Point objects or (lon, lat) tuples. The method ensures
-    #     the input geometry is in GHSL tiles projection for the spatial intersection.
-
-    #     Args:
-    #         source: A Shapely geometry, a GeoDataFrame, or a list of Point
-    #                   objects or (lat, lon) tuples representing the area of interest.
-
-    #     Returns:
-    #         A list the tile ids for the intersecting tiles.
-
-    #     Raises:
-    #         ValueError: If the input `source` is not one of the supported types.
-    #     """
-    #     if isinstance(source, gpd.GeoDataFrame):
-    #         if source.crs != crs:
-    #             source = source.to_crs(crs)
-    #         search_geom = source.geometry.unary_union
-    #     elif isinstance(
-    #         source,
-    #         BaseGeometry,
-    #     ):
-    #         search_geom = source
-    #     elif isinstance(source, Iterable) and all(
-    #         len(pt) == 2 or isinstance(pt, Point) for pt in source
-    #     ):
-    #         points = [
-    #             pt if isinstance(pt, Point) else Point(pt[1], pt[0]) for pt in source
-    #         ]
-    #         search_geom = MultiPoint(points)
-    #     else:
-    #         raise ValueError(
-    #             f"Expected Geometry, GeoDataFrame or iterable object of Points got {source.__class__}"
-    #         )
-
-    #     if self.tiles_gdf.crs != crs:
-    #         search_geom = (
-    #             gpd.GeoDataFrame(geometry=[search_geom], crs=crs)
-    #             .to_crs(self.tiles_gdf.crs)
-    #             .geometry[0]
-    #         )
-
-    #     # Find intersecting tiles
-    #     mask = (
-    #         tile_geom.intersects(search_geom) for tile_geom in self.tiles_gdf.geometry
-    #     )
-
-    #     intersecting_tiles = self.tiles_gdf.loc[mask, "tile_id"].to_list()
-
-    #     return intersecting_tiles
 
     def _get_product_info(self) -> dict:
         """Generate and return common product information used in multiple methods."""

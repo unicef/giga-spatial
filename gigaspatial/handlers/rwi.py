@@ -71,41 +71,6 @@ class RWIConfig(HDXConfig):
 
         return resources
 
-    # def get_relevant_data_units_by_country(
-    #     self, country: str, **kwargs
-    # ) -> List[Resource]:
-    #     """Get relevant data units for a country, optionally filtering for latest version"""
-    #     country = pycountry.countries.lookup(country)
-    #     values = [country.alpha_3]
-    #     resources = self.get_dataset_resources(
-    #         filter={"url": values},
-    #     )
-
-    #     if self.latest_only and len(resources) > 1:
-    #         # Find the resource with the latest creation date
-    #         latest_resource = None
-    #         latest_date = None
-
-    #         for resource in resources:
-    #             created = resource.get("created")
-    #             if created:
-    #                 try:
-    #                     created_dt = datetime.fromisoformat(
-    #                         created.replace("Z", "+00:00")
-    #                     )
-    #                     if latest_date is None or created_dt > latest_date:
-    #                         latest_date = created_dt
-    #                         latest_resource = resource
-    #                 except ValueError:
-    #                     self.logger.warning(
-    #                         f"Could not parse creation date for resource: {created}"
-    #                     )
-
-    #         if latest_resource:
-    #             resources = [latest_resource]
-
-    #     return resources
-
 
 class RWIDownloader(HDXDownloader):
     """Specialized downloader for the Relative Wealth Index dataset from HDX"""

@@ -98,18 +98,6 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
     ) -> List[str]:
         return
 
-    # def get_relevant_data_units_by_points(
-    #     self, points: List[Union[Point, tuple]] = None, **kwargs
-    # ) -> List[str]:
-    #     return [self.DATASET_URL]
-
-    # def get_relevant_data_units_by_country(
-    #     self,
-    #     country: str = None,
-    #     **kwargs,
-    # ) -> List[str]:
-    #     return [self.DATASET_URL]
-
     def get_data_unit_path(self, unit: str, **kwargs) -> Path:
         """
         Given a Ookla Speedtest file url, return the corresponding path.
@@ -220,27 +208,6 @@ class OoklaSpeedtestReader(BaseHandlerReader):
         **kwargs,
     ) -> pd.DataFrame:
         return super().load(source=source, **kwargs)
-
-    # def resolve_source_paths(
-    #     self,
-    #     source: Union[
-    #         str,  # country
-    #         List[Union[Tuple[float, float], Point]],  # points
-    #         BaseGeometry,  # geometry
-    #         gpd.GeoDataFrame,  # geodataframe
-    #         Path,  # path
-    #         str,  # path
-    #         List[Union[str, Path]],
-    #     ] = None,
-    #     **kwargs,
-    # ) -> List[Union[str, Path]]:
-    #     if isinstance(source, (str, Path)) or (
-    #         isinstance(source, List) and all(isinstance(p, (str, Path)) for p in source)
-    #     ):
-    #         return super().resolve_by_paths(source, **kwargs)
-    #     else:
-    #         data_units = self.config.get_relevant_data_units(source, **kwargs)
-    #         return self.config.get_data_unit_paths(data_units, **kwargs)
 
 
 class OoklaSpeedtestHandler(BaseHandler):
