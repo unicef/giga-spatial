@@ -629,33 +629,15 @@ class WPPopulationConfig(BaseHandlerConfig):
                         )
 
     def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+        self, geometry: str, **kwargs
     ) -> List[Dict[str, Any]]:
-        raise NotImplementedError(
-            "WorldPop does not support geometry-based filtering. "
-            "Please use country-based filtering or direct resource filtering instead."
-        )
-
-    def get_relevant_data_units_by_points(
-        self, points: List[Union[Point, tuple]], **kwargs
-    ) -> List[Dict[str, Any]]:
-        raise NotImplementedError(
-            "WorldPop does not support point-based filtering. "
-            "Please use country-based filtering or direct resource filtering instead."
-        )
-
-    def get_relevant_data_units_by_country(
-        self, country: str, **kwargs
-    ) -> List[Dict[str, Any]]:
-        iso3 = pycountry.countries.lookup(country).alpha_3
-
         datasets = self.client.search_datasets(
-            self.project, self.dataset_category, iso3, self.year
+            self.project, self.dataset_category, geometry, self.year
         )
 
         if not datasets:
             raise RuntimeError(
-                f"No WorldPop datasets found for country: {country} (ISO3: {iso3}), "
+                f"No WorldPop datasets found for country: {geometry}, "
                 f"project: {self.project}, category: {self.dataset_category}, year: {self.year}. "
                 "Please check the configuration parameters."
             )
@@ -667,6 +649,38 @@ class WPPopulationConfig(BaseHandlerConfig):
         ]
 
         return files
+
+    # def get_relevant_data_units_by_points(
+    #     self, points: List[Union[Point, tuple]], **kwargs
+    # ) -> List[Dict[str, Any]]:
+    #     raise NotImplementedError(
+    #         "WorldPop does not support point-based filtering. "
+    #         "Please use country-based filtering or direct resource filtering instead."
+    #     )
+
+    # def get_relevant_data_units_by_country(
+    #     self, country: str, **kwargs
+    # ) -> List[Dict[str, Any]]:
+    #     iso3 = pycountry.countries.lookup(country).alpha_3
+
+    #     datasets = self.client.search_datasets(
+    #         self.project, self.dataset_category, iso3, self.year
+    #     )
+
+    #     if not datasets:
+    #         raise RuntimeError(
+    #             f"No WorldPop datasets found for country: {country} (ISO3: {iso3}), "
+    #             f"project: {self.project}, category: {self.dataset_category}, year: {self.year}. "
+    #             "Please check the configuration parameters."
+    #         )
+
+    #     files = [
+    #         file
+    #         for file in datasets[0].get("files", [])
+    #         if ((self.dataset_category == "sapya1km") or file.endswith(".tif"))
+    #     ]
+
+    #     return files
 
     def get_data_unit_path(self, unit: str, **kwargs) -> Path:
         """
@@ -750,6 +764,19 @@ class WPPopulationConfig(BaseHandlerConfig):
 
         # Default behavior for all other datasets
         return [self.get_data_unit_path(unit) for unit in units]
+
+    def extract_search_geometry(self, source, **kwargs):
+        """
+        Override the method since geometry extraction does not apply.
+        Returns country iso3 for dataset search
+        """
+        if not isinstance(source, str):
+            raise ValueError(
+                f"Unsupported source type: {type(source)}"
+                "Please use country-based (str) filtering."
+            )
+
+        return pycountry.countries.lookup(source).alpha_3
 
     def __repr__(self) -> str:
 
@@ -913,10 +940,10 @@ class WPPopulationDownloader(BaseHandlerDownloader):
 
         return flattened
 
-    def download(self, source: str, **kwargs) -> List[str]:
-        """Download data for a source"""
-        resources = self.config.get_relevant_data_units(source, **kwargs)
-        return self.download_data_units(resources)
+    # def download(self, source: str, **kwargs) -> List[str]:
+    #     """Download data for a source"""
+    #     resources = self.config.get_relevant_data_units(source, **kwargs)
+    #     return self.download_data_units(resources)
 
 
 class WPPopulationReader(BaseHandlerReader):

@@ -96,19 +96,19 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
     def get_relevant_data_units_by_geometry(
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame] = None, **kwargs
     ) -> List[str]:
-        return [self.DATASET_URL]
+        return
 
-    def get_relevant_data_units_by_points(
-        self, points: List[Union[Point, tuple]] = None, **kwargs
-    ) -> List[str]:
-        return [self.DATASET_URL]
+    # def get_relevant_data_units_by_points(
+    #     self, points: List[Union[Point, tuple]] = None, **kwargs
+    # ) -> List[str]:
+    #     return [self.DATASET_URL]
 
-    def get_relevant_data_units_by_country(
-        self,
-        country: str = None,
-        **kwargs,
-    ) -> List[str]:
-        return [self.DATASET_URL]
+    # def get_relevant_data_units_by_country(
+    #     self,
+    #     country: str = None,
+    #     **kwargs,
+    # ) -> List[str]:
+    #     return [self.DATASET_URL]
 
     def get_data_unit_path(self, unit: str, **kwargs) -> Path:
         """
@@ -221,26 +221,26 @@ class OoklaSpeedtestReader(BaseHandlerReader):
     ) -> pd.DataFrame:
         return super().load(source=source, **kwargs)
 
-    def resolve_source_paths(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-            Path,  # path
-            str,  # path
-            List[Union[str, Path]],
-        ] = None,
-        **kwargs,
-    ) -> List[Union[str, Path]]:
-        if isinstance(source, (str, Path)) or (
-            isinstance(source, List) and all(isinstance(p, (str, Path)) for p in source)
-        ):
-            return super().resolve_by_paths(source, **kwargs)
-        else:
-            data_units = self.config.get_relevant_data_units(source, **kwargs)
-            return self.config.get_data_unit_paths(data_units, **kwargs)
+    # def resolve_source_paths(
+    #     self,
+    #     source: Union[
+    #         str,  # country
+    #         List[Union[Tuple[float, float], Point]],  # points
+    #         BaseGeometry,  # geometry
+    #         gpd.GeoDataFrame,  # geodataframe
+    #         Path,  # path
+    #         str,  # path
+    #         List[Union[str, Path]],
+    #     ] = None,
+    #     **kwargs,
+    # ) -> List[Union[str, Path]]:
+    #     if isinstance(source, (str, Path)) or (
+    #         isinstance(source, List) and all(isinstance(p, (str, Path)) for p in source)
+    #     ):
+    #         return super().resolve_by_paths(source, **kwargs)
+    #     else:
+    #         data_units = self.config.get_relevant_data_units(source, **kwargs)
+    #         return self.config.get_data_unit_paths(data_units, **kwargs)
 
 
 class OoklaSpeedtestHandler(BaseHandler):
@@ -344,22 +344,41 @@ class OoklaSpeedtestHandler(BaseHandler):
                 None, ensure_available, **kwargs
             )  # Load the full dataset (uses DATASET_URL)
 
-            if isinstance(source, str):  # country
-                mercator_tiles = CountryMercatorTiles.create(
-                    source, zoom_level=16, **kwargs
+            key = self.config._cache_key(source, **kwargs)
+
+            # Check cache unless forced recompute
+            if (
+                not kwargs.get("force_recompute", False)
+                and key in self.config._unit_cache
+            ):
+                self.logger.debug(
+                    f"Using cached quadkeys for {key[0]}: {key[1][:50]}..."
                 )
-            elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame, List)):
-                mercator_tiles = MercatorTiles.from_spatial(
-                    source, zoom_level=16, **kwargs
-                )
+                quadkeys = self.config._unit_cache[key]
+
             else:
-                raise ValueError(
-                    f"Unsupported source type for filtering: {type(source)}"
-                )
 
-            quadkeys = mercator_tiles.quadkeys
+                if isinstance(source, str):  # country
+                    mercator_tiles = CountryMercatorTiles.create(
+                        source, zoom_level=16, **kwargs
+                    )
+                elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame, List)):
+                    mercator_tiles = MercatorTiles.from_spatial(
+                        source, zoom_level=16, **kwargs
+                    )
+                else:
+                    raise ValueError(
+                        f"Unsupported source type for filtering: {type(source)}"
+                    )
 
-            result = full_dataset[full_dataset["quadkey"].isin(quadkeys)]
+                quadkeys = mercator_tiles.quadkeys
+
+                # Cache the result
+                self.config._unit_cache[key] = quadkeys
+
+            result = full_dataset[full_dataset["quadkey"].isin(quadkeys)].reset_index(
+                drop=True
+            )
 
         if process_geospatial:
             # Convert 'tile' column from WKT to geometry

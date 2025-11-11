@@ -618,9 +618,9 @@ def get_country_boundaries_by_iso3(
 
     # Look for a view specifically for this country
     for view in all_views:
-        if country_name.lower() in view["name"].lower() and "latest" in view.get(
-            "tags", []
-        ):
+        if country_name.lower() == view["name"].split(" (")[
+            0
+        ].lower() and "latest" in view.get("tags", []):
             country_view_uuid = view["uuid"]
             client.logger.info(
                 f"Found country-specific view: {view['name']} ({country_view_uuid})"

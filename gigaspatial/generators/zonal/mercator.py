@@ -89,6 +89,7 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
             tiles = CountryMercatorTiles.create(
                 country=source, zoom_level=zoom_level, data_store=data_store
             )
+            self._country = source
         elif isinstance(source, (BaseGeometry, Iterable)):
             if isinstance(source, Iterable) and all(
                 isinstance(qk, str) for qk in source
@@ -107,3 +108,18 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
             )
 
         return tiles.to_geodataframe()
+
+    def map_wp_pop(
+        self,
+        country=None,
+        resolution=1000,
+        predicate="intersects",
+        output_column="population",
+        **kwargs,
+    ):
+        if hasattr(self, "_country") and country is None:
+            country = self._country
+
+        return super().map_wp_pop(
+            country, resolution, predicate, output_column, **kwargs
+        )

@@ -228,65 +228,62 @@ class HDXConfig(BaseHandlerConfig):
             self.logger.error(f"Error getting dataset resources: {str(e)}")
             raise
 
-    def get_relevant_data_units(
-        self, source: Union[str, Dict], **kwargs
-    ) -> List[Resource]:
-        """Get relevant data units based on the source type
+    # def get_relevant_data_units(
+    #     self, source: Union[str, Dict], **kwargs
+    # ) -> List[Resource]:
+    #     """Get relevant data units based on the source type
 
-        Args:
-            source: Either a country name/code (str) or a filter dictionary
-            **kwargs: Additional keyword arguments passed to the specific method
+    #     Args:
+    #         source: Either a country name/code (str) or a filter dictionary
+    #         **kwargs: Additional keyword arguments passed to the specific method
 
-        Returns:
-            List of matching resources
-        """
-        if isinstance(source, str):
-            # If source is a string, assume it's a country and use country-based filtering
-            return self.get_relevant_data_units_by_country(source, **kwargs)
-        elif isinstance(source, dict):
-            # If source is a dict, use it directly as a filter
-            return self.get_dataset_resources(filter=source, **kwargs)
-        else:
-            raise ValueError(
-                f"Unsupported source type: {type(source)}"
-                "Please use country-based filtering or direct resource filtering instead."
-            )
+    #     Returns:
+    #         List of matching resources
+    #     """
+    #     if isinstance(source, str):
+    #         # If source is a string, assume it's a country and use country-based filtering
+    #         return self.get_relevant_data_units_by_country(source, **kwargs)
+    #     elif isinstance(source, dict):
+    #         # If source is a dict, use it directly as a filter
+    #         return self.get_dataset_resources(filter=source, **kwargs)
+    #     else:
+    #         raise ValueError(
+    #             f"Unsupported source type: {type(source)}"
+    #             "Please use country-based filtering or direct resource filtering instead."
+    #         )
 
     def get_relevant_data_units_by_geometry(
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
     ) -> List[Resource]:
-        raise NotImplementedError(
-            "HDX does not support geometry-based filtering. "
-            "Please use country-based filtering or direct resource filtering instead."
-        )
+        return self.get_dataset_resources(geometry, **kwargs)
 
-    def get_relevant_data_units_by_points(
-        self, points: List[Union[Point, tuple]], **kwargs
-    ) -> List[Resource]:
-        raise NotImplementedError(
-            "HDX does not support point-based filtering. "
-            "Please use country-based filtering or direct resource filtering instead."
-        )
+    # def get_relevant_data_units_by_points(
+    #     self, points: List[Union[Point, tuple]], **kwargs
+    # ) -> List[Resource]:
+    #     raise NotImplementedError(
+    #         "HDX does not support point-based filtering. "
+    #         "Please use country-based filtering or direct resource filtering instead."
+    #     )
 
-    def get_relevant_data_units_by_country(
-        self,
-        country: str,
-        key: str = "url",
-        **kwargs,
-    ) -> Any:
-        """Get relevant data units for a country
+    # def get_relevant_data_units_by_country(
+    #     self,
+    #     country: str,
+    #     key: str = "url",
+    #     **kwargs,
+    # ) -> Any:
+    #     """Get relevant data units for a country
 
-        Args:
-            country: Country name or code
-            key: The key to filter on in the resource data
-            patterns: List of patterns to match against the resource data
-            **kwargs: Additional keyword arguments
-        """
-        country = pycountry.countries.lookup(country)
-        values = [country.alpha_3, country.alpha_2, country.name]
-        return self.get_dataset_resources(
-            filter={key: values},
-        )
+    #     Args:
+    #         country: Country name or code
+    #         key: The key to filter on in the resource data
+    #         patterns: List of patterns to match against the resource data
+    #         **kwargs: Additional keyword arguments
+    #     """
+    #     country = pycountry.countries.lookup(country)
+    #     values = [country.alpha_3, country.alpha_2, country.name]
+    #     return self.get_dataset_resources(
+    #         filter={key: values},
+    #     )
 
     def get_data_unit_path(self, unit: str, **kwargs) -> str:
         """Get the path for a data unit"""
@@ -310,6 +307,30 @@ class HDXConfig(BaseHandlerConfig):
                 "Download the data first using HDXDownloader."
             )
         return self.data_store.list_files(dataset_folder)
+
+    def extract_search_geometry(self, source, **kwargs):
+        """
+        Override the base class method since geometry extraction does not apply.
+        Returns dictionary to filter.
+
+        Args:
+            source: Either a country name/code (str) or a filter dictionary
+            **kwargs: Additional keyword arguments passed to the specific method
+        """
+        if isinstance(source, str):
+            country = pycountry.countries.lookup(source)
+            values = [country.alpha_3, country.alpha_2, country.name]
+            key = kwargs.get(
+                "key", "url"
+            )  # The key to filter on in the resource data. Defaults to `url`
+            return {key: values}
+        elif isinstance(source, dict):
+            return source
+        else:
+            raise ValueError(
+                f"Unsupported source type: {type(source)}"
+                "Please use country-based (str) filtering or direct resource (dict) filtering instead."
+            )
 
     def __repr__(self) -> str:
         return (
@@ -377,10 +398,10 @@ class HDXDownloader(BaseHandlerDownloader):
 
         return downloaded_paths
 
-    def download(self, source: Union[Dict, str], **kwargs) -> List[str]:
-        """Download data for a source"""
-        resources = self.config.get_relevant_data_units(source, **kwargs)
-        return self.download_data_units(resources)
+    # def download(self, source: Union[Dict, str], **kwargs) -> List[str]:
+    #     """Download data for a source"""
+    #     resources = self.config.get_relevant_data_units(source, **kwargs)
+    #     return self.download_data_units(resources)
 
 
 class HDXReader(BaseHandlerReader):
@@ -395,37 +416,37 @@ class HDXReader(BaseHandlerReader):
         config = config if isinstance(config, HDXConfig) else HDXConfig(**config)
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def resolve_source_paths(
-        self,
-        source: Union[
-            str,  # country code
-            Dict,  # filter
-            Path,  # path
-            str,  # path
-            List[Union[str, Path]],
-        ],
-        **kwargs,
-    ) -> List[Union[str, Path]]:
-        if isinstance(source, (str, Path)):
-            # Could be a country code or a path
-            if self.data_store.file_exists(str(source)) or str(source).endswith(
-                (".csv", ".tif", ".json", ".parquet", ".gz", ".geojson", ".zip")
-            ):
-                source_data_paths = self.resolve_by_paths(source)
-            else:
-                source_data_paths = self.resolve_by_country(source, **kwargs)
-        elif isinstance(source, Dict):
-            resources = self.config.get_relevant_data_units(source=source, **kwargs)
-            source_data_paths = self.config.get_data_unit_paths(resources, **kwargs)
-        elif isinstance(source, Iterable) and all(
-            isinstance(p, (str, Path)) for p in source
-        ):
-            source_data_paths = self.resolve_by_paths(source)
-        else:
-            raise NotImplementedError(f"Unsupported source type: {type(source)}")
+    # def resolve_source_paths(
+    #     self,
+    #     source: Union[
+    #         str,  # country code
+    #         Dict,  # filter
+    #         Path,  # path
+    #         str,  # path
+    #         List[Union[str, Path]],
+    #     ],
+    #     **kwargs,
+    # ) -> List[Union[str, Path]]:
+    #     if isinstance(source, (str, Path)):
+    #         # Could be a country code or a path
+    #         if self.data_store.file_exists(str(source)) or str(source).endswith(
+    #             (".csv", ".tif", ".json", ".parquet", ".gz", ".geojson", ".zip")
+    #         ):
+    #             source_data_paths = self.resolve_by_paths(source)
+    #         else:
+    #             source_data_paths = self.resolve_by_country(source, **kwargs)
+    #     elif isinstance(source, Dict):
+    #         resources = self.config.get_relevant_data_units(source=source, **kwargs)
+    #         source_data_paths = self.config.get_data_unit_paths(resources, **kwargs)
+    #     elif isinstance(source, Iterable) and all(
+    #         isinstance(p, (str, Path)) for p in source
+    #     ):
+    #         source_data_paths = self.resolve_by_paths(source)
+    #     else:
+    #         raise NotImplementedError(f"Unsupported source type: {type(source)}")
 
-        self.logger.info(f"Resolved {len(source_data_paths)} paths!")
-        return source_data_paths
+    #     self.logger.info(f"Resolved {len(source_data_paths)} paths!")
+    #     return source_data_paths
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], **kwargs

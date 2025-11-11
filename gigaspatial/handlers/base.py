@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Union, Tuple, Callable, Iterable
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Point
+from shapely.geometry import Point, MultiPoint
 from shapely.geometry.base import BaseGeometry
 import multiprocessing
 import logging
@@ -33,6 +33,25 @@ class BaseHandlerConfig(ABC):
         if self.logger is None:
             self.logger = global_config.get_logger(self.__class__.__name__)
 
+        self._unit_cache = {}
+
+    def _cache_key(self, source, **kwargs):
+        """Create a canonical cache key from source."""
+        if isinstance(source, str):
+            return ("country", source)
+        if isinstance(source, BaseGeometry):
+            return ("geometry", source.wkt)
+        if isinstance(source, gpd.GeoDataFrame):
+            return ("geometry", str(source.geometry.unary_union.wkt))
+        if isinstance(source, Iterable) and all(
+            isinstance(p, (Point, tuple)) for p in source
+        ):
+            pt_str = tuple(
+                (p.x, p.y) if isinstance(p, Point) else tuple(p) for p in source
+            )
+            return ("points", pt_str)
+        return ("other", str(source))
+
     def get_relevant_data_units(
         self,
         source: Union[
@@ -41,23 +60,24 @@ class BaseHandlerConfig(ABC):
             BaseGeometry,  # geometry
             gpd.GeoDataFrame,  # geodataframe
         ],
+        force_recompute: bool = False,
         **kwargs,
     ):
-        if isinstance(source, str):
-            data_units = self.get_relevant_data_units_by_country(source, **kwargs)
-        elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame)):
-            data_units = self.get_relevant_data_units_by_geometry(source, **kwargs)
-        elif isinstance(source, Iterable):
-            if all(isinstance(p, (Iterable, Point)) for p in source):
-                data_units = self.get_relevant_data_units_by_points(source, **kwargs)
-            else:
-                raise ValueError(
-                    "List input to get_relevant_data_units must be all points."
-                )
-        else:
-            raise NotImplementedError(f"Unsupported source type: {type(source)}")
+        key = self._cache_key(source, **kwargs)
 
-        return data_units
+        # Check cache unless forced recompute
+        if not force_recompute and key in self._unit_cache:
+            self.logger.debug(f"Using cached units for {key[0]}: {key[1][:50]}...")
+            units, _ = self._unit_cache[key]  # Unpack tuple, only return units
+            return units
+
+        # Convert source to geometry and compute units
+        geometry = self.extract_search_geometry(source, **kwargs)
+        units = self.get_relevant_data_units_by_geometry(geometry, **kwargs)
+
+        # Cache both units and geometry as tuple
+        self._unit_cache[key] = (units, geometry)
+        return units
 
     @abstractmethod
     def get_relevant_data_units_by_geometry(
@@ -67,30 +87,6 @@ class BaseHandlerConfig(ABC):
         Given a geometry, return a list of relevant data unit identifiers (e.g., tiles, files, resources).
         """
         pass
-
-    @abstractmethod
-    def get_relevant_data_units_by_points(
-        self, points: Iterable[Union[Point, tuple]], **kwargs
-    ) -> Any:
-        """
-        Given a list of points, return a list of relevant data unit identifiers.
-        """
-        pass
-
-    def get_relevant_data_units_by_country(self, country: str, **kwargs) -> Any:
-        """
-        Given a country code or name, return a list of relevant data unit identifiers.
-        """
-        from gigaspatial.handlers.boundaries import AdminBoundaries
-
-        country_geometry = (
-            AdminBoundaries.create(country_code=country, **kwargs)
-            .boundaries[0]
-            .geometry
-        )
-        return self.get_relevant_data_units_by_geometry(
-            geometry=country_geometry, **kwargs
-        )
 
     @abstractmethod
     def get_data_unit_path(self, unit: Any, **kwargs) -> list:
@@ -110,6 +106,55 @@ class BaseHandlerConfig(ABC):
             return []
 
         return [self.get_data_unit_path(unit=unit, **kwargs) for unit in units]
+
+    def extract_search_geometry(self, source, **kwargs):
+        """General method to extract a canonical geometry from supported source types."""
+        if isinstance(source, str):
+            # Use the admin boundary as geometry
+            from gigaspatial.handlers.boundaries import AdminBoundaries
+
+            return (
+                AdminBoundaries.create(country_code=source, **kwargs)
+                .boundaries[0]
+                .geometry
+            )
+        elif isinstance(source, gpd.GeoDataFrame):
+            if crs := kwargs.get("crs", None):
+
+                if not source.crs:
+                    raise ValueError(
+                        "Cannot extract search geometry. Please set a crs on the source object first."
+                    )
+
+                if source.crs != crs:
+                    source = source.to_crs(crs)
+
+            return source.geometry.union_all()
+        elif isinstance(
+            source,
+            BaseGeometry,
+        ):
+            return source
+        elif isinstance(source, Iterable) and all(
+            isinstance(p, (Point, Iterable)) for p in source
+        ):
+            points = [p if isinstance(p, Point) else Point(p[1], p[0]) for p in source]
+            return MultiPoint(points)
+        else:
+            raise ValueError(f"Unsupported source type: {type(source)}")
+
+    def get_cached_search_geometry(self, source):
+        key = self._cache_key(source)
+        result = self._unit_cache.get(key)
+        if result:
+            _, geometry = result
+            return geometry
+        return None
+
+    def clear_unit_cache(self):
+        """Clear cached units."""
+        self._unit_cache.clear()
+        self.logger.debug("Unit cache cleared")
 
 
 class BaseHandlerDownloader(ABC):
@@ -153,12 +198,12 @@ class BaseHandlerDownloader(ABC):
         """
         pass
 
-    @abstractmethod
-    def download(self, *args, **kwargs):
+    def download(self, source, **kwargs):
         """
-        Abstract method to download data. Implement in subclasses.
+        Given source download the data.
         """
-        pass
+        units = self.config.get_relevant_data_units(source, **kwargs)
+        return self.download_data_units(units, **kwargs)
 
 
 class BaseHandlerReader(ABC):
@@ -212,65 +257,21 @@ class BaseHandlerReader(ABC):
         Returns:
             List of resolved source paths
         """
-        if isinstance(source, (str, Path)):
-            # Could be a country code or a path
-            if self.data_store.file_exists(str(source)) or str(source).endswith(
-                (".csv", ".tif", ".json", ".parquet", ".gz", ".geojson", ".zip")
-            ):
-                source_data_paths = self.resolve_by_paths(source)
-            else:
-                source_data_paths = self.resolve_by_country(source, **kwargs)
-        elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame)):
-            source_data_paths = self.resolve_by_geometry(source, **kwargs)
-        elif isinstance(source, Iterable):
-            # List of points or paths
-            if all(isinstance(p, (Iterable, Point)) for p in source):
-                source_data_paths = self.resolve_by_points(source, **kwargs)
-            elif all(isinstance(p, (str, Path)) for p in source):
-                source_data_paths = self.resolve_by_paths(source)
-            else:
-                raise ValueError(
-                    "List input to resolve_source_paths must be all points or all paths."
-                )
-        else:
-            raise NotImplementedError(f"Unsupported source type: {type(source)}")
+        if (
+            isinstance(source, Path)
+            or (
+                isinstance(source, (list, tuple, set))
+                and all(isinstance(p, (str, Path)) for p in source)
+            )
+            or (isinstance(source, str) and "." in source)
+        ):
+            return self.resolve_by_paths(source)
 
-        self.logger.info(f"Resolved {len(source_data_paths)} paths!")
-        return source_data_paths
+        data_units = self.config.get_relevant_data_units(source, **kwargs)
+        data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
 
-    def resolve_by_country(self, country: str, **kwargs) -> List[Union[str, Path]]:
-        """
-        Resolve source paths for a given country code/name.
-        Uses the config's get_relevant_data_units_by_country method.
-        """
-        if not self.config:
-            raise ValueError("Config is required for resolving by country")
-        data_units = self.config.get_relevant_data_units_by_country(country, **kwargs)
-        return self.config.get_data_unit_paths(data_units, **kwargs)
-
-    def resolve_by_points(
-        self, points: List[Union[Tuple[float, float], Point]], **kwargs
-    ) -> List[Union[str, Path]]:
-        """
-        Resolve source paths for a list of points.
-        Uses the config's get_relevant_data_units_by_points method.
-        """
-        if not self.config:
-            raise ValueError("Config is required for resolving by points")
-        data_units = self.config.get_relevant_data_units_by_points(points, **kwargs)
-        return self.config.get_data_unit_paths(data_units, **kwargs)
-
-    def resolve_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> List[Union[str, Path]]:
-        """
-        Resolve source paths for a geometry or GeoDataFrame.
-        Uses the config's get_relevant_data_units_by_geometry method.
-        """
-        if not self.config:
-            raise ValueError("Config is required for resolving by geometry")
-        data_units = self.config.get_relevant_data_units_by_geometry(geometry, **kwargs)
-        return self.config.get_data_unit_paths(data_units, **kwargs)
+        self.logger.info(f"Resolved {len(data_paths)} paths!")
+        return data_paths
 
     def resolve_by_paths(
         self, paths: Union[Path, str, List[Union[str, Path]]], **kwargs
@@ -379,6 +380,25 @@ class BaseHandlerReader(ABC):
         result = pd.concat(all_data, ignore_index=True)
         return result
 
+    def crop_to_geometry(self, data, geometry, predicate="intersects", **kwargs):
+        # Tabular (GeoDataFrame) case
+        if isinstance(data, (pd.DataFrame, gpd.GeoDataFrame)):
+            if isinstance(data, pd.DataFrame):
+                from gigaspatial.processing.geo import convert_to_geodataframe  
+
+                try:
+                    data = convert_to_geodataframe(data, **kwargs)
+                except:
+                    return data
+            # Clip to geometry
+            return data[getattr(data.geometry, predicate)(geometry)]
+
+        # Raster case
+        if isinstance(data, TifProcessor):
+            return data.clip_to_geometry(geometry=geometry, **kwargs)
+
+        return data
+
     @abstractmethod
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], **kwargs
@@ -406,6 +426,7 @@ class BaseHandlerReader(ABC):
             str,
             List[Union[str, Path]],
         ],
+        crop_to_source: bool = False,
         **kwargs,
     ) -> Any:
         """
@@ -413,6 +434,8 @@ class BaseHandlerReader(ABC):
 
         Args:
             source: The data source (country code/name, points, geometry, paths, etc.).
+            crop_to_source : bool, default False
+                If True, crop loaded data to the exact source geometry
             **kwargs: Additional parameters to pass to the loading process.
 
         Returns:
@@ -430,7 +453,22 @@ class BaseHandlerReader(ABC):
             return None
 
         loaded_data = self.load_from_paths(processed_paths, **kwargs)
-        return self._post_load_hook(loaded_data, **kwargs)
+        loaded_data = self._post_load_hook(loaded_data, **kwargs)
+
+        # Apply cropping if requested
+        if crop_to_source and loaded_data is not None:
+            search_geometry = self.config.get_cached_search_geometry(source)
+            if search_geometry is not None and isinstance(
+                search_geometry, BaseGeometry
+            ):
+                loaded_data = self.crop_to_geometry(loaded_data, search_geometry)
+            else:
+                # If no cached geometry, compute it
+                search_geometry = self.config.extract_search_geometry(source, **kwargs)
+                if isinstance(search_geometry, BaseGeometry):
+                    loaded_data = self.crop_to_geometry(loaded_data, search_geometry)
+
+        return loaded_data
 
 
 class BaseHandler(ABC):
@@ -596,19 +634,11 @@ class BaseHandler(ABC):
             bool: True if data is available after this operation
         """
         try:
-            data_units = None
-            data_paths = None
-            # Resolve what data units are needed
-            if hasattr(self.config, "get_relevant_data_units"):
-                data_units = self.config.get_relevant_data_units(source, **kwargs)
-                data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
-            else:
-                # Fallback: try to resolve paths directly
-                if hasattr(self.reader, "resolve_source_paths"):
-                    data_paths = self.reader.resolve_source_paths(source, **kwargs)
-                else:
-                    self.logger.warning("Cannot determine required data paths")
-                    return False
+            # Get relevant units (cached if already computed for this source)
+            data_units = self.config.get_relevant_data_units(
+                source, force_recompute=force_download, **kwargs
+            )
+            data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
 
             # Check if data exists (unless force download)
             if not force_download:
@@ -617,39 +647,42 @@ class BaseHandler(ABC):
                     for path in data_paths
                     if not self.data_store.file_exists(str(path))
                 ]
-                if not missing_paths:
-                    self.logger.info("All required data is already available")
-                    return True
             else:
                 # If force_download, treat all as missing
                 missing_paths = data_paths
 
             if not missing_paths:
-                self.logger.info("No missing data to download.")
+                self.logger.info("All required data is already available")
                 return True
 
-            # Download logic
-            if data_units is not None:
-                # Map data_units to their paths and select only those that are missing
-                unit_to_path = dict(
-                    zip(data_paths, data_units)
-                )  # units might be dicts, cannot be used as key
-                if force_download:
-                    # Download all units if force_download
-                    self.downloader.download_data_units(data_units, **kwargs)
-                else:
-                    missing_units = [
-                        unit
-                        for path, unit in unit_to_path.items()
-                        if path in missing_paths
-                    ]
-                    if missing_units:
-                        self.downloader.download_data_units(missing_units, **kwargs)
+            # Map units to paths (assumes correspondence order; adapt if needed)
+            path_to_unit = dict(zip(data_paths, data_units))
+            if force_download:
+                units_to_download = data_units
             else:
+                units_to_download = [
+                    path_to_unit[p] for p in missing_paths if p in path_to_unit
+                ]
+
+            if units_to_download:
+                self.downloader.download_data_units(units_to_download, **kwargs)
+            else:
+                # Fallback - download by source if unit mapping isn't available
                 self.downloader.download(source, **kwargs)
 
-            return True
+            # After attempted download, check again
+            remaining_missing = [
+                path
+                for path in data_paths
+                if not self.data_store.file_exists(str(path))
+            ]
+            if remaining_missing:
+                self.logger.error(
+                    f"Some data still missing after download: {remaining_missing}"
+                )
+                return False
 
+            return True
         except Exception as e:
             self.logger.error(f"Failed to ensure data availability: {e}")
             return False
@@ -664,6 +697,7 @@ class BaseHandler(ABC):
             Path,  # path
             List[Union[str, Path]],  # list of paths
         ],
+        crop_to_source: bool = False,
         ensure_available: bool = True,
         **kwargs,
     ) -> Any:
@@ -682,7 +716,7 @@ class BaseHandler(ABC):
             if not self.ensure_data_available(source, **kwargs):
                 raise RuntimeError("Could not ensure data availability for loading")
 
-        return self.reader.load(source, **kwargs)
+        return self.reader.load(source, crop_to_source=crop_to_source, **kwargs)
 
     def download_and_load(
         self,
@@ -694,6 +728,7 @@ class BaseHandler(ABC):
             Path,  # path
             List[Union[str, Path]],  # list of paths
         ],
+        crop_to_source: bool = False,
         force_download: bool = False,
         **kwargs,
     ) -> Any:
@@ -709,7 +744,7 @@ class BaseHandler(ABC):
             Loaded data
         """
         self.ensure_data_available(source, force_download=force_download, **kwargs)
-        return self.reader.load(source, **kwargs)
+        return self.reader.load(source, crop_to_source=crop_to_source, **kwargs)
 
     def get_available_data_info(
         self,

@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import List, Optional, Union
 from pathlib import Path
 
 import logging
@@ -67,6 +67,7 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
             data_store=data_store,
             logger=logger,
         )
+        self._country = country
         self.logger.info(
             f"Initialized AdminBoundariesViewGenerator for {country} (level {admin_level})"
         )
@@ -82,3 +83,16 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
             country, admin_level, data_store, admin_path
         ).to_geodataframe()
         return gdf_boundaries
+
+    def map_wp_pop(
+        self,
+        country=None,
+        resolution=1000,
+        predicate="intersects",
+        output_column="population",
+        **kwargs,
+    ):
+        country = self._country if country is None else country
+        return super().map_wp_pop(
+            country, resolution, predicate, output_column, **kwargs
+        )
