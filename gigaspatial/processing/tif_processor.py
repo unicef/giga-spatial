@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple, Union, Literal, Callable, Dict, Any
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 from contextlib import contextmanager
-from shapely.geometry import box, Polygon, MultiPolygon
+from shapely.geometry import box, Polygon, MultiPolygon, MultiPoint
 from pathlib import Path
 import rasterio
 from rasterio.mask import mask
@@ -52,6 +52,7 @@ class TifProcessor:
         self._temp_dir = tempfile.mkdtemp()
         self._merged_file_path = None
         self._reprojected_file_path = None
+        self._clipped_file_path = None
 
         # Handle multiple dataset paths
         if isinstance(self.dataset_path, list):
@@ -62,7 +63,14 @@ class TifProcessor:
                 self.dataset_path = self._merged_file_path
         else:
             self.dataset_paths = [Path(self.dataset_path)]
-            if not self.data_store.file_exists(str(self.dataset_path)):
+            # For absolute paths with LocalDataStore, check file existence directly
+            # to avoid path resolution issues
+            if isinstance(self.data_store, LocalDataStore) and os.path.isabs(
+                str(self.dataset_path)
+            ):
+                if not os.path.exists(str(self.dataset_path)):
+                    raise FileNotFoundError(f"Dataset not found at {self.dataset_path}")
+            elif not self.data_store.file_exists(str(self.dataset_path)):
                 raise FileNotFoundError(f"Dataset not found at {self.dataset_path}")
 
             # Reproject single raster during initialization if target_crs is set
@@ -87,6 +95,9 @@ class TifProcessor:
                 yield src
         elif self._reprojected_file_path:
             with rasterio.open(self._reprojected_file_path) as src:
+                yield src
+        elif self._clipped_file_path:
+            with rasterio.open(self._clipped_file_path) as src:
                 yield src
         elif isinstance(self.data_store, LocalDataStore):
             with rasterio.open(str(self.dataset_path)) as src:
@@ -1308,10 +1319,22 @@ class TifProcessor:
     def _prepare_geometry_for_clipping(
         self,
         geometry: Union[
-            Polygon, MultiPolygon, gpd.GeoDataFrame, gpd.GeoSeries, List[dict], dict
+            Polygon,
+            MultiPolygon,
+            MultiPoint,
+            gpd.GeoDataFrame,
+            gpd.GeoSeries,
+            List[dict],
+            dict,
         ],
     ) -> List[dict]:
         """Convert various geometry formats to list of GeoJSON-like dicts for rasterio.mask"""
+
+        if isinstance(geometry, MultiPoint):
+            # Use bounding box of MultiPoint
+            minx, miny, maxx, maxy = geometry.bounds
+            bbox = box(minx, miny, maxx, maxy)
+            return [bbox.__geo_interface__]
 
         if isinstance(geometry, (Polygon, MultiPolygon)):
             # Shapely geometry
@@ -1375,21 +1398,67 @@ class TifProcessor:
         Helper to create a new TifProcessor instance from clipped data.
         Saves the clipped data to a temporary file and initializes a new TifProcessor.
         """
-        clipped_file_path = os.path.join(
-            self._temp_dir, f"clipped_temp_{os.urandom(8).hex()}.tif"
+        # Create a temporary placeholder file to initialize the processor
+        # This allows us to get the processor's temp_dir
+        placeholder_dir = tempfile.mkdtemp()
+        placeholder_path = os.path.join(
+            placeholder_dir, f"placeholder_{os.urandom(8).hex()}.tif"
         )
+
+        # Create a minimal valid TIF file as placeholder
+        placeholder_transform = rasterio.transform.from_bounds(0, 0, 1, 1, 1, 1)
+        with rasterio.open(
+            placeholder_path,
+            "w",
+            driver="GTiff",
+            width=1,
+            height=1,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=placeholder_transform,
+        ) as dst:
+            dst.write(np.zeros((1, 1, 1), dtype="uint8"))
+
+        # Create a new TifProcessor instance with the placeholder
+        # Use LocalDataStore() since the temp file is always a local absolute path
+        new_processor = TifProcessor(
+            dataset_path=placeholder_path,
+            data_store=LocalDataStore(),  # Always use LocalDataStore for temp files
+            mode=self.mode,
+        )
+
+        # Now save the clipped file directly to the new processor's temp directory
+        # Similar to how _reproject_to_temp_file works
+        clipped_file_path = os.path.join(
+            new_processor._temp_dir, f"clipped_{os.urandom(8).hex()}.tif"
+        )
+
         with rasterio.open(clipped_file_path, "w", **clipped_meta) as dst:
             dst.write(clipped_data)
 
+        # Verify file was created successfully
+        if not os.path.exists(clipped_file_path):
+            raise RuntimeError(f"Failed to create clipped file at {clipped_file_path}")
+
+        # Set the clipped file path and update processor attributes
+        new_processor._clipped_file_path = clipped_file_path
+        new_processor.dataset_path = clipped_file_path
+        new_processor.dataset_paths = [Path(clipped_file_path)]
+
+        # Clean up placeholder file and directory
+        try:
+            os.remove(placeholder_path)
+            os.rmdir(placeholder_dir)
+        except OSError:
+            pass
+
+        # Reload metadata since the path changed
+        new_processor._load_metadata()
+
         self.logger.info(f"Clipped raster saved to temporary file: {clipped_file_path}")
 
-        # Create a new TifProcessor instance with the clipped data
-        # Pass relevant parameters from the current instance to maintain consistency
-        return TifProcessor(
-            dataset_path=clipped_file_path,
-            data_store=self.data_store,
-            mode=self.mode,
-        )
+        return new_processor
 
     def _get_pixel_coordinates(self):
         """Helper method to generate coordinate arrays for all pixels"""

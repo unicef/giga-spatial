@@ -3,4 +3,6 @@ from gigaspatial.generators.zonal import (
     GeometryBasedZonalViewGenerator,
     MercatorViewGenerator,
     AdminBoundariesViewGenerator,
+    H3ViewGenerator,
+    S2ViewGenerator,
 )

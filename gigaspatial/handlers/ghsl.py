@@ -2,12 +2,12 @@
 from pathlib import Path
 import functools
 import multiprocessing
-from typing import List, Optional, Union, Literal, Iterable, Tuple
+from typing import List, Optional, Union, Literal, Tuple
 import geopandas as gpd
 import pandas as pd
 import numpy as np
 from pydantic.dataclasses import dataclass
-from shapely.geometry import Point, MultiPoint
+from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 from enum import Enum
 import requests
@@ -21,6 +21,7 @@ from pydantic import (
     field_validator,
     ConfigDict,
 )
+import ssl
 import logging
 
 from gigaspatial.core.io.data_store import DataStore
@@ -74,6 +75,9 @@ class GHSLDataConfig(BaseHandlerConfig):
 
     def _load_tiles(self):
         """Load GHSL tiles from tiles shapefile."""
+        # Create a default, unverified context
+        ssl._create_default_https_context = ssl._create_unverified_context
+
         try:
             self.tiles_gdf = gpd.read_file(self.TILES_URL)
         except Exception as e:
@@ -168,15 +172,20 @@ class GHSLDataConfig(BaseHandlerConfig):
         """
         Return intersecting tiles for a given geometry or GeoDataFrame.
         """
-        return self._get_relevant_tiles(geometry)
+        crs = kwargs.get("crs", "EPSG:4326")  # assume WGS84 4326 if no crs passed
+        if self.tiles_gdf.crs != crs:
+            geometry = (
+                gpd.GeoDataFrame(geometry=[geometry], crs=crs)
+                .to_crs(self.tiles_gdf.crs)
+                .geometry[0]
+            )
 
-    def get_relevant_data_units_by_points(
-        self, points: Iterable[Union[Point, tuple]], **kwargs
-    ) -> List[dict]:
-        """
-        Return intersecting tiles f or a list of points.
-        """
-        return self._get_relevant_tiles(points)
+        # Find intersecting tiles
+        mask = (tile_geom.intersects(geometry) for tile_geom in self.tiles_gdf.geometry)
+
+        intersecting_tiles = self.tiles_gdf.loc[mask, "tile_id"].to_list()
+
+        return intersecting_tiles
 
     def get_data_unit_path(self, unit: str = None, file_ext=".zip", **kwargs) -> Path:
         """Construct and return the path for the configured dataset or dataset tile."""
@@ -210,69 +219,6 @@ class GHSLDataConfig(BaseHandlerConfig):
         ]
 
         return "/".join(path_segments)
-
-    def _get_relevant_tiles(
-        self,
-        source: Union[
-            BaseGeometry,
-            gpd.GeoDataFrame,
-            Iterable[Union[Point, tuple]],
-        ],
-        crs="EPSG:4326",
-    ) -> list:
-        """
-        Identify and return the GHSL tiles that spatially intersect with the given geometry.
-
-        The input geometry can be a Shapely geometry object, a GeoDataFrame,
-        or a list of Point objects or (lon, lat) tuples. The method ensures
-        the input geometry is in GHSL tiles projection for the spatial intersection.
-
-        Args:
-            source: A Shapely geometry, a GeoDataFrame, or a list of Point
-                      objects or (lat, lon) tuples representing the area of interest.
-
-        Returns:
-            A list the tile ids for the intersecting tiles.
-
-        Raises:
-            ValueError: If the input `source` is not one of the supported types.
-        """
-        if isinstance(source, gpd.GeoDataFrame):
-            if source.crs != crs:
-                source = source.to_crs(crs)
-            search_geom = source.geometry.unary_union
-        elif isinstance(
-            source,
-            BaseGeometry,
-        ):
-            search_geom = source
-        elif isinstance(source, Iterable) and all(
-            len(pt) == 2 or isinstance(pt, Point) for pt in source
-        ):
-            points = [
-                pt if isinstance(pt, Point) else Point(pt[1], pt[0]) for pt in source
-            ]
-            search_geom = MultiPoint(points)
-        else:
-            raise ValueError(
-                f"Expected Geometry, GeoDataFrame or iterable object of Points got {source.__class__}"
-            )
-
-        if self.tiles_gdf.crs != crs:
-            search_geom = (
-                gpd.GeoDataFrame(geometry=[search_geom], crs=crs)
-                .to_crs(self.tiles_gdf.crs)
-                .geometry[0]
-            )
-
-        # Find intersecting tiles
-        mask = (
-            tile_geom.intersects(search_geom) for tile_geom in self.tiles_gdf.geometry
-        )
-
-        intersecting_tiles = self.tiles_gdf.loc[mask, "tile_id"].to_list()
-
-        return intersecting_tiles
 
     def _get_product_info(self) -> dict:
         """Generate and return common product information used in multiple methods."""
@@ -629,8 +575,20 @@ class GHSLDataReader(BaseHandlerReader):
             raster_paths=source_data_path, merge_rasters=merge_rasters
         )
 
-    def load(self, source, merge_rasters: bool = False, **kwargs):
-        return super().load(source=source, file_ext=".tif", merge_rasters=merge_rasters)
+    def load(
+        self,
+        source,
+        crop_to_source: bool = False,
+        merge_rasters: bool = False,
+        **kwargs,
+    ):
+        return super().load(
+            source=source,
+            crop_to_source=crop_to_source,
+            file_ext=kwargs.pop("file_ext", ".tif"),
+            merge_rasters=merge_rasters,
+            **kwargs,
+        )
 
 
 class GHSLDataHandler(BaseHandler):
@@ -770,12 +728,14 @@ class GHSLDataHandler(BaseHandler):
             Path,  # path
             List[Union[str, Path]],  # list of paths
         ],
+        crop_to_source: bool = False,
         ensure_available: bool = True,
         merge_rasters: bool = False,
         **kwargs,
     ):
         return super().load_data(
             source=source,
+            crop_to_source=crop_to_source,
             ensure_available=ensure_available,
             file_ext=".tif",
             extract=True,
@@ -794,6 +754,7 @@ class GHSLDataHandler(BaseHandler):
             Path,  # path
             List[Union[str, Path]],  # list of paths
         ],
+        crop_to_source: bool = False,
         ensure_available: bool = True,
         **kwargs,
     ) -> pd.DataFrame:
@@ -809,7 +770,10 @@ class GHSLDataHandler(BaseHandler):
             DataFrame containing the GHSL data
         """
         tif_processors = self.load_data(
-            source=source, ensure_available=ensure_available, **kwargs
+            source=source,
+            crop_to_source=crop_to_source,
+            ensure_available=ensure_available,
+            **kwargs,
         )
         if isinstance(tif_processors, TifProcessor):
             return tif_processors.to_dataframe(**kwargs)
@@ -827,6 +791,7 @@ class GHSLDataHandler(BaseHandler):
             Path,  # path
             List[Union[str, Path]],  # list of paths
         ],
+        crop_to_source: bool = False,
         ensure_available: bool = True,
         **kwargs,
     ) -> gpd.GeoDataFrame:
@@ -842,7 +807,10 @@ class GHSLDataHandler(BaseHandler):
             GeoDataFrame containing the GHSL data
         """
         tif_processors = self.load_data(
-            source=source, ensure_available=ensure_available, **kwargs
+            source=source,
+            crop_to_source=crop_to_source,
+            ensure_available=ensure_available,
+            **kwargs,
         )
         if isinstance(tif_processors, TifProcessor):
             return tif_processors.to_geodataframe(**kwargs)

@@ -43,6 +43,13 @@ class Config(BaseSettings):
         default="", alias="GIGA_SCHOOL_MEASUREMENTS_API_KEY"
     )
     HEALTHSITES_API_KEY: str = Field(default="", alias="HEALTHSITES_API_KEY")
+    SNOWFLAKE_ACCOUNT: str = Field(default="", alias="SNOWFLAKE_ACCOUNT")
+    SNOWFLAKE_USER: str = Field(default="", alias="SNOWFLAKE_USER")
+    SNOWFLAKE_PASSWORD: str = Field(default="", alias="SNOWFLAKE_PASSWORD")
+    SNOWFLAKE_WAREHOUSE: str = Field(default="", alias="SNOWFLAKE_WAREHOUSE")
+    SNOWFLAKE_DATABASE: str = Field(default="", alias="SNOWFLAKE_DATABASE")
+    SNOWFLAKE_SCHEMA: str = Field(default="", alias="SNOWFLAKE_SCHEMA")
+    SNOWFLAKE_STAGE_NAME: str = Field(default="", alias="SNOWFLAKE_STAGE_NAME")
 
     ROOT_DATA_DIR: Path = Field(
         default=Path("."),

@@ -2,6 +2,141 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.3] - 2025-11-11
+
+### Added
+
+-   **SnowflakeDataStore Support**
+    -   New `SnowflakeDataStore` class implementing the `DataStore` interface for Snowflake stages.
+    -   Supports file operations (read, write, list, delete) on Snowflake internal stages.
+    -   Integrated with `gigaspatial/config.py` for centralized configuration via environment variables.
+    -   Provides directory-like operations (`mkdir`, `rmdir`, `walk`, `is_dir`, `is_file`) for conceptual directories in Snowflake stages.
+    -   Includes context manager support and connection management.
+    -   Full compatibility with existing `DataStore` abstraction.
+
+-   **BaseHandler: Config-Level Data Unit Caching**
+    -   `BaseHandlerConfig` now maintains internal `_unit_cache` for data unit and geometry caching.
+    -   Cache stores tuples of `(units, search_geometry)` for efficient reuse across handler, downloader, and reader operations.
+    -   New methods:
+        -   `get_cached_search_geometry()`: Retrieve cached geometry for a source.
+        -   `clear_unit_cache()`: Clear cached data for testing or manual refreshes.
+        -   `_cache_key()`: Generate canonical cache keys from various source types.
+    -   Benefits all components (handler, downloader, reader) regardless of entry point.
+
+-   **Unified Geometry Extraction in BaseHandlerConfig**
+    -   New `extract_search_geometry()` method providing standardized geometry extraction from various source types:
+        -   Country codes (via `AdminBoundaries`)
+        -   Shapely geometries (`BaseGeometry`)
+        -   GeoDataFrames with automatic CRS handling
+        -   Lists of points or coordinate tuples (converted to `MultiPoint`)
+    -   Centralizes geometry conversion logic, eliminating duplication across handler methods.
+
+-   **BaseHandler: Crop-to-Source Feature for Handlers**
+    -   New `crop_to_source` parameter in `BaseHandlerReader.load()` and `BaseHandler.load_data()` methods.
+    -   Allows users to load data clipped to exact source boundaries rather than full data units (e.g., tiles).
+    -   Particularly useful for tile-based datasets (Google Open Buildings, GHSL) where tiles extend beyond requested regions.
+    -   Implemented `crop_to_geometry()` method in `BaseHandlerReader` for spatial filtering:
+        -   Supports `(Geo)DataFrame` clipping using geometry intersection.
+        -   Supports raster clipping using `TifProcessor`'s `clip_to_geometry` method.
+        -   Extensible for future cropping implementations.
+    -   Search geometries are now cached alongside data units for efficient cropping operations.
+
+-   **S2 Zonal View Generator (`S2ViewGenerator`)**
+    -   New generator for producing zonal views using Google S2 cells (levels 0–30).
+    -   Supports sources:
+        -   Country name (`str`) via `CountryS2Cells.create(...)`
+        -   Shapely geometry or `gpd.GeoDataFrame` via `S2Cells.from_spatial(...)`
+        -   Points (`List[Point | (lon, lat)]`) via `S2Cells.from_points(...)`
+        -   Explicit cells (`List[int | str]`, S2 IDs or tokens) via `S2Cells.from_cells(...)`
+    -   Uses `cell_token` as the zone identifier.
+    -   Includes `map_wp_pop()` convenience method (auto-uses stored country when available).
+
+-   **H3 Zonal View Generator (`H3ViewGenerator`)**
+    -   New generator for producing zonal views using H3 hexagons (resolutions 0–15).
+    -   Supports sources:
+        -   Country name (`str`) via `CountryH3Hexagons.create(...)`
+        -   Shapely geometry or `gpd.GeoDataFrame` via `H3Hexagons.from_spatial(...)`
+        -   Points (`List[Point | (lon, lat)]`) via `H3Hexagons.from_spatial(...)`
+        -   Explicit H3 indexes (`List[str]`) via `H3Hexagons.from_hexagons(...)`
+    -   Uses `h3` as the zone identifier.
+    -   Includes `map_wp_pop()` convenience method (auto-uses stored country when available).
+
+-   **TifProcessor: MultiPoint clipping support**
+    -   `_prepare_geometry_for_clipping()` now accepts `MultiPoint` inputs and uses their bounding box for raster clipping.
+    -   Enables passing collections of points as a `MultiPoint` to `clip_to_geometry()` without pre-converting to a polygon.
+
+### Changed
+
+-   **Configuration**
+    -   Added Snowflake connection parameters to `gigaspatial/config.py`:
+        -   `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`
+        -   `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`
+        -   `SNOWFLAKE_STAGE_NAME`
+    -   Added Snowflake configuration variables to `.env_sample`
+
+-   **BaseHandler**
+    -   **Streamlined Data Unit Resolution**
+        -   Consolidated `get_relevant_data_units_by_country()`, `get_relevant_data_units_by_points()`, and `get_relevant_data_units_by_geometry()` into a unified workflow.
+        -   All source types now convert to geometry via `extract_search_geometry()` before unit resolution.
+        -   Subclasses now only need to implement `get_relevant_data_units_by_geometry()` for custom logic.
+        -   Significantly reduces code duplication in handler subclasses.
+    
+    -   **Optimized Handler Workflow**
+        -   Eliminated redundant `get_relevant_data_units()` calls across handler, downloader, and reader operations.
+        -   `ensure_data_available()` now uses cached units and paths, preventing multiple lookups per request.
+        -   Data unit resolution occurs at most once per unique source query, improving performance for:
+            -   Repeated `load_data()` calls with the same source.
+            -   Operations involving both download and read steps.
+            -   Direct usage of downloader or reader components.
+
+-   **Enhanced BaseHandlerReader**
+    -   `resolve_source_paths()` now primarily handles explicit file paths.
+    -   Geometry/country/point conversion delegated to handler and config layers.
+    -   `load()` method updated to support `crop_to_source` parameter with automatic geometry retrieval from cache.
+    -   Fallback geometry computation if cache miss occurs (e.g., when reader used independently).
+
+
+-   **BaseHandlerConfig Caching Logic**
+    -   `get_relevant_data_units()` now checks cache before computing units.
+    -   Added `force_recompute` parameter to bypass cache when needed (e.g., `force_download=True`).
+    -   Cache operations include debug logging for transparency during development.
+
+
+-   **TifProcessor temp-file handling**
+    -   Simplified `_create_clipped_processor()` to mirror `_reproject_to_temp_file`: write clipped output to the new processor’s `_temp_dir`, set `_clipped_file_path`, update `dataset_path`, and reload metadata.
+    -   `open_dataset()` now prioritizes `_merged_file_path`, `_reprojected_file_path`, then `_clipped_file_path`, and opens local files directly.
+    -   Clipped processors consistently use `LocalDataStore()` for local temp files to avoid data-store path resolution issues.
+
+## Fixed
+
+-   **TifProcessor: clip_to_geometry() open failure after merge**
+    -   Fixed a bug where `open_dataset()` failed for processors returned by `clip_to_geometry()` when the source was initialized with multiple paths and loaded via handlers with `merge_rasters=True`.
+    -   The clipped raster is now saved directly into the new processor’s temp directory and tracked via `_clipped_file_path`, ensuring reliable access by `open_dataset()`.
+    -   Absolute path checks in `__post_init__` now use `os.path.exists()` for absolute paths with `LocalDataStore`, preventing false negatives for temp files.
+
+### Performance
+
+-   **Significant reduction in redundant computations in handlers**:
+    -   Single geometry extraction per source query (previously up to 3 times).
+    -   Single data unit resolution per source query (previously 2-3 times).
+    -   Cached geometry reuse for cropping operations.
+    -   Benefits scale with:
+        -   Number of repeated queries.
+        -   Complexity of geometry extraction (especially country boundaries).
+        -   Number of data units per query.
+
+### Developer Notes
+
+-   Subclass implementations should now:
+    -   Only override `get_relevant_data_units_by_geometry()` for custom unit resolution.
+    -   Use `extract_search_geometry()` for any geometry conversion needs.
+    -   Optionally override `crop_to_geometry()` for dataset-specific cropping logic.
+
+
+### Dependencies
+
+-   Added `snowflake-connector-python>=3.0.0` as a new dependency
+
 ## [v0.7.2] - 2025-10-27
 
 ### Added

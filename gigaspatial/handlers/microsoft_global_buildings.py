@@ -186,71 +186,15 @@ class MSBuildingsConfig(BaseHandlerConfig):
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
     ) -> pd.DataFrame:
         """
-        Return intersecting tiles for a given geometry or GeoDataFrame.
-        """
-        return self._get_relevant_tiles(geometry)
-
-    def get_relevant_data_units_by_points(
-        self, points: Iterable[Union[Point, tuple]], **kwargs
-    ) -> pd.DataFrame:
-        """
-        Return intersecting tiles for a list of points.
-        """
-        return self._get_relevant_tiles(points)
-
-    def get_relevant_data_units_by_country(
-        self, country: str, **kwargs
-    ) -> pd.DataFrame:
-        """
-        Return intersecting tiles for a given country.
-        """
-        return self._get_relevant_tiles(country)
-
-    def get_data_unit_path(self, unit: Union[pd.Series, dict], **kwargs) -> Path:
-
-        tile_location = unit["country"] if unit["country"] else unit["location"]
-
-        return (
-            self.base_path
-            / tile_location
-            / self.upload_date
-            / f'{unit["quadkey"]}.csv.gz'
-        )
-
-    def get_data_unit_paths(
-        self, units: Union[pd.DataFrame, Iterable[dict]], **kwargs
-    ) -> List:
-        if isinstance(units, pd.DataFrame):
-            return [self.get_data_unit_path(row) for _, row in units.iterrows()]
-        return super().get_data_unit_paths(units)
-
-    def _get_relevant_tiles(
-        self,
-        source: Union[
-            str,  # country
-            BaseGeometry,  # shapely geoms
-            gpd.GeoDataFrame,
-            Iterable[Union[Point, Tuple[float, float]]],  # points
-        ],
-    ) -> pd.DataFrame:
-        """
         Get the DataFrame of Microsoft Buildings tiles that intersect with a given source spatial geometry.
 
         In case country given, this method first tries to find tiles directly mapped to the given country.
         If no directly mapped tiles are found and the country is not in the location
         mapping, it attempts to find overlapping tiles by creating Mercator tiles
         for the country and filtering the dataset's tiles.
-
-        Args:
-            source: A country code/name, a Shapely geometry, a GeoDataFrame, or a list of Point
-                    objects or (lat, lon) tuples representing the area of interest.
-                    The coordinates are assumed to be in EPSG:4326.
-
-        Returns:
-            A pandas DataFrame containing the rows from the tiles list that
-            spatially intersect with the `source`. Returns an empty DataFrame
-            if no intersecting tiles are found.
         """
+        source = geometry
+
         if isinstance(source, str):
             try:
                 country_code = pycountry.countries.lookup(source).alpha_3
@@ -284,6 +228,28 @@ class MSBuildingsConfig(BaseHandlerConfig):
         return self.df_tiles.loc[
             mask, ["quadkey", "url", "country", "location"]
         ].to_dict("records")
+
+    def get_data_unit_path(self, unit: Union[pd.Series, dict], **kwargs) -> Path:
+
+        tile_location = unit["country"] if unit["country"] else unit["location"]
+
+        return (
+            self.base_path
+            / tile_location
+            / self.upload_date
+            / f'{unit["quadkey"]}.csv.gz'
+        )
+
+    def get_data_unit_paths(
+        self, units: Union[pd.DataFrame, Iterable[dict]], **kwargs
+    ) -> List:
+        if isinstance(units, pd.DataFrame):
+            return [self.get_data_unit_path(row) for _, row in units.iterrows()]
+        return super().get_data_unit_paths(units)
+
+    def extract_search_geometry(self, source, **kwargs):
+        """Override the method since geometry will be extracted by MercatorTiles"""
+        return source
 
 
 class MSBuildingsDownloader(BaseHandlerDownloader):
@@ -372,41 +338,6 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
             )
 
         return [path for path in file_paths if path is not None]
-
-    def download(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
-            BaseGeometry,  # shapely geoms
-            gpd.GeoDataFrame,
-        ],
-        **kwargs,
-    ) -> List[str]:
-        """
-        Download Microsoft Global ML Building Footprints data for a specified geographic region.
-
-        The region can be defined by a country, a list of points,
-        a Shapely geometry, or a GeoDataFrame. This method identifies the
-        relevant data tiles intersecting the region and downloads them in parallel.
-
-        Args:
-            source: Defines the geographic area for which to download data.
-                    Can be:
-                      - A string representing a country code or name.
-                      - A list of (latitude, longitude) tuples or Shapely Point objects.
-                      - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
-                      - A GeoDataFrame with a geometry column in EPSG:4326.
-            **kwargs: Additional parameters passed to data unit resolution methods
-
-        Returns:
-            A list of local file paths for the successfully downloaded tiles.
-            Returns an empty list if no data is found for the region or if
-            all downloads fail.
-        """
-
-        tiles = self.config.get_relevant_data_units(source, **kwargs)
-        return self.download_data_units(tiles, **kwargs)
 
     def download_by_country(
         self,

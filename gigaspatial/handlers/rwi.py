@@ -1,5 +1,6 @@
 import logging
-from typing import List, Optional, Union, Literal
+from typing import List, Optional, Tuple, Union, Literal
+from geopandas.geodataframe import GeoDataFrame
 from pydantic.dataclasses import dataclass
 from datetime import datetime
 import pycountry
@@ -7,6 +8,8 @@ import pycountry
 from hdx.data.resource import Resource
 
 from pydantic import Field, ConfigDict
+from shapely.geometry import Point
+from shapely.geometry.base import BaseGeometry
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
@@ -33,15 +36,11 @@ class RWIConfig(HDXConfig):
     def __post_init__(self):
         super().__post_init__()
 
-    def get_relevant_data_units_by_country(
-        self, country: str, **kwargs
-    ) -> List[Resource]:
-        """Get relevant data units for a country, optionally filtering for latest version"""
-        country = pycountry.countries.lookup(country)
-        values = [country.alpha_3]
-        resources = self.get_dataset_resources(
-            filter={"url": values},
-        )
+    def get_relevant_data_units(
+        self, source: str, force_recompute: bool = False, **kwargs
+    ):
+        key = self._cache_key(source, **kwargs)
+        resources = super().get_relevant_data_units(source, force_recompute, **kwargs)
 
         if self.latest_only and len(resources) > 1:
             # Find the resource with the latest creation date
@@ -65,6 +64,10 @@ class RWIConfig(HDXConfig):
 
             if latest_resource:
                 resources = [latest_resource]
+
+            # Update the cache to the latest only
+            self._unit_cache[key] = resources
+            return resources
 
         return resources
 

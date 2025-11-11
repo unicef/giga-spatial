@@ -108,49 +108,18 @@ class NasaSRTMConfig(BaseHandlerConfig):
         ew = "E" if lon >= 0 else "W"
         return f"{ns}{abs(lat):02d}{ew}{abs(lon):03d}"
 
-    # ------------------------------------------------------------------
-    # --- Interface methods ---
-    # ------------------------------------------------------------------
+    def get_relevant_data_units(self, source, force_recompute: bool = False, **kwargs):
+        return super().get_relevant_data_units(
+            source, force_recompute, crs="EPSG:4326", **kwargs
+        )
 
     def get_relevant_data_units_by_geometry(
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
     ) -> List[dict]:
-        return self._get_relevant_tiles(geometry)
-
-    def get_relevant_data_units_by_points(
-        self, points: Iterable[Union[Point, tuple]], **kwargs
-    ) -> List[dict]:
-        return self._get_relevant_tiles(points)
-
-    def _get_relevant_tiles(
-        self,
-        source: Union[BaseGeometry, gpd.GeoDataFrame, Iterable[Union[Point, tuple]]],
-    ) -> List[dict]:
-        """
-        Identify intersecting 1°x1° tiles with geometry or points.
-        """
-        if isinstance(source, gpd.GeoDataFrame):
-            if source.crs != "EPSG:4326":
-                source = source.to_crs("EPSG:4326")
-            search_geom = source.geometry.union_all()
-        elif isinstance(source, BaseGeometry):
-            search_geom = source
-        elif isinstance(source, Iterable):
-            points = [
-                pt if isinstance(pt, Point) else Point(pt[1], pt[0]) for pt in source
-            ]
-            search_geom = MultiPoint(points)
-        else:
-            raise ValueError("Expected geometry, GeoDataFrame, or iterable of Points.")
-
-        mask = self.tile_tree.query(search_geom, predicate="intersects")
+        mask = self.tile_tree.query(geometry, predicate="intersects")
         filtered_grid = [self.grid_records[i] for i in mask]
 
         return gpd.GeoDataFrame(filtered_grid, crs="EPSG:4326").to_dict("records")
-
-    # ------------------------------------------------------------------
-    # --- Paths ---
-    # ------------------------------------------------------------------
 
     def get_data_unit_path(self, unit: Union[pd.Series, dict, str], **kwargs) -> Path:
         """
@@ -259,40 +228,40 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
 
         return [path for path in file_paths if path is not None]
 
-    def download(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
-            BaseGeometry,  # shapely geoms
-            gpd.GeoDataFrame,
-        ],
-        **kwargs,
-    ) -> List[str]:
-        """
-        Download NASA SRTM elevation data for a specified geographic region.
+    # def download(
+    #     self,
+    #     source: Union[
+    #         str,  # country
+    #         List[Union[Tuple[float, float], Point]],  # points
+    #         BaseGeometry,  # shapely geoms
+    #         gpd.GeoDataFrame,
+    #     ],
+    #     **kwargs,
+    # ) -> List[str]:
+    #     """
+    #     Download NASA SRTM elevation data for a specified geographic region.
 
-        The region can be defined by a country, a list of points,
-        a Shapely geometry, or a GeoDataFrame. This method identifies the
-        relevant data tiles intersecting the region and downloads them in parallel.
+    #     The region can be defined by a country, a list of points,
+    #     a Shapely geometry, or a GeoDataFrame. This method identifies the
+    #     relevant data tiles intersecting the region and downloads them in parallel.
 
-        Args:
-            source: Defines the geographic area for which to download data.
-                    Can be:
-                      - A string representing a country code or name.
-                      - A list of (latitude, longitude) tuples or Shapely Point objects.
-                      - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
-                      - A GeoDataFrame with a geometry column in EPSG:4326.
-            **kwargs: Additional parameters passed to data unit resolution methods
+    #     Args:
+    #         source: Defines the geographic area for which to download data.
+    #                 Can be:
+    #                   - A string representing a country code or name.
+    #                   - A list of (latitude, longitude) tuples or Shapely Point objects.
+    #                   - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
+    #                   - A GeoDataFrame with a geometry column in EPSG:4326.
+    #         **kwargs: Additional parameters passed to data unit resolution methods
 
-        Returns:
-            A list of local file paths for the successfully downloaded tiles.
-            Returns an empty list if no data is found for the region or if
-            all downloads fail.
-        """
+    #     Returns:
+    #         A list of local file paths for the successfully downloaded tiles.
+    #         Returns an empty list if no data is found for the region or if
+    #         all downloads fail.
+    #     """
 
-        tiles = self.config.get_relevant_data_units(source, **kwargs)
-        return self.download_data_units(tiles, **kwargs)
+    #     tiles = self.config.get_relevant_data_units(source, **kwargs)
+    #     return self.download_data_units(tiles, **kwargs)
 
 
 class NasaSRTMReader(BaseHandlerReader):
