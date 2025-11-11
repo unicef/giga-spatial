@@ -286,6 +286,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self,
         handler: Optional[GoogleOpenBuildingsHandler] = None,
         use_polygons: bool = False,
+        **kwargs,
     ) -> pd.DataFrame:
         """Map Google Open Buildings data to zones.
 
@@ -318,7 +319,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.logger.info("Loading Google Buildings point data")
         handler = handler or GoogleOpenBuildingsHandler(data_store=self.data_store)
         buildings_df = handler.load_points(
-            self.zone_gdf, ensure_available=self.config.ensure_available
+            self.zone_gdf, ensure_available=self.config.ensure_available, **kwargs
         )
 
         if buildings_df.empty:
@@ -342,7 +343,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 "Loading Google Buildings polygon data for more accurate mapping"
             )
             buildings_gdf = handler.load_polygons(
-                self.zone_gdf, self.config.ensure_available
+                self.zone_gdf, ensure_available=self.config.ensure_available, **kwargs
             )
 
             self.logger.info(
@@ -471,7 +472,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 )
                 predicate = "intersects"
             else:
-                gdf_pop = handler.load_into_geodataframe(self.zone_gdf)
+                gdf_pop = handler.load_into_geodataframe(self.zone_gdf, **kwargs)
 
                 result = self.map_polygons(
                     gdf_pop,

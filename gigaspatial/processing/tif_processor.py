@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple, Union, Literal, Callable, Dict, Any
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 from contextlib import contextmanager
-from shapely.geometry import box, Polygon, MultiPolygon
+from shapely.geometry import box, Polygon, MultiPolygon, MultiPoint
 from pathlib import Path
 import rasterio
 from rasterio.mask import mask
@@ -1319,10 +1319,22 @@ class TifProcessor:
     def _prepare_geometry_for_clipping(
         self,
         geometry: Union[
-            Polygon, MultiPolygon, gpd.GeoDataFrame, gpd.GeoSeries, List[dict], dict
+            Polygon,
+            MultiPolygon,
+            MultiPoint,
+            gpd.GeoDataFrame,
+            gpd.GeoSeries,
+            List[dict],
+            dict,
         ],
     ) -> List[dict]:
         """Convert various geometry formats to list of GeoJSON-like dicts for rasterio.mask"""
+
+        if isinstance(geometry, MultiPoint):
+            # Use bounding box of MultiPoint
+            minx, miny, maxx, maxy = geometry.bounds
+            bbox = box(minx, miny, maxx, maxy)
+            return [bbox.__geo_interface__]
 
         if isinstance(geometry, (Polygon, MultiPolygon)):
             # Shapely geometry

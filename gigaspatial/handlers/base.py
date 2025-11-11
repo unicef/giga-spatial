@@ -381,15 +381,26 @@ class BaseHandlerReader(ABC):
         return result
 
     def crop_to_geometry(self, data, geometry, predicate="intersects", **kwargs):
+
+        # Project geometry to the projection of the data if data has projection
+        geom_crs = kwargs.get("crs", "EPSG:4326")
+        if hasattr(data, "crs") and data.crs != geom_crs:
+            geometry = (
+                gpd.GeoDataFrame(geometry=[geometry], crs="EPSG:4326")
+                .to_crs(data.crs)
+                .geometry[0]
+            )
+
         # Tabular (GeoDataFrame) case
         if isinstance(data, (pd.DataFrame, gpd.GeoDataFrame)):
             if isinstance(data, pd.DataFrame):
-                from gigaspatial.processing.geo import convert_to_geodataframe  
+                from gigaspatial.processing.geo import convert_to_geodataframe
 
                 try:
                     data = convert_to_geodataframe(data, **kwargs)
                 except:
                     return data
+
             # Clip to geometry
             return data[getattr(data.geometry, predicate)(geometry)]
 

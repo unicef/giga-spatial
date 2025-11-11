@@ -400,7 +400,7 @@ class PoiViewGenerator:
 
         self.logger.info("Loading Google Buildings point data")
         buildings_df = handler.load_points(
-            self.points_gdf, ensure_available=self.config.ensure_available
+            self.points_gdf, ensure_available=self.config.ensure_available, **kwargs
         )
         if buildings_df is None or len(buildings_df) == 0:
             self.logger.info("No Google buildings data found for the provided POIs")
@@ -723,6 +723,7 @@ class PoiViewGenerator:
             self.points_gdf.copy(),
             ensure_available=self.config.ensure_available,
             merge_rasters=True,
+            **kwargs,
         )
 
         mapped_data = self.map_zonal_stats(
@@ -775,6 +776,7 @@ class PoiViewGenerator:
             self.points_gdf.copy(),
             ensure_available=self.config.ensure_available,
             merge_rasters=True,
+            **kwargs,
         )
 
         mapped_data = self.map_zonal_stats(

@@ -61,6 +61,10 @@ All notable changes to this project will be documented in this file.
     -   Uses `h3` as the zone identifier.
     -   Includes `map_wp_pop()` convenience method (auto-uses stored country when available).
 
+-   **TifProcessor: MultiPoint clipping support**
+    -   `_prepare_geometry_for_clipping()` now accepts `MultiPoint` inputs and uses their bounding box for raster clipping.
+    -   Enables passing collections of points as a `MultiPoint` to `clip_to_geometry()` without pre-converting to a polygon.
+
 ### Changed
 
 -   **Configuration**
