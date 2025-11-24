@@ -5,6 +5,7 @@ import os
 import io
 import contextlib
 import logging
+import threading
 from typing import Union, Optional, List, Generator, Tuple
 from pathlib import Path
 
@@ -40,6 +41,11 @@ class SnowflakeDataStore(DataStore):
         :param database: Snowflake database name
         :param schema: Snowflake schema name
         :param stage_name: Name of the Snowflake stage to use for file storage
+        
+        Note: Connection is created lazily to support multiprocessing. The connection
+        parameters are stored (all picklable), and the actual connection is created
+        on first use. This allows the DataStore to be pickled and sent to worker
+        processes, where each process creates its own connection.
         """
         if not all([account, user, password, warehouse, database, schema, stage_name]):
             raise ValueError(
@@ -55,13 +61,48 @@ class SnowflakeDataStore(DataStore):
         self.schema = schema
         self.stage_name = stage_name
 
-        # Create connection
-        self.connection = self._create_connection()
+        # Connection created lazily (not in __init__) to support multiprocessing
+        # When pickled and sent to a worker process, only parameters are serialized
+        # Each process creates its own connection on first use
+        self._connection = None
+        self._lock = None  # Lock created lazily to avoid pickling issues
+        
         self.logger = config.get_logger(self.__class__.__name__)
 
         # Temporary directory for file operations
         self._temp_dir = tempfile.mkdtemp()
 
+    def _get_lock(self):
+        """Get or create the lock for thread safety (created per process)."""
+        if self._lock is None:
+            self._lock = threading.Lock()
+        return self._lock
+    
+    def _get_connection(self):
+        """
+        Get or create the Snowflake connection (lazy initialization).
+        
+        This method ensures the connection is created on first use, which allows
+        the DataStore to be pickled and sent to worker processes. Each process
+        creates its own connection.
+        """
+        if self._connection is None:
+            with self._get_lock():
+                # Double-check pattern for thread safety within a process
+                if self._connection is None:
+                    self._connection = self._create_connection()
+        return self._connection
+    
+    @property
+    def connection(self):
+        """
+        Property accessor for connection (for backward compatibility).
+        
+        This allows existing code that accesses self.connection to continue working,
+        while using lazy initialization internally.
+        """
+        return self._get_connection()
+    
     def _create_connection(self):
         """Create and return a Snowflake connection."""
         conn_params = {
@@ -100,9 +141,16 @@ class SnowflakeDataStore(DataStore):
     def _ensure_connection(self):
         """Ensure the connection is active, reconnect if needed."""
         try:
-            self.connection.cursor().execute("SELECT 1")
+            self._get_connection().cursor().execute("SELECT 1")
         except Exception:
-            self.connection = self._create_connection()
+            # Reset connection and create a new one
+            if self._connection:
+                try:
+                    self._connection.close()
+                except:
+                    pass
+            self._connection = None
+            self._get_connection()
 
     def _get_stage_path(self, path: str) -> str:
         """Convert a file path to a Snowflake stage path."""
@@ -124,7 +172,7 @@ class SnowflakeDataStore(DataStore):
         :return: File contents as string or bytes
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -187,7 +235,7 @@ class SnowflakeDataStore(DataStore):
         :param data: File contents
         """
         self._ensure_connection()
-        cursor = self.connection.cursor()
+        cursor = self._get_connection().cursor()
 
         try:
             # Convert to bytes if string
@@ -404,7 +452,7 @@ class SnowflakeDataStore(DataStore):
         :return: True if file exists, False otherwise
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -436,7 +484,7 @@ class SnowflakeDataStore(DataStore):
         :return: File size in kilobytes
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -471,7 +519,7 @@ class SnowflakeDataStore(DataStore):
         :return: List of file paths
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -648,7 +696,7 @@ class SnowflakeDataStore(DataStore):
         :return: File metadata dictionary
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -706,7 +754,7 @@ class SnowflakeDataStore(DataStore):
         :param dir: Path to the directory to remove
         """
         self._ensure_connection()
-        cursor = self.connection.cursor()
+        cursor = self._get_connection().cursor()
 
         try:
             normalized_dir = self._normalize_path(dir)
@@ -747,7 +795,7 @@ class SnowflakeDataStore(DataStore):
         :param path: Path to the file to remove
         """
         self._ensure_connection()
-        cursor = self.connection.cursor()
+        cursor = self._get_connection().cursor()
 
         try:
             normalized_path = self._normalize_path(path)
@@ -793,8 +841,33 @@ class SnowflakeDataStore(DataStore):
 
     def close(self):
         """Close the Snowflake connection."""
-        if self.connection:
-            self.connection.close()
+        if self._connection:
+            self._connection.close()
+            self._connection = None
+
+    def __getstate__(self):
+        """
+        Custom pickling: exclude connection and lock to allow multiprocessing.
+        
+        When pickled, only store connection parameters (all picklable).
+        The connection and lock will be recreated in the worker process.
+        """
+        state = self.__dict__.copy()
+        # Remove connection and lock (they can't be pickled)
+        state['_connection'] = None
+        state['_lock'] = None
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom unpickling: restore state without connection.
+        
+        Connection will be created lazily on first use in the worker process.
+        """
+        self.__dict__.update(state)
+        # Ensure connection and lock are None (will be created on first use)
+        self._connection = None
+        self._lock = None
 
     def __enter__(self):
         """Context manager entry."""
