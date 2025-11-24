@@ -2,6 +2,7 @@ import pandas as pd
 import geopandas as gpd
 from pathlib import Path
 import json
+import io
 
 from .data_store import DataStore
 
@@ -87,8 +88,17 @@ def write_dataset(data, data_store: DataStore, path, **kwargs):
                 )
 
             try:
+                # Write to BytesIO buffer first
+                buffer = io.BytesIO()
+                GEO_WRITERS[suffix](data, buffer, **kwargs)
+                buffer.seek(0)
+
+                # Then write buffer contents to data_store
                 with data_store.open(path, "wb") as f:
-                    GEO_WRITERS[suffix](data, f, **kwargs)
+                    f.write(buffer.getvalue())
+
+                # with data_store.open(path, "wb") as f:
+                #    GEO_WRITERS[suffix](data, f, **kwargs)
             except Exception as e:
                 raise ValueError(f"Error writing GeoDataFrame: {str(e)}")
 

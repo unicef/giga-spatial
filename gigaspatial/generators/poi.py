@@ -738,6 +738,7 @@ class PoiViewGenerator:
 
     def map_smod(
         self,
+        stat="median",
         dataset_year=2020,
         dataset_resolution=1000,
         output_column="smod_class",
@@ -781,6 +782,7 @@ class PoiViewGenerator:
 
         mapped_data = self.map_zonal_stats(
             data=tif_processors,
+            stat=stat,
             output_column=output_column,
             **kwargs,
         )

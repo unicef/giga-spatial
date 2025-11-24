@@ -12,6 +12,21 @@
 [![PyPI Downloads](https://static.pepy.tech/badge/giga-spatial)](https://pepy.tech/projects/giga-spatial)
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/y/unicef/giga-spatial.svg?color=dark-green)](https://github.com/unicef/giga-spatial/graphs/contributors)
 
+**Table of contents**
+
+- [About Giga](#about-giga)
+- [About GigaSpatial](#about-gigaspatial)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Key workflows](#key-workflows)
+- [Core concepts](#core-concepts)
+- [Supported datasets](#supported-datasets)
+- [Why use GigaSpatial?](#why-use-gigaspatial)
+- [Why open source?](#why-open-source)
+- [How to contribute](#how-to-contribute)
+- [Code of conduct](#code-of-conduct)
+- [Stay connected](#stay-connected)
+
 
 ## About Giga
 
@@ -20,31 +35,111 @@ Giga maps schools' Internet access in real time, creates models for innovative f
 
 ## About GigaSpatial
 
-**GigaSpatial** is a Python package developed as part of the Giga Applied Science Team to handle geospatial data efficiently. It provides tools for downloading, processing, and analyzing geospatial data, enabling users to work with datasets such as OpenStreetMap (OSM), Global Human Settlement Layer (GHSL), Microsoft Global Buildings, Google Open Buildings, and more. The package is designed to support Giga's mission by providing robust geospatial capabilities for mapping and analyzing school connectivity.
+**GigaSpatial** is a Python toolkit for scalable geospatial data download, processing, and enrichment, designed for use across diverse domains such as infrastructure mapping, accessibility analysis, and environmental studies.
+
+> Originally developed within UNICEF’s Giga initiative, GigaSpatial now provides a general‑purpose geospatial toolkit that can be applied to many contexts, including but not limited to school connectivity analysis.
+
+### Who is this for?
+
+- Data engineers building reproducible geospatial pipelines.
+- Data scientists analyzing school connectivity and infrastructure.
+- Researchers working with large, multi‑source spatial datasets.
 
 ## Installation
 
-See the [installation docs](https://unicef.github.io/giga-spatial/getting-started/installation/) for all details. GigaSpatial requires Python 3.10 or above and depends on the following key packages:
+GigaSpatial requires Python 3.10 or above.
+
+```console
+pip install giga-spatial
+```
+
+The package depends on:
 
 - geopandas
 - pandas
 - shapely
 - rasterio
 
-We recommend using a virtual environment for installation. See the [installation docs](https://unicef.github.io/giga-spatial/getting-started/installation/) for more details.
+For detailed setup instructions (including recommended environments and system dependencies), see the [installation docs](https://unicef.github.io/giga-spatial/getting-started/installation/).
+
+We recommend using a virtual environment for installation.
+
+## Quick start
+
+```python
+import geopandas as gpd
+from gigaspatial.handlers import GoogleOpenBuildingsHandler, GHSLDataHandler
+from gigaspatial.generators import POIViewGenerator
+
+# 1. Load school locations
+schools = gpd.read_file("schools.geojson")
+
+# 2. Prepare data sources (downloads / caching handled by handlers)
+buildings = GoogleOpenBuildingsHandler().load_data(source=schools, data_type="points")
+ghsl = GHSLDataHandler(product="GHS_SMOD").load_data(source=schools, merge_rasters=True)
+
+# 3. Generate school mappings with buildings + settlement model
+view = POIViewGenerator(points=points)
+ghsl_mapping = view.map_zonal_stats(data=ghsl, stat="median", output_column="smod_median")
+
+print(ghsl_mapping.head())
+
+buildings_mapping = view.map_zonal_stats(data=ghsl, stat="median", output_column="smod_median")
+buildings_mapping = view.map_nearest_points(
+    points_df=buildings,
+    id_column="full_plus_code",
+    output_prefix="nearest_google_building",
+)
+
+print(buildings_mapping.head())
+
+```
 
 ## Key Features
-- **Data Downloading**: Download geospatial data from various sources including GHSL, Microsoft Global Buildings, Google Open Buildings, OpenCellID, and HDX datasets.
-- **Data Processing**: Process and transform geospatial data, such as GeoTIFF files and vector data, with support for compression and efficient handling.
-- **View Generators**: 
+
+- **Data Downloading**
+  Download geospatial data from various sources including GHSL, Microsoft Global Buildings, Google Open Buildings, OpenCellID, and HDX datasets.
+
+- **Data Processing** 
+  Process and transform geospatial data, such as GeoTIFF files and vector data, with support for compression and efficient handling.
+
+- **View Generators** 
   - Enrich spatial context with POI (Point of Interest) data
   - Support for raster point sampling and zonal statistics
   - Area-weighted aggregation for polygon-based statistics
-- **Grid System**: Create and manipulate grid-based geospatial data for analysis and modeling.
-- **Data Storage**: Flexible storage options with local, cloud (ADLS), and Snowflake stage support.
-- **Configuration Management**: 
+
+- **Grid System**
+  Create and manipulate grid-based geospatial data for analysis and modeling.
+
+- **Data Storage**
+  Flexible storage options with local, cloud (ADLS), and Snowflake stage support.
+
+- **Configuration Management**
   - Centralized configuration via environment variables or `.env` file
   - Easy setup of API keys and paths
+
+## Key Workflows
+
+- **Fetch POI data**
+  Retrieve points of interest from OpenStreetMap, Healthsites.io, and Giga-maintained sources for any area of interest.
+
+- **Enrich POI locations**
+  Join POIs with Google/Microsoft building footprints, GHSL population and settlement layers, and other contextual datasets.
+
+- **Build and analyze grids**
+  Generate national or sub‑national grids and aggregate multi‑source indicators (e.g. coverage, population, infrastructure) into each cell.
+
+- **End‑to‑end pipelines**
+  Use handlers, readers, and view generators together to go from raw data download to analysis‑ready tables in local storage, ADLS, or Snowflake.
+
+
+## Core concepts
+
+- **Handlers**: Orchestrate dataset lifecycle (download, cache, read) for sources like GHSL, Google/Microsoft buildings, OSM, and HDX.
+- **Readers**: Low‑level utilities that parse and standardize raster and vector formats.
+- **View generators**: High‑level components that enrich points or grids with contextual variables (POIs, buildings, population, etc.).
+- **Grid system**: Utilities to build and manage grid cells for large‑scale analysis.
+- **Storage backends**: Pluggable interfaces for local disk, Azure Data Lake Storage, and Snowflake stages.
 
 ## Supported Datasets
 
@@ -75,15 +170,19 @@ The **view generators** in GigaSpatial are designed to enrich the spatial contex
 
 ---
 
-## Why Use GigaSpatial?
-- **Efficient Geospatial Handling**: Streamline the process of downloading, processing, and analyzing geospatial data
-- **Scalable Analysis**: Map data to grid cells or POI locations for both scalable and detailed insights
-- **Open Source**: Contribute to and benefit from a collaborative, transparent, and innovative geospatial toolset
-- **Modern Architecture**: Built with maintainability and extensibility in mind, featuring:
-  - Base handler orchestration for unified lifecycle management
-  - Dedicated reader classes for major datasets
-  - Modular source resolution for flexible data access
-  - Comprehensive error handling and logging
+## Why use GigaSpatial?
+
+- **End-to-end geospatial pipelines**: Go from raw open datasets (OSM, GHSL, global buildings, HDX, etc.) to analysis-ready tables with a consistent set of handlers, readers, and view generators.
+
+- **Scalable analysis**: Work seamlessly with both point and grid representations, making it easy to aggregate indicators at national scale or zoom into local POIs.
+
+- **Batteries included for enrichment**: Fetch POIs, buildings, and population layers and join them onto schools or other locations with a few lines of code.
+
+- **Flexible storage**: Run the same workflows against local files, Azure Data Lake Storage (ADLS), or Snowflake stages without changing core logic.
+
+- **Modern, extensible architecture**: Base handler orchestration, dataset-specific readers, modular source resolution, and structured logging make it straightforward to add new sources and maintain production pipelines.
+
+- **Open and collaborative**: Developed in the open under an AGPL-3.0 license, with contributions and reviews from the wider geospatial and data-for-development community.
 
 ## Why Open Source?  
 
@@ -101,7 +200,7 @@ We welcome contributions to our repositories! Whether it's fixing a bug, adding 
 2. Create a new branch for your changes.  
 3. Submit a pull request with a clear explanation of your contribution. 
 
-To go through the contribtution guidelines in detail you can visit the following link. 
+To go through the “contribution” guidelines in detail you can visit the following link. 
 
 [Click here for the detailed Contribution guidelines](https://github.com/unicef/giga-spatial/blob/main/CONTRIBUTING.md)
 

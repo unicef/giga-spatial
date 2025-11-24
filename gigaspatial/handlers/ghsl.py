@@ -21,7 +21,6 @@ from pydantic import (
     field_validator,
     ConfigDict,
 )
-import ssl
 import logging
 
 from gigaspatial.core.io.data_store import DataStore
@@ -75,16 +74,77 @@ class GHSLDataConfig(BaseHandlerConfig):
 
     def _load_tiles(self):
         """Load GHSL tiles from tiles shapefile."""
-        # Create a default, unverified context
-        ssl._create_default_https_context = ssl._create_unverified_context
+        # Check cache first
+        cache_dir = self.base_path / "cache"
+        tiles_cache = cache_dir / f"tiles_{self.coord_system.value}.geojson"
+
+        if self.data_store.file_exists(tiles_cache):
+
+            try:
+                self.tiles_gdf = gpd.read_file(tiles_cache)
+                self.logger.info(f"Loaded tiles from cache")
+                return
+            except Exception:
+                self.logger.warning("Cache invalid, re-downloading")
+
+        import shutil
+        import ssl
+        import warnings
+        from gigaspatial.core.io.writers import write_dataset
+
+        temp_dir = None
 
         try:
-            self.tiles_gdf = gpd.read_file(self.TILES_URL)
-        except Exception as e:
-            self.logger.error(f"Failed to download tiles shapefile: {e}")
+            # Try with SSL verification first
+            try:
+                self.logger.info("Attempting download with SSL verification")
+                # Set up SSL context before any requests
+                ssl._create_default_https_context = ssl._create_unverified_context
+                self.tiles_gdf = gpd.read_file(self.TILES_URL)
+                self.logger.info("Download successful with SSL verification")
+
+            except Exception as e:
+                # Fall back to requests with SSL verification
+                self.logger.warning(
+                    f"Geopandas download with SSL verification failed ({type(e).__name__}): {e}"
+                )
+                self.logger.warning(
+                    "Retrying download with requests and without SSL verification"
+                )
+
+                # Download tiles with requests
+                temp_dir = Path(tempfile.mkdtemp())
+                zip_path = temp_dir / "tiles.zip"
+
+                # Suppress SSL warnings when using verify=False
+                from urllib3.exceptions import InsecureRequestWarning
+
+                warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+
+                response = requests.get(self.TILES_URL, verify=False)
+                response.raise_for_status()
+                self.logger.info("Download successful without SSL verification")
+
+                # Write downloaded content to file
+                with open(zip_path, "wb") as f:
+                    f.write(response.content)
+
+                # Read the shapefile from the zip
+                self.tiles_gdf = gpd.read_file(zip_path)
+
+            # Cache it
+            write_dataset(self.tiles_gdf, self.data_store, str(tiles_cache))
+            self.logger.info("Tiles cached successfully")
+
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Failed to download tiles: {e}")
             raise ValueError(
                 f"Could not download GHSL tiles from {self.TILES_URL}"
             ) from e
+        finally:
+            # Cleanup temp directory if it was created
+            if temp_dir is not None and temp_dir.exists():
+                shutil.rmtree(temp_dir)
 
     @field_validator("year")
     def validate_year(cls, value: str) -> int:
