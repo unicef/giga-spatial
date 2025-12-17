@@ -2,6 +2,99 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.4] - 2025-11-24
+
+### Added
+
+-   **TifProcessor: Raster Export Methods** 
+    -   **`save_to_file()` method:** Comprehensive raster export functionality with flexible compression and optimization options.
+        -   Supports multiple compression algorithms: LZW (default), DEFLATE, ZSTD, JPEG, WEBP, and NONE.
+        -   Configurable compression parameters: `ZLEVEL` for DEFLATE (default: 6), `ZSTD_LEVEL` for ZSTD (default: 9), `JPEG_QUALITY` (default: 85), `WEBP_LEVEL` (default: 75).
+        -   Predictor support for improved compression: predictor=2 for integer data (horizontal differencing), predictor=3 for floating-point data.
+        -   Tiled output enabled by default (512×512 blocksize) for optimal random access performance.
+        -   Cloud-Optimized GeoTIFF (COG) support via `cog=True` parameter with automatic overview generation.
+        -   Customizable overview levels and resampling methods for COG creation.
+        -   BigTIFF support for files >4GB via `bigtiff` parameter.
+        -   Multi-threading support for compatible compression algorithms via `num_threads` parameter.
+        -   Integrates with `self.open_dataset()` context manager, automatically handling merged, reprojected, and clipped rasters.
+        -   Writes through `self.data_store` abstraction layer, supporting both local and remote storage (e.g., ADLS).
+        -   Preserves all bands from source rasters without skipping.
+    
+    -   **`save_array_to_file()` method:** Export processed numpy arrays while preserving georeferencing metadata.
+        -   Accepts 2D or 3D numpy arrays (with automatic dimension handling).
+        -   Inherits CRS, transform, and nodata values from source raster or accepts custom values.
+        -   Supports same compression options as `save_to_file()`.
+        -   Enables saving modified/processed raster data while maintaining spatial reference.
+        -   Writes through `self.data_store` for consistent storage abstraction.
+
+-   **TifProcessor: Value-Based Filtering for DataFrame and GeoDataFrame Conversion**
+    -   **`min_value` and `max_value` parameters:** Added optional filtering thresholds to `to_dataframe()` and `to_geodataframe()` methods.
+        -   `min_value`: Filters out pixels with values ≤ threshold (exclusive).
+        -   `max_value`: Filters out pixels with values ≥ threshold (exclusive).
+        -   Filtering occurs **before** geometry creation in `to_geodataframe()`, significantly improving performance for sparse datasets.
+        -   Supports both single-band and multi-band rasters with consistent behavior.
+    
+    -   **Enhanced `_build_data_mask()` method:** Extended to incorporate value threshold filtering alongside nodata filtering.
+        -   Combines multiple mask conditions using logical AND for efficient filtering.
+        -   Maintains backward compatibility when no thresholds are specified.
+    
+    -   **Enhanced `_build_multi_band_mask()` method:** Extended for multi-band value filtering.
+        -   Drops pixels where ANY band has nodata or fails value thresholds.
+        -   Ensures consistent filtering behavior across RGB, RGBA, and multi-band modes.
+
+-   **TifProcessor: Raster Statistics in `get_raster_info()`**
+    -   Added `include_statistics` and `approx_ok` flags to optionally return pixel statistics alongside metadata.
+    -   New `_get_basic_statistics()` helper streams through raster blocks to compute per-band and overall min, max, mean, std, sum, and count with nodata-aware masking.
+    -   Results are cached for reuse within the processor lifecycle to avoid repeated scans.
+
+-   **BaseHandler: Tabular Load Progress**
+    -   `_load_tabular_data()` now supports a `tqdm` progress bar, showing file-level load progress for large tabular batches.
+    -   Added `show_progress` and `progress_desc` parameters so handlers can toggle or customize the indicator while keeping existing callers backward compatible.
+
+-   **Improved developer usability by enabling easier access to primary components without deep module references:**
+    - Exposed core handlers, view generators, and processing modules at the top-level `gigaspatial` package namespace for improved user experience and simplified imports.
+    - Added convenient aliases for `gigaspatial.core.io` as `io` and `gigaspatial.processing.algorithms` as `algorithms` directly accessible from `gigaspatial`.
+    - Declared explicit public API in `__init__.py` to clarify stable, supported components.
+
+### Changed
+
+-   **GHSLDataConfig: Improved SSL Certificate Handling for Tile Downloads**
+    -   Replaced `ssl._create_unverified_context` approach with a robust two-tier fallback strategy for downloading GHSL tiles shapefile.
+    
+    -   **Primary method:** Attempts download via `gpd.read_file()` with unverified SSL context (fast, direct access).
+    
+    -   **Fallback method:** Uses `requests.get()` with `verify=False` for environments where `gpd.read_file()` fails (e.g., cloud compute instances with Anaconda certificate bundles).
+    -   Downloads tiles to temporary local file before reading when fallback is triggered, ensuring compatibility across different Python environments.
+    
+    -   **Tile caching:** Implemented GeoJSON-based caching in `base_path/cache/` directory to minimize redundant downloads.
+        -   Cache checked before any download attempts.
+        -   Invalid cache automatically triggers re-download.
+        -   Uses `write_dataset()` for consistent storage abstraction across local and remote data stores.
+    
+    -   **Enhanced error handling:** 
+        -   Logs specific exception types (`type(e).__name__`) for better debugging.
+        -   Graceful fallback with informative warning messages.
+        -   Preserves exception chain for traceback analysis.
+    -   Improved compatibility with Azure ML compute instances where multiple certificate stores (system, Anaconda, certifi) coexist.
+    -   Temporary file cleanup guaranteed via `finally` block, preventing orphaned downloads.
+
+### Fixed
+
+-   **GHSLDataConfig: SSL certificate verification failures in cloud environments**
+    -   Resolved `CERTIFICATE_VERIFY_FAILED` errors when downloading GHSL tiles shapefile on cloud compute instances.
+  
+### Performance
+
+-   **Reduced network overhead for GHSL tile metadata**:
+    -   Tiles shapefile downloaded only once per coordinate system (WGS84/Mollweide) and cached locally.
+    -   Subsequent `GHSLDataConfig` instantiations load from cache, eliminating repeated ~MB shapefile downloads.
+    -   Benefits scale with number of GHSL queries across application lifecycle.
+
+
+### Documentation
+
+- Improved `README` with clearer key workflows, core concepts, and updated overview text.
+
 ## [v0.7.3] - 2025-11-11
 
 ### Added

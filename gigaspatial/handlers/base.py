@@ -8,6 +8,7 @@ from shapely.geometry import Point, MultiPoint
 from shapely.geometry.base import BaseGeometry
 import multiprocessing
 import logging
+from tqdm import tqdm
 
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
@@ -346,7 +347,7 @@ class BaseHandlerReader(ABC):
             Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects or a single
                                                     TifProcessor if merge_rasters is True.
         """
-        if merge_rasters and len(raster_paths) > 1:
+        if merge_rasters or len(raster_paths) == 1:
             self.logger.info(
                 f"Merging {len(raster_paths)} rasters into a single TifProcessor."
             )
@@ -358,7 +359,11 @@ class BaseHandlerReader(ABC):
             ]
 
     def _load_tabular_data(
-        self, file_paths: List[Union[str, Path]], read_function: Callable = read_dataset
+        self,
+        file_paths: List[Union[str, Path]],
+        read_function: Callable = read_dataset,
+        show_progress: bool = True,
+        progress_desc: Optional[str] = None,
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
         Load and concatenate tabular data from multiple files.
@@ -367,14 +372,25 @@ class BaseHandlerReader(ABC):
             file_paths (List[Union[str, Path]]): List of file paths to load data from.
             read_function (Callable): Function to use for reading individual files.
                 Defaults to read_dataset. Should accept (data_store, file_path) arguments.
+            show_progress (bool): Whether to display a progress bar while loading files.
+            progress_desc (Optional[str]): Custom description for the progress bar.
 
         Returns:
             Union[pd.DataFrame, gpd.GeoDataFrame]: Concatenated data from all files.
                 Returns empty DataFrame if no data is loaded.
         """
         all_data = []
-        for file_path in file_paths:
+        iterator: Iterable = file_paths
+        if show_progress and file_paths:
+            iterator = tqdm(
+                file_paths,
+                desc=progress_desc or "Loading tabular data",
+                total=len(file_paths),
+            )
+
+        for file_path in iterator:
             all_data.append(read_function(self.data_store, file_path))
+
         if not all_data:
             return pd.DataFrame()
         result = pd.concat(all_data, ignore_index=True)

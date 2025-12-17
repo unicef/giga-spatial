@@ -4,7 +4,7 @@ import geopandas as gpd
 import networkx as nx
 import scipy.sparse as sp
 from typing import List, Optional, Tuple, Union, Literal, Callable, Dict, Any
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from pydantic.dataclasses import dataclass
 from contextlib import contextmanager
 from shapely.geometry import box, Polygon, MultiPolygon, MultiPoint
@@ -56,11 +56,10 @@ class TifProcessor:
 
         # Handle multiple dataset paths
         if isinstance(self.dataset_path, list):
-            if len(self.dataset_path) > 1:
-                self.dataset_paths = [Path(p) for p in self.dataset_path]
-                self._validate_multiple_datasets()
-                self._merge_rasters()
-                self.dataset_path = self._merged_file_path
+            self.dataset_paths = [Path(p) for p in self.dataset_path]
+            self._validate_multiple_datasets()
+            self._merge_rasters()
+            self.dataset_path = self._merged_file_path
         else:
             self.dataset_paths = [Path(self.dataset_path)]
             # For absolute paths with LocalDataStore, check file existence directly
@@ -86,6 +85,19 @@ class TifProcessor:
 
         self._load_metadata()
         self._validate_mode_band_compatibility()
+
+    @field_validator("dataset_path")
+    def validate_dataset_path(cls, value):
+        if isinstance(value, list):
+            if path_len := len(value):
+                if path_len == 1:
+                    return value[0]
+                return value
+
+            raise ValueError("No dataset paths provided.")
+
+        if isinstance(value, (Path, str)):
+            return value
 
     @contextmanager
     def open_dataset(self):
@@ -165,9 +177,19 @@ class TifProcessor:
             self.logger.info(f"Reprojection complete. Output saved to {dst_path}")
             return Path(dst_path)
 
-    def get_raster_info(self) -> Dict[str, Any]:
-        """Get comprehensive raster information."""
-        return {
+    def get_raster_info(
+        self,
+        include_statistics: bool = False,
+        approx_ok: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Get comprehensive raster information.
+
+        Args:
+            include_statistics: Whether to compute basic pixel statistics
+            approx_ok: Allow approximate statistics (leverages GDAL histogram-based stats)
+        """
+        info = {
             "count": self.count,
             "width": self.width,
             "height": self.height,
@@ -180,6 +202,11 @@ class TifProcessor:
             "is_merged": self.is_merged,
             "source_count": self.source_count,
         }
+
+        if include_statistics:
+            info["statistics"] = self._get_basic_statistics(approx_ok=approx_ok)
+
+        return info
 
     def _reproject_to_temp_file(
         self, src: rasterio.DatasetReader, target_crs: str
@@ -524,7 +551,12 @@ class TifProcessor:
         return self._cache["height"]
 
     def to_dataframe(
-        self, drop_nodata=True, check_memory=True, **kwargs
+        self,
+        drop_nodata=True,
+        check_memory=True,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        **kwargs,
     ) -> pd.DataFrame:
         """
         Convert raster to DataFrame.
@@ -532,6 +564,8 @@ class TifProcessor:
         Args:
             drop_nodata: Whether to drop nodata values
             check_memory: Whether to check memory before operation (default True)
+            min_value: Optional minimum threshold for pixel values (exclusive)
+            max_value: Optional maximum threshold for pixel values (exclusive)
             **kwargs: Additional arguments
 
         Returns:
@@ -547,12 +581,16 @@ class TifProcessor:
                     band_number=kwargs.get("band_number", 1),
                     drop_nodata=drop_nodata,
                     band_names=kwargs.get("band_names", None),
+                    min_value=min_value,
+                    max_value=max_value,
                 )
             else:
                 return self._to_dataframe(
                     band_number=None,  # All bands
                     drop_nodata=drop_nodata,
                     band_names=kwargs.get("band_names", None),
+                    min_value=min_value,
+                    max_value=max_value,
                 )
         except Exception as e:
             raise ValueError(
@@ -563,13 +601,21 @@ class TifProcessor:
 
         return df
 
-    def to_geodataframe(self, check_memory=True, **kwargs) -> gpd.GeoDataFrame:
+    def to_geodataframe(
+        self,
+        check_memory=True,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        **kwargs,
+    ) -> gpd.GeoDataFrame:
         """
         Convert the processed TIF data into a GeoDataFrame, where each row represents a pixel zone.
         Each zone is defined by its bounding box, based on pixel resolution and coordinates.
 
         Args:
             check_memory: Whether to check memory before operation
+            min_value: Optional minimum threshold for pixel values (exclusive)
+            max_value: Optional maximum threshold for pixel values (exclusive)
             **kwargs: Additional arguments passed to to_dataframe()
 
         Returns:
@@ -579,7 +625,10 @@ class TifProcessor:
         if check_memory:
             self._memory_guard("conversion", threshold_percent=80.0)
 
-        df = self.to_dataframe(check_memory=False, **kwargs)
+        # Get filtered DataFrame - geometry creation happens AFTER filtering
+        df = self.to_dataframe(
+            check_memory=False, min_value=min_value, max_value=max_value, **kwargs
+        )
 
         x_res, y_res = self.resolution
 
@@ -590,7 +639,6 @@ class TifProcessor:
         ]
 
         gdf = gpd.GeoDataFrame(df, geometry=geometries, crs=self.crs)
-
         return gdf
 
     def to_dataframe_chunked(
@@ -1186,33 +1234,52 @@ class TifProcessor:
         band_number: Optional[int] = None,
         drop_nodata: bool = True,
         band_names: Optional[Union[str, List[str]]] = None,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
     ) -> pd.DataFrame:
         """
         Process TIF to DataFrame - handles both single-band and multi-band.
 
         Args:
             band_number: Specific band to read (1-indexed). If None, reads all bands.
-            drop_no Whether to drop nodata values
+            drop_nodata: Whether to drop nodata values
             band_names: Custom names for bands (multi-band only)
+            min_value: Minimum threshold for pixel values (exclusive)
+            max_value: Maximum threshold for pixel values (exclusive)
 
         Returns:
-            pd.DataFrame with lon, lat, and band value(s)
+            pd.DataFrame with lon, lat, and band value(s) filtered according to drop_nodata, min_value and max_value
         """
         with self.open_dataset() as src:
             if band_number is not None:
                 # SINGLE BAND MODE
                 band = src.read(band_number)
-                mask = self._build_data_mask(band, drop_nodata, src.nodata)
-                lons, lats = self._extract_coordinates_with_mask(mask)
-                pixel_values = (
-                    np.extract(mask, band) if mask is not None else band.flatten()
-                )
-                band_name = band_names if isinstance(band_names, str) else "pixel_value"
+                nodata_value = src.nodata if src.nodata is not None else self.nodata
 
-                return pd.DataFrame({"lon": lons, "lat": lats, band_name: pixel_values})
+                # Build mask combining nodata and value thresholds
+                mask = self._build_data_mask(
+                    band, drop_nodata, nodata_value, min_value, max_value
+                )
+
+                # Extract coordinates and values with mask
+                lons, lats = self._extract_coordinates_with_mask(mask)
+                values = np.extract(mask, band) if mask is not None else band.flatten()
+
+                band_name = (
+                    band_names
+                    if isinstance(band_names, str)
+                    else (
+                        band_names[band_number]
+                        if isinstance(band_names, list)
+                        else "pixel_value"
+                    )
+                )
+
+                return pd.DataFrame({"lon": lons, "lat": lats, band_name: values})
             else:
                 # MULTI-BAND MODE (all bands)
                 stack = src.read()
+                nodata_value = src.nodata if src.nodata is not None else self.nodata
 
                 # Auto-detect band names by mode
                 if band_names is None:
@@ -1225,9 +1292,10 @@ class TifProcessor:
                             src.descriptions[i] or f"band_{i+1}"
                             for i in range(self.count)
                         ]
-
-                # Build mask (checks ALL bands!)
-                mask = self._build_multi_band_mask(stack, drop_nodata, src.nodata)
+                # Build mask combining nodata and value thresholds
+                mask = self._build_multi_band_mask(
+                    stack, drop_nodata, nodata_value, min_value, max_value
+                )
 
                 # Create DataFrame
                 data_dict = self._bands_to_dict(stack, self.count, band_names, mask)
@@ -1424,7 +1492,7 @@ class TifProcessor:
         # Use LocalDataStore() since the temp file is always a local absolute path
         new_processor = TifProcessor(
             dataset_path=placeholder_path,
-            data_store=LocalDataStore(),  # Always use LocalDataStore for temp files
+            data_store=self.data_store,
             mode=self.mode,
         )
 
@@ -1459,6 +1527,139 @@ class TifProcessor:
         self.logger.info(f"Clipped raster saved to temporary file: {clipped_file_path}")
 
         return new_processor
+
+    def _get_basic_statistics(self, approx_ok: bool = False) -> Dict[str, Any]:
+        """
+        Compute per-band statistics (min, max, mean, std, sum, count).
+
+        Args:
+            approx_ok: Reserved for future use (kept for API compatibility). Currently unused
+                       because statistics are computed exactly through block-wise iteration.
+        """
+        cache_key = "statistics_exact"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        if approx_ok:
+            self.logger.debug(
+                "approx_ok requested for statistics, but only exact statistics are supported."
+            )
+
+        band_stats: List[Dict[str, Union[int, float, None]]] = []
+        overall = {
+            "min": None,
+            "max": None,
+            "mean": None,
+            "std": None,
+            "sum": 0.0,
+            "count": 0,
+        }
+
+        with self.open_dataset() as src:
+            nodata_value = src.nodata if src.nodata is not None else self.nodata
+            total_sum = 0.0
+            total_sq_sum = 0.0
+            total_count = 0
+
+            for band_idx in range(1, src.count + 1):
+                band_min = None
+                band_max = None
+                band_sum = 0.0
+                band_sq_sum = 0.0
+                band_count = 0
+
+                for _, window in src.block_windows(bidx=band_idx):
+                    block = src.read(band_idx, window=window, masked=False)
+
+                    if nodata_value is not None:
+                        valid_mask = block != nodata_value
+                        if not np.any(valid_mask):
+                            continue
+                        valid = block[valid_mask]
+                    else:
+                        valid = block
+
+                    valid = valid.astype(np.float64, copy=False)
+                    if valid.size == 0:
+                        continue
+
+                    block_min = float(valid.min())
+                    block_max = float(valid.max())
+                    block_sum = float(valid.sum())
+                    block_sq_sum = float(np.square(valid, dtype=np.float64).sum())
+                    block_count = int(valid.size)
+
+                    band_min = (
+                        block_min if band_min is None else min(band_min, block_min)
+                    )
+                    band_max = (
+                        block_max if band_max is None else max(band_max, block_max)
+                    )
+                    band_sum += block_sum
+                    band_sq_sum += block_sq_sum
+                    band_count += block_count
+
+                if band_count == 0:
+                    band_stats.append(
+                        {
+                            "band": band_idx,
+                            "min": None,
+                            "max": None,
+                            "mean": None,
+                            "std": None,
+                            "sum": 0.0,
+                            "count": 0,
+                        }
+                    )
+                    continue
+
+                band_mean = band_sum / band_count
+                variance = max((band_sq_sum / band_count) - band_mean**2, 0.0)
+                band_std = variance**0.5
+
+                band_stats.append(
+                    {
+                        "band": band_idx,
+                        "min": band_min,
+                        "max": band_max,
+                        "mean": band_mean,
+                        "std": band_std,
+                        "sum": band_sum,
+                        "count": band_count,
+                    }
+                )
+
+                overall["min"] = (
+                    band_min
+                    if overall["min"] is None
+                    else min(overall["min"], band_min)
+                )
+                overall["max"] = (
+                    band_max
+                    if overall["max"] is None
+                    else max(overall["max"], band_max)
+                )
+                total_sum += band_sum
+                total_sq_sum += band_sq_sum
+                total_count += band_count
+
+            if total_count > 0:
+                overall["sum"] = total_sum
+                overall["count"] = total_count
+                overall["mean"] = total_sum / total_count
+                overall_variance = max(
+                    (total_sq_sum / total_count) - overall["mean"] ** 2, 0.0
+                )
+                overall["std"] = overall_variance**0.5
+
+        result = {
+            "bands": band_stats,
+            "overall": overall,
+            "approximate": False,
+        }
+
+        self._cache[cache_key] = result
+        return result
 
     def _get_pixel_coordinates(self):
         """Helper method to generate coordinate arrays for all pixels"""
@@ -1503,40 +1704,99 @@ class TifProcessor:
 
         return x_coords.flatten(), y_coords.flatten()
 
-    def _build_data_mask(self, data, drop_nodata=True, nodata_value=None):
-        """Build a boolean mask for filtering data based on nodata values."""
-        if not drop_nodata or nodata_value is None:
+    def _build_data_mask(
+        self,
+        data: np.ndarray,
+        drop_nodata: bool = True,
+        nodata_value: Optional[float] = None,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+    ) -> Optional[np.ndarray]:
+        """
+        Build a boolean mask for filtering data based on nodata and value thresholds.
+
+        Args:
+            Data array to mask
+            drop_no Whether to drop nodata values
+            nodata_value: The nodata value to filter
+            min_value: Minimum value threshold (exclusive)
+            max_value: Maximum value threshold (exclusive)
+
+        Returns:
+            Boolean mask or None if no masking needed
+        """
+        masks = []
+
+        # Nodata mask
+        if drop_nodata and nodata_value is not None:
+            masks.append(data != nodata_value)
+
+        # Min value threshold
+        if min_value is not None:
+            masks.append(data > min_value)
+
+        # Max value threshold
+        if max_value is not None:
+            masks.append(data < max_value)
+
+        if not masks:
             return None
 
-        return data != nodata_value
+        # Combine all masks with AND logic
+        combined_mask = masks[0]
+        for mask in masks[1:]:
+            combined_mask &= mask
+
+        return combined_mask
 
     def _build_multi_band_mask(
         self,
         bands: np.ndarray,
         drop_nodata: bool = True,
         nodata_value: Optional[float] = None,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
     ) -> Optional[np.ndarray]:
         """
-        Build mask for multi-band data - drops pixels where ANY band has nodata.
+        Build mask for multi-band data.
+
+        Drops pixels where ANY band has nodata or fails value thresholds.
 
         Args:
-            bands: 3D array of shape (n_bands, height, width)
-            drop_nodata Whether to drop nodata values
+            bands: 3D array of shape (nbands, height, width)
+            drop_no Whether to drop nodata values
             nodata_value: The nodata value to check
+            min_value: Minimum value threshold (exclusive)
+            max_value: Maximum value threshold (exclusive)
 
         Returns:
             Boolean mask or None if no masking needed
         """
-        if not drop_nodata or nodata_value is None:
+        masks = []
+
+        # Nodata mask - any band has nodata
+        if drop_nodata and nodata_value is not None:
+            has_nodata = np.any(bands == nodata_value, axis=0)
+            masks.append(~has_nodata)
+
+        # Value threshold masks - any band fails threshold
+        if min_value is not None:
+            below_min = np.any(bands <= min_value, axis=0)
+            masks.append(~below_min)
+
+        if max_value is not None:
+            above_max = np.any(bands >= max_value, axis=0)
+            masks.append(~above_max)
+
+        if not masks:
             return None
 
-        # Check if ANY band has nodata at each pixel location
-        has_nodata = np.any(bands == nodata_value, axis=0)
+        # Combine all masks with AND logic
+        combined_mask = masks[0]
+        for mask in masks[1:]:
+            combined_mask &= mask
 
-        # Return True where ALL bands are valid
-        valid_mask = ~has_nodata
-
-        return valid_mask if not valid_mask.all() else None
+        return combined_mask
 
     def _bands_to_dict(self, bands, band_count, band_names, mask=None):
         """Read specified bands and return as a dictionary with optional masking."""
@@ -1785,6 +2045,277 @@ class TifProcessor:
                 )
         elif self.mode == "multi" and self.count < 2:
             raise ValueError("Multi mode requires a TIF file with 2 or more bands")
+
+    def save_to_file(
+        self,
+        output_path: Union[str, Path],
+        compress: Optional[str] = "LZW",
+        tiled: bool = True,
+        blocksize: int = 512,
+        bigtiff: Optional[str] = None,
+        predictor: Optional[int] = None,
+        num_threads: Optional[int] = None,
+        cog: bool = False,
+        overviews: Optional[List[int]] = None,
+        overview_resampling: str = "nearest",
+        **kwargs,
+    ) -> Path:
+        """
+        Export the raster to a file with optimized settings.
+
+        Parameters
+        ----------
+        output_path : Union[str, Path]
+            Output file path. Can be a local path or a path in the data store.
+        compress : Optional[str], default='LZW'
+            Compression method. Options: 'LZW', 'DEFLATE', 'ZSTD', 'JPEG',
+            'WEBP', 'NONE', etc. Use None for no compression.
+        tiled : bool, default=True
+            Whether to tile the output (recommended for performance).
+        blocksize : int, default=512
+            Block size for tiled output (must be multiple of 16).
+        bigtiff : Optional[str], default=None
+            'YES', 'NO', or 'IF_NEEDED' for files >4GB.
+        predictor : Optional[int], default=None
+            Predictor for compression (2 for horizontal differencing, 3 for floating point).
+            Recommended: 2 for integer data with LZW/DEFLATE, 3 for float data.
+        num_threads : Optional[int], default=None
+            Number of threads for compression (if supported by algorithm).
+        cog : bool, default=False
+            Create a Cloud-Optimized GeoTIFF with internal overviews.
+        overviews : Optional[List[int]], default=None
+            Overview levels (e.g., [2, 4, 8, 16]). Required if cog=True.
+        overview_resampling : str, default='nearest'
+            Resampling method for overviews: 'nearest', 'bilinear', 'cubic', 'average', etc.
+        **kwargs
+            Additional creation options to pass to rasterio.
+
+        Returns
+        -------
+        Path
+            Path to the created file.
+
+        Examples
+        --------
+        >>> # Basic save with LZW compression
+        >>> processor.save_to_file('output.tif')
+
+        >>> # High compression for integer data
+        >>> processor.save_to_file('output.tif', compress='ZSTD', predictor=2)
+
+        >>> # Create a Cloud-Optimized GeoTIFF
+        >>> processor.save_to_file('output.tif', cog=True, overviews=[2, 4, 8, 16])
+
+        >>> # Save with JPEG compression for RGB imagery
+        >>> processor.save_to_file('output.tif', compress='JPEG', photometric='YCBCR')
+        """
+        output_path = Path(output_path)
+
+        # Build creation options
+        creation_options = {}
+
+        if compress and compress.upper() != "NONE":
+            creation_options["compress"] = compress.upper()
+
+        if tiled:
+            creation_options["tiled"] = True
+            creation_options["blockxsize"] = blocksize
+            creation_options["blockysize"] = blocksize
+
+        if bigtiff:
+            creation_options["BIGTIFF"] = bigtiff
+
+        if predictor is not None:
+            creation_options["predictor"] = predictor
+
+        if num_threads is not None:
+            creation_options["NUM_THREADS"] = num_threads
+
+        # Add compression-specific options
+        if compress:
+            if compress.upper() == "DEFLATE" and "ZLEVEL" not in kwargs:
+                kwargs["ZLEVEL"] = 6  # Default compression level
+            elif compress.upper() == "ZSTD" and "ZSTD_LEVEL" not in kwargs:
+                kwargs["ZSTD_LEVEL"] = 9  # Default compression level
+            elif compress.upper() == "JPEG" and "JPEG_QUALITY" not in kwargs:
+                kwargs["JPEG_QUALITY"] = 85  # Default quality
+            elif compress.upper() == "WEBP" and "WEBP_LEVEL" not in kwargs:
+                kwargs["WEBP_LEVEL"] = 75  # Default quality
+
+        # Merge additional kwargs
+        creation_options.update(kwargs)
+
+        # Write to temporary file first (rasterio requires local file)
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            # Use open_dataset context manager - handles merged/reprojected/clipped files automatically
+            with self.open_dataset() as src:
+                profile = src.profile.copy()
+                profile.update(**creation_options)
+
+                with rasterio.open(tmp_path, "w", **profile) as dst:
+                    # Write all bands
+                    for band_idx in range(1, src.count + 1):
+                        data = src.read(band_idx)
+                        dst.write(data, band_idx)
+
+                    # Add overviews if requested
+                    if overviews or cog:
+                        if overviews is None:
+                            # Auto-generate overview levels for COG
+                            overviews = [2, 4, 8, 16]
+                        dst.build_overviews(
+                            overviews, getattr(Resampling, overview_resampling)
+                        )
+
+                    # Update tags to indicate COG if requested
+                    if cog:
+                        dst.update_tags(LAYOUT="COG")
+
+            # Write through data store
+            with open(tmp_path, "rb") as f:
+                file_content = f.read()
+
+            self.data_store.write_file(str(output_path), file_content)
+
+            self.logger.info(f"Raster saved to {output_path}")
+
+        finally:
+            # Clean up temporary file
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        return output_path
+
+    def save_array_to_file(
+        self,
+        array: np.ndarray,
+        output_path: Union[str, Path],
+        compress: Optional[str] = "LZW",
+        tiled: bool = True,
+        blocksize: int = 512,
+        crs: Optional[Any] = None,
+        transform: Optional[Any] = None,
+        nodata: Optional[float] = None,
+        **kwargs,
+    ) -> Path:
+        """
+        Save a numpy array to a raster file using metadata from this processor.
+
+        Useful for saving processed or modified raster data while preserving
+        georeferencing information.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            2D or 3D array to save. If 3D, first dimension is bands.
+        output_path : Union[str, Path]
+            Output file path. Can be a local path or a path in the data store.
+        compress : Optional[str], default='LZW'
+            Compression method.
+        tiled : bool, default=True
+            Whether to tile the output.
+        blocksize : int, default=512
+            Block size for tiled output.
+        crs : Optional[Any], default=None
+            CRS to use. If None, uses CRS from source raster.
+        transform : Optional[Any], default=None
+            Affine transform. If None, uses transform from source raster.
+        nodata : Optional[float], default=None
+            Nodata value. If None, uses nodata from source raster.
+        **kwargs
+            Additional creation options.
+
+        Returns
+        -------
+        Path
+            Path to the created file.
+
+        Examples
+        --------
+        >>> # Process data and save
+        >>> data = processor.to_dataframe()
+        >>> processed = data['value'].values.reshape(processor.height, processor.width)
+        >>> processor.save_array_to_file(processed, 'processed.tif')
+
+        >>> # Save multiple bands
+        >>> rgb = np.stack([red_band, green_band, blue_band])
+        >>> processor.save_array_to_file(rgb, 'rgb.tif', compress='JPEG')
+        """
+        output_path = Path(output_path)
+
+        # Ensure array is at least 3D
+        if array.ndim == 2:
+            array = array[np.newaxis, :, :]
+        elif array.ndim != 3:
+            raise ValueError(f"Array must be 2D or 3D, got shape {array.shape}")
+
+        num_bands = array.shape[0]
+        height = array.shape[1]
+        width = array.shape[2]
+
+        # Get metadata from source using open_dataset
+        with self.open_dataset() as src:
+            if crs is None:
+                crs = src.crs
+            if transform is None:
+                transform = src.transform
+            if nodata is None:
+                nodata = src.nodata
+            dtype = array.dtype
+
+        # Build profile
+        profile = {
+            "driver": "GTiff",
+            "height": height,
+            "width": width,
+            "count": num_bands,
+            "dtype": dtype,
+            "crs": crs,
+            "transform": transform,
+            "nodata": nodata,
+        }
+
+        # Add creation options
+        if compress and compress.upper() != "NONE":
+            profile["compress"] = compress.upper()
+        if tiled:
+            profile["tiled"] = True
+            profile["blockxsize"] = blocksize
+            profile["blockysize"] = blocksize
+
+        profile.update(kwargs)
+
+        # Write to temporary file first
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            # Write the file - write all bands
+            with rasterio.open(tmp_path, "w", **profile) as dst:
+                for band_idx in range(num_bands):
+                    dst.write(array[band_idx], band_idx + 1)
+
+            # Write through data store
+            with open(tmp_path, "rb") as f:
+                file_content = f.read()
+
+            self.data_store.write_file(str(output_path), file_content)
+
+            self.logger.info(f"Array saved to {output_path}")
+
+        finally:
+            # Clean up temporary file
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        return output_path
 
     def __enter__(self):
         return self
