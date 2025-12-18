@@ -102,7 +102,7 @@ class SnowflakeDataStore(DataStore):
         while using lazy initialization internally.
         """
         return self._get_connection()
-    
+
     def _create_connection(self):
         """Create and return a Snowflake connection."""
         conn_params = {
@@ -876,4 +876,3 @@ class SnowflakeDataStore(DataStore):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.close()
-
