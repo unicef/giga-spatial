@@ -127,7 +127,17 @@ def read_dataset(data_store: DataStore, path: str, compression: str = None, **kw
     try:
         # Check if file exists
         if not data_store.file_exists(path):
-            raise FileNotFoundError(f"File '{path}' not found in blob storage")
+            # Get storage type name for error message
+            storage_type = data_store.__class__.__name__.replace('DataStore', '').lower()
+            if storage_type == 'adls':
+                storage_name = 'Azure Blob Storage'
+            elif storage_type == 'snowflake':
+                storage_name = 'Snowflake stage'
+            elif storage_type == 'local':
+                storage_name = 'local storage'
+            else:
+                storage_name = 'storage'
+            raise FileNotFoundError(f"File '{path}' not found in {storage_name}")
 
         path_obj = Path(path)
         suffixes = path_obj.suffixes
