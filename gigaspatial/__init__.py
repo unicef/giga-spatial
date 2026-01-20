@@ -1,10 +1,12 @@
-__version__ = "0.7.4"
+__version__ = "0.7.5"
 
 import gigaspatial.core.io as io
 
 from .handlers import (
+    AdminBoundaries,
     GoogleOpenBuildingsHandler,
     MSBuildingsHandler,
+    GoogleMSBuildingsHandler,
     GHSLDataHandler,
     GigaSchoolLocationFetcher,
     GigaSchoolMeasurementsFetcher,
@@ -37,8 +39,10 @@ __all__ = [
     "io",
     "algorithms",
     # handlers
+    "AdminBoundaries",
     "GoogleOpenBuildingsHandler",
     "MSBuildingsHandler",
+    "GoogleMSBuildingsHandler",
     "GHSLDataHandler",
     "GigaSchoolLocationFetcher",
     "GigaSchoolMeasurementsFetcher",

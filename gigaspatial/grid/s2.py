@@ -1,13 +1,18 @@
 import pandas as pd
 import geopandas as gpd
+import json
+
 from s2sphere import CellId, Cell, LatLng, RegionCoverer, LatLngRect
+
 from shapely.geometry import Polygon, Point, shape
 from shapely.geometry.base import BaseGeometry
-import json
+from shapely.ops import orient
+
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Union, Iterable, Optional, Tuple, ClassVar, Literal
 import pycountry
+
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.config import config
@@ -279,20 +284,49 @@ class S2Cells(BaseModel):
 
     def to_geoms(self) -> List[Polygon]:
         """Convert cells to shapely Polygon geometries."""
-        self.logger.info(
-            f"Converting {len(self.cells)} cells to shapely Polygon geometries."
-        )
-
+        self.logger.info(f"Converting {len(self.cells)} cells to geometries.")
         polygons = []
+        invalid_count = 0
+
         for cell_id in self.cells:
-            cell = Cell(CellId(cell_id))
+            c_id = CellId(int(cell_id))
+            cell = Cell(c_id)
+
             vertices = []
             for i in range(4):
                 vertex = cell.get_vertex(i)
                 lat_lng = LatLng.from_point(vertex)
                 vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))
-            vertices.append(vertices[0])  # Close the polygon
-            polygons.append(Polygon(vertices))
+
+            vertices.append(vertices[0])
+
+            try:
+                poly = Polygon(vertices)
+
+                # Enforce CCW orientation
+                poly = orient(poly, sign=1.0)
+
+                # Fix projection artifacts
+                if not poly.is_valid:
+                    invalid_count += 1
+                    poly = poly.buffer(0)
+
+                # Verify after repair
+                if not poly.is_valid:
+                    self.logger.warning(
+                        f"Cell {c_id.to_token()} still invalid after buffer(0)"
+                    )
+                    continue
+
+                polygons.append(poly)
+
+            except Exception as e:
+                self.logger.error(f"Failed to convert cell {c_id.to_token()}: {e}")
+
+        if invalid_count > 0:
+            self.logger.info(
+                f"Repaired {invalid_count} invalid geometries via buffer(0)"
+            )
 
         return polygons
 

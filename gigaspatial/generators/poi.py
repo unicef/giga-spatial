@@ -4,16 +4,22 @@ from pydantic.dataclasses import dataclass, Field
 
 import geopandas as gpd
 import pandas as pd
+import numpy as np
 import logging
+import warnings
 
+from scipy.spatial import cKDTree
+
+from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.writers import write_dataset
-from gigaspatial.config import config as global_config
+
 from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
 from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
 from gigaspatial.handlers.ghsl import GHSLDataHandler
 from gigaspatial.handlers.worldpop import WPPopulationHandler
+
 from gigaspatial.processing.geo import (
     convert_to_geodataframe,
     buffer_geodataframe,
@@ -23,7 +29,7 @@ from gigaspatial.processing.geo import (
     get_centroids,
 )
 from gigaspatial.processing.tif_processor import TifProcessor
-from scipy.spatial import cKDTree
+from gigaspatial.processing.buildings_engine import GoogleMSBuildingsEngine
 
 
 @dataclass
@@ -125,6 +131,14 @@ class PoiViewGenerator:
             ValueError: If points format is not supported or coordinate columns cannot be detected
         """
         if isinstance(points, gpd.GeoDataFrame):
+            # Check for duplicate indices and reset if found
+            if points.index.duplicated().any():
+                warnings.warn(
+                    "Duplicate indices detected in GeoDataFrame. Resetting index to ensure unique indices.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                points = points.reset_index(drop=True)
             # Convert geometry to lat/lon if needed
             if points.geometry.name == "geometry":
                 points = points.copy()
@@ -148,12 +162,20 @@ class PoiViewGenerator:
         elif isinstance(points, pd.DataFrame):
             # Detect and standardize coordinate columns
             try:
+                # Check for duplicate indices and reset if found
+                if points.index.duplicated().any():
+                    warnings.warn(
+                        "Duplicate indices detected in DataFrame. Resetting index to ensure unique indices.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    points = points.reset_index(drop=True)
                 lat_col, lon_col = detect_coordinate_columns(points)
                 points = points.copy()
                 points["latitude"] = points[lat_col]
                 points["longitude"] = points[lon_col]
                 if poi_id_column not in points.columns:
-                    points["poi_id"] = [f"poi_{i}" for i in range(len(points))]
+                    points[poi_id_column] = [f"poi_{i}" for i in range(len(points))]
                 else:
                     points = points.rename(
                         columns={poi_id_column: "poi_id"},
@@ -187,6 +209,14 @@ class PoiViewGenerator:
             elif isinstance(points[0], dict):
                 # List of dictionaries
                 df = pd.DataFrame(points)
+                # Check for duplicate indices and reset if found
+                if df.index.duplicated().any():
+                    warnings.warn(
+                        "Duplicate indices detected in DataFrame created from dictionary list. Resetting index to ensure unique indices.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    df = df.reset_index(drop=True)
                 try:
                     lat_col, lon_col = detect_coordinate_columns(df)
                     df["latitude"] = df[lat_col]
@@ -266,7 +296,7 @@ class PoiViewGenerator:
     def map_nearest_points(
         self,
         points_df: Union[pd.DataFrame, gpd.GeoDataFrame],
-        id_column: str,
+        id_column: Optional[str] = None,
         lat_column: Optional[str] = None,
         lon_column: Optional[str] = None,
         output_prefix: str = "nearest",
@@ -282,8 +312,9 @@ class PoiViewGenerator:
             points_df (Union[pd.DataFrame, gpd.GeoDataFrame]):
                 DataFrame containing points to find nearest neighbors from.
                 Must have latitude and longitude columns or point geometries.
-            id_column (str):
+            id_column (str, optional):
                 Name of the column containing unique identifiers for each point.
+                If None, the index of points_df will be used instead.
             lat_column (str, optional):
                 Name of the latitude column in points_df. If None, will attempt to detect it
                 or extract from geometry if points_df is a GeoDataFrame.
@@ -336,7 +367,9 @@ class PoiViewGenerator:
                 raise ValueError(f"Could not detect coordinate columns: {str(e)}")
 
         # Validate required columns
-        required_columns = [lat_column, lon_column, id_column]
+        required_columns = [lat_column, lon_column]
+        if id_column is not None:
+            required_columns.append(id_column)
         missing_columns = [
             col for col in required_columns if col not in points_df.columns
         ]
@@ -359,14 +392,20 @@ class PoiViewGenerator:
             lon2=df_nearest[lon_column],
         )
         # Create a temporary DataFrame to hold the results for merging
+        # Use id_column if provided, otherwise use index
+        if id_column is not None:
+            nearest_ids = points_df.iloc[idx][id_column].values
+        else:
+            nearest_ids = points_df.index[idx].values
+
         temp_result_df = pd.DataFrame(
             {
                 "poi_id": points_df_poi["poi_id"],
-                f"{output_prefix}_id": points_df.iloc[idx][id_column].values,
+                f"{output_prefix}_id": nearest_ids,
                 f"{output_prefix}_distance": dist,
             }
         )
-        # self._update_view(temp_result_df) # Removed direct view update
+
         self.logger.info(
             f"Nearest points mapping complete with prefix '{output_prefix}'"
         )
@@ -1030,3 +1069,270 @@ class PoiViewGenerator:
             "uncovered_pois": (~poi_within).sum(),
         }
         return coverage_stats
+
+    def find_nearest_buildings(
+        self,
+        country: str,
+        search_radius: float = 1000,
+        source_filter: Literal["google", "microsoft"] = None,
+        find_nearest_globally: bool = False,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """
+        Find the nearest building to each POI within a specified search radius.
+
+        This method processes building data by:
+        1. Filtering to only building tiles that intersect POI buffers (partitioned datasets)
+        2. Finding the nearest building candidate per POI (nearest-neighbor search)
+        3. Computing final POI-to-building distances in **meters** using haversine distance
+
+        Parameters
+        ----------
+        country : str
+            Country code for which to load building data.
+
+        search_radius : float, default=1000
+            Search radius in meters. Only buildings within this distance from a POI
+            will be considered. For better performance, use the smallest radius
+            that meets your requirements.
+
+        source_filter : {'google', 'microsoft'}, optional
+            Filter buildings by data source. If None, uses buildings from all sources.
+
+        find_nearest_globally : bool, default=False
+            If True, finds the true nearest building regardless of distance.
+            This overrides search_radius and may be significantly slower.
+            When False, uses the efficient radius-limited search.
+
+        **kwargs : dict
+            Additional arguments passed to the building data handler.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with columns:
+            - poi_id: Original POI identifier
+            - nearest_building_distance_m: Distance to nearest building in meters.
+            NaN if no building found within the search constraints.
+            - building_within_{search_radius}m: Boolean indicating if a building
+            was found within the specified search_radius.
+
+        Notes
+        -----
+        - Distances are computed in meters using haversine (great-circle) distance via
+        `calculate_distance`.
+        - Nearest-neighbor candidate selection is performed using coordinates extracted
+        from geometries.
+        - For countries with a single building file (no partitioning),
+        the search is performed globally regardless of search_radius.
+        - For partitioned countries, search_radius optimizes performance by
+        filtering which tiles to process.
+
+        Examples
+        --------
+        >>> # Find buildings within 350m of POIs
+        >>> result = poi_gdf.find_nearest_buildings("USA", search_radius=350)
+
+        >>> # Find nearest building globally (may be slow for partitioned countries)
+        >>> result = poi_gdf.find_nearest_buildings("USA", find_nearest_globally=True)
+        """
+
+        # ---------------------------------------------------------
+        # 1. PARAMETER VALIDATION AND LOGGING
+        # ---------------------------------------------------------
+
+        if find_nearest_globally:
+            self.logger.info(
+                "Global nearest building search enabled. "
+                "This may be slower than radius-limited search."
+            )
+            return self._find_nearest_building_globally(
+                country=country, source_filter=source_filter, **kwargs
+            )
+
+        # Warn for large search radii
+        if search_radius > 5000:
+            self.logger.warning(
+                f"Large search radius ({search_radius}m) may impact performance. "
+                "Consider using progressive expansion for better efficiency."
+            )
+
+        self.logger.info(
+            f"Mapping Google-Microsoft Buildings data to POIs within {search_radius}m"
+        )
+
+        # ---------------------------------------------------------
+        # 2. LOAD BUILDING FILES
+        # ---------------------------------------------------------
+
+        from gigaspatial.handlers.google_ms_combined_buildings import (
+            GoogleMSBuildingsHandler,
+        )
+
+        handler = GoogleMSBuildingsHandler(partition_strategy="s2_grid")
+
+        if self.config.ensure_available:
+            if not handler.ensure_data_available(country, **kwargs):
+                raise RuntimeError("Could not ensure data availability for loading")
+
+        building_files = handler.reader.resolve_source_paths(country, **kwargs)
+
+        result = GoogleMSBuildingsEngine.nearest_buildings_to_pois(
+            handler=handler,
+            building_files=building_files,
+            pois_gdf=self.points_gdf,
+            source_filter=source_filter,
+            search_radius_m=search_radius,
+            logger=self.logger,
+        )
+
+        distances_clean = result.distances_m.replace(np.inf, np.nan)
+        result_df = pd.DataFrame(
+            {
+                "poi_id": result.distances_m.index,
+                "nearest_building_distance_m": distances_clean,
+                f"building_within_{search_radius}m": result.distances_m
+                <= search_radius,
+            }
+        )
+
+        # Update the view and return
+        self._update_view(result_df)
+        return self.view
+
+    def _find_nearest_building_globally(
+        self,
+        country: str,
+        source_filter: Literal["google", "microsoft"] = None,
+        max_global_search: float = 10000,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """Find the true nearest building for each POI using progressive expansion."""
+
+        self.logger.info("Starting global nearest building search...")
+
+        from gigaspatial.handlers.google_ms_combined_buildings import (
+            GoogleMSBuildingsHandler,
+        )
+
+        handler = GoogleMSBuildingsHandler(partition_strategy="s2_grid")
+        building_files = handler.reader.resolve_source_paths(country, **kwargs)
+
+        # Single file: use optimized path
+        if len(building_files) == 1:
+            self.logger.info("Single file country: using single-file optimization.")
+
+            result = GoogleMSBuildingsEngine.nearest_buildings_to_pois(
+                handler=handler,
+                building_files=building_files,
+                pois_gdf=self.points_gdf,
+                source_filter=source_filter,
+                search_radius_m=max_global_search,
+                logger=self.logger,
+            )
+
+            result_df = pd.DataFrame(
+                {
+                    "poi_id": result.distances_m.index,
+                    "nearest_building_distance_m": result.distances_m.replace(
+                        np.inf, np.nan
+                    ),
+                    f"building_within_{max_global_search}m": result.distances_m
+                    <= max_global_search,
+                }
+            )
+
+            found_count = result_df["nearest_building_distance_m"].notna().sum()
+            self.logger.info(
+                f"Single file search complete. Found {found_count}/{len(result_df)} POIs."
+            )
+
+            self._update_view(result_df)
+            return self.view
+
+        # Partitioned case: progressive radius expansion
+        self.logger.info(
+            f"Partitioned country: progressive expansion up to {max_global_search}m"
+        )
+
+        radii = [350, 1000, 2500, 5000, max_global_search]
+
+        # FIX: Track POIs that still need searching (use set for efficiency)
+        remaining_poi_ids = set(self.points_gdf.poi_id)
+        global_results = pd.Series(np.inf, index=self.points_gdf.poi_id, dtype=float)
+
+        # FIX: Track processed tiles to avoid re-scanning
+        processed_tiles = set()
+
+        for radius in radii:
+            if not remaining_poi_ids:
+                self.logger.info("All POIs found buildings. Stopping early.")
+                break
+
+            self.logger.info(
+                f"Searching radius {radius}m for {len(remaining_poi_ids)} POIs"
+            )
+
+            # Create jobs for this radius
+            jobs = GoogleMSBuildingsEngine.create_partitioned_jobs_for_pois(
+                self.points_gdf,
+                building_files,
+                search_radius_m=radius,
+            )
+
+            # FIX: Only process tiles we haven't seen yet
+            new_jobs = [(f, pois) for f, pois in jobs if f not in processed_tiles]
+
+            if not new_jobs:
+                self.logger.debug(f"No new tiles at radius {radius}m")
+                continue
+
+            # Process new tiles (don't update the view inside the engine)
+            temp_result = GoogleMSBuildingsEngine.nearest_buildings_to_pois(
+                handler=handler,
+                building_files=[f for f, _ in new_jobs],
+                pois_gdf=self.points_gdf,
+                source_filter=source_filter,
+                search_radius_m=radius,
+                logger=self.logger,
+            )
+            temp_min_dists = temp_result.distances_m
+
+            # Update global results and track found POIs
+            found_in_this_iteration = set()
+
+            for poi_id in remaining_poi_ids:
+                dist = temp_min_dists[poi_id]
+                if dist < global_results[poi_id]:
+                    global_results[poi_id] = dist
+                    if dist <= radius:  # Found within this radius
+                        found_in_this_iteration.add(poi_id)
+
+            # FIX: Remove found POIs from remaining set
+            remaining_poi_ids -= found_in_this_iteration
+
+            # Mark these tiles as processed
+            processed_tiles.update(f for f, _ in new_jobs)
+
+            self.logger.info(
+                f"Found {len(found_in_this_iteration)} POIs at radius {radius}m. "
+                f"{len(remaining_poi_ids)} remaining."
+            )
+
+        # Create final results
+        result_df = pd.DataFrame(
+            {
+                "poi_id": global_results.index,
+                "nearest_building_distance_m": global_results.replace(np.inf, np.nan),
+                f"building_within_{max_global_search}m": global_results
+                <= max_global_search,
+            }
+        )
+
+        found_count = result_df["nearest_building_distance_m"].notna().sum()
+        self.logger.info(
+            f"Global search complete. Found buildings for {found_count}/{len(result_df)} POIs."
+        )
+
+        self._update_view(result_df)
+        return self.view

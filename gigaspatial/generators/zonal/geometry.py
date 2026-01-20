@@ -14,6 +14,7 @@ from gigaspatial.handlers.ghsl import GHSLDataHandler
 from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
 from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
 from gigaspatial.handlers.worldpop import WPPopulationHandler
+from gigaspatial.processing.buildings_engine import GoogleMSBuildingsEngine
 from gigaspatial.generators.zonal.base import (
     ZonalViewGenerator,
     ZonalViewGeneratorConfig,
@@ -256,7 +257,13 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             The method automatically determines which GHSL tiles intersect with the zones
             and loads only the necessary data for efficient processing.
         """
-        handler = handler or GHSLDataHandler(data_store=self.data_store, **kwargs)
+        coord_system = kwargs.pop("coord_system", None)
+        if not coord_system:
+            coord_system = 4326 if self.zone_data_crs == "EPSG:4326" else 54009
+
+        handler = handler or GHSLDataHandler(
+            data_store=self.data_store, coord_system=coord_system, **kwargs
+        )
         self.logger.info(
             f"Mapping {handler.config.product} data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
         )
@@ -448,6 +455,151 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.add_variable_to_view(count_result, "ms_buildings_count")
         self.add_variable_to_view(area_result, "ms_buildings_area_in_meters")
 
+        return self.view
+
+    def map_buildings(
+        self,
+        country: str,
+        source_filter: Literal["google", "microsoft"] = None,
+        output_column: str = "building_count",
+        **kwargs,
+    ):
+        """Map Google-Microsoft combined buildings data to zones.
+
+        Efficiently counts buildings within each zone by leveraging spatial indexing
+        and S2 grid partitioning. For partitioned datasets, only loads building tiles
+        that intersect with zones, significantly improving performance for large countries.
+
+        The method uses Shapely's STRtree for fast spatial queries, enabling efficient
+        intersection testing between millions of buildings and zone geometries.
+
+        Parameters
+        ----------
+        country : str
+            ISO 3166-1 alpha-3 country code (e.g., 'USA', 'BRA', 'IND').
+            Must match the country codes used in the building dataset.
+
+        source_filter : {'google', 'microsoft'}, optional
+            Filter buildings by data source. Options:
+            - 'google': Only count buildings from Google Open Buildings
+            - 'microsoft': Only count buildings from Microsoft Global Buildings
+            - None (default): Count buildings from both sources
+
+        output_column : str, default='building_count'
+            Name of the column to add to the view containing building counts.
+            Must be a valid pandas column name.
+
+        **kwargs : dict
+            Additional keyword arguments passed to GoogleMSBuildingsHandler.
+            Common options include data versioning or custom data paths.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated view DataFrame with building counts added.
+            The DataFrame includes all original zone columns plus the new
+            output_column containing integer counts of buildings per zone.
+
+        Notes
+        -----
+        Algorithm Overview:
+        1. **Single-file countries**: Processes all zones against the entire dataset
+        in one pass (optimal for small countries or non-partitioned data).
+
+        2. **Partitioned countries**: Uses S2 grid spatial index to:
+        - Identify which S2 cells intersect with zones
+        - Load only intersecting building tiles (not entire country)
+        - Process each tile independently for memory efficiency
+        - Accumulate counts across tiles
+
+        Performance Characteristics:
+        - For partitioned data with N zones and M S2 tiles:
+        * Only loads ~sqrt(M) tiles that intersect zones (huge savings)
+        * Uses STRtree with O(log k) query time per zone
+        * Memory usage: O(max_buildings_per_tile + N)
+
+        - For single-file data:
+        * Loads entire building dataset once
+        * Single STRtree query for all zones (vectorized)
+
+        The spatial query uses the 'intersects' predicate, meaning a building is
+        counted if its polygon boundary touches or overlaps with a zone's boundary.
+        Buildings on zone borders may be counted in multiple zones.
+
+        Examples
+        --------
+        Count all buildings in H3 hexagons across the USA:
+
+        >>> h3_zones = H3ViewGenerator(resolution=8, bbox=usa_bbox)
+        >>> h3_zones.map_buildings("USA")
+        >>> print(h3_zones.view[['zone_id', 'building_count']].head())
+        zone_id  building_count
+        0  88...01            1250
+        1  88...02             890
+        2  88...03               0
+
+        Count only Google buildings with custom column name:
+
+        >>> zones.map_buildings(
+        ...     "BRA",
+        ...     source_filter="google",
+        ...     output_column="google_building_count"
+        ... )
+
+        Compare building counts from different sources:
+
+        >>> zones.map_buildings("IND", source_filter="google",
+        ...                     output_column="google_buildings")
+        >>> zones.map_buildings("IND", source_filter="microsoft",
+        ...                     output_column="ms_buildings")
+        >>> zones.view['total_buildings'] = (
+        ...     zones.view['google_buildings'] + zones.view['ms_buildings']
+        ... )
+
+        See Also
+        --------
+        map_google_buildings : Map Google Open Buildings data only
+        map_ms_buildings : Map Microsoft Global Buildings data only
+        GoogleMSBuildingsHandler : Handler for combined building datasets
+
+        References
+        ----------
+        .. [1] Google Open Buildings: https://sites.research.google/open-buildings/
+        .. [2] Microsoft Global Buildings: https://github.com/microsoft/GlobalMLBuildingFootprints
+        """
+
+        self.logger.info(f"Mapping Google-Microsoft Buildings data to zones")
+
+        from gigaspatial.handlers.google_ms_combined_buildings import (
+            GoogleMSBuildingsHandler,
+        )
+
+        handler = GoogleMSBuildingsHandler(partition_strategy="s2_grid")
+
+        if self.config.ensure_available:
+            if not handler.ensure_data_available(country, **kwargs):
+                raise RuntimeError("Could not ensure data availability for loading")
+
+        building_files = handler.reader.resolve_source_paths(country, **kwargs)
+
+        result = GoogleMSBuildingsEngine.count_buildings_in_zones(
+            handler=handler,
+            building_files=building_files,
+            zones_gdf=self.zone_gdf,
+            source_filter=source_filter,
+            logger=self.logger,
+        )
+
+        # Log summary
+        total_buildings = result.counts.sum()
+        zones_with_buildings = (result.counts > 0).sum()
+        self.logger.info(
+            f"Mapping complete: {total_buildings:,.0f} buildings across "
+            f"{zones_with_buildings}/{len(result.counts)} zones"
+        )
+
+        # Update the view and return
+        self.add_variable_to_view(result.counts, output_column)
         return self.view
 
     def map_ghsl_pop(

@@ -17,6 +17,12 @@ from gigaspatial.handlers.microsoft_global_buildings import (
     MSBuildingsReader,
     MSBuildingsHandler,
 )
+from gigaspatial.handlers.google_ms_combined_buildings import (
+    GoogleMSBuildingsConfig,
+    GoogleMSBuildingsDownloader,
+    GoogleMSBuildingsReader,
+    GoogleMSBuildingsHandler,
+)
 from gigaspatial.handlers.osm import OSMLocationFetcher
 from gigaspatial.handlers.overture import OvertureAmenityFetcher
 from gigaspatial.handlers.mapbox_image import MapboxImageDownloader

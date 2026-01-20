@@ -12,6 +12,61 @@ from gigaspatial.config import config
 LOGGER = config.get_logger("GigaSpatialProcessing")
 
 
+def estimate_utm_crs_with_fallback(
+    gdf: gpd.GeoDataFrame,
+    logger=LOGGER,
+    fallback_crs: str = "EPSG:3857",
+):
+    """
+    Robustly estimate an appropriate UTM CRS for a GeoDataFrame.
+
+    This helper wraps ``GeoDataFrame.estimate_utm_crs`` and falls back to a
+    configurable CRS (default: Web Mercator) when estimation fails or returns
+    ``None``. It centralises the common pattern used across the codebase.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Input GeoDataFrame used to estimate a suitable UTM CRS.
+    logger :
+        Optional logger used to emit warnings when falling back. If ``None``,
+        no warnings are logged.
+    fallback_crs : str, optional
+        CRS to use when UTM estimation fails or returns ``None``.
+
+    Returns
+    -------
+    Any
+        A CRS object or string suitable for ``GeoDataFrame.to_crs``.
+    """
+    if gdf is None or gdf.empty:
+        if logger is not None:
+            logger.warning(
+                "UTM CRS estimation requested for an empty GeoDataFrame; "
+                f"falling back to {fallback_crs}."
+            )
+        return fallback_crs
+
+    try:
+        utm_crs = gdf.estimate_utm_crs()
+    except Exception as e:
+        if logger is not None:
+            logger.warning(
+                f"UTM CRS estimation failed, using fallback CRS {fallback_crs}. "
+                f"Error: {e}"
+            )
+        utm_crs = None
+
+    if not utm_crs:
+        if logger is not None:
+            logger.warning(
+                f"UTM CRS estimation returned None, using fallback CRS {fallback_crs}."
+            )
+        utm_crs = fallback_crs
+
+    return utm_crs
+
+
 def detect_coordinate_columns(
     data, lat_keywords=None, lon_keywords=None, case_sensitive=False
 ) -> Tuple[str, str]:

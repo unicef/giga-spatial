@@ -9,6 +9,7 @@ import networkx as nx
 
 from gigaspatial.processing.geo import (
     convert_to_geodataframe,
+    estimate_utm_crs_with_fallback,
 )
 from gigaspatial.config import config
 
@@ -58,20 +59,16 @@ def build_distance_graph(
 
     def get_utm_coordinates(df: Union[pd.DataFrame, gpd.GeoDataFrame]) -> np.ndarray:
         """Extract coordinates as numpy array in UTM projection."""
-        if isinstance(df, pd.DataFrame):
+        if isinstance(df, pd.DataFrame) and not isinstance(df, gpd.GeoDataFrame):
             gdf = convert_to_geodataframe(df)
         else:
             gdf = df.copy()
 
-        # More robust UTM CRS estimation
-        try:
-            gdf_utm = gdf.to_crs(gdf.estimate_utm_crs())
-        except Exception as e:
-            if verbose:
-                LOGGER.warning(
-                    f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
-                )
-            gdf_utm = gdf.to_crs("EPSG:3857")  # Fallback to Web Mercator
+        # More robust UTM CRS estimation with shared helper
+        utm_crs = estimate_utm_crs_with_fallback(
+            gdf, logger=LOGGER if verbose else None
+        )
+        gdf_utm = gdf.to_crs(utm_crs)
 
         return gdf_utm.get_coordinates().to_numpy()
 
@@ -93,6 +90,12 @@ def build_distance_graph(
     # Use the provided max_k parameter, but don't exceed available points
     k_to_use = min(max_k, len(right_coords))
 
+    if exclude_same_index:
+        # Request one extra neighbor to account for self-match removal
+        k_to_query = min(k_to_use + 1, len(right_coords))
+    else:
+        k_to_query = k_to_use
+
     if verbose and k_to_use < max_k:
         LOGGER.info(
             f"Note: max_k ({max_k}) reduced to {k_to_use} (number of available points)"
@@ -101,7 +104,7 @@ def build_distance_graph(
     # Note: Distance calculations here are based on Euclidean distance in UTM projection.
     # This can introduce errors up to ~50 cm for a 50 meter threshold, especially near the poles where distortion increases.
     distances, indices = kdtree.query(
-        left_coords, k=k_to_use, distance_upper_bound=distance_threshold
+        left_coords, k=k_to_query, distance_upper_bound=distance_threshold
     )
 
     # Handle single k case (when k_to_use = 1, results are 1D)

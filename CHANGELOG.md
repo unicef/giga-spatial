@@ -2,6 +2,77 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.7.5] - 2026-01-20
+
+### Added
+
+-   **Google-Microsoft Combined Buildings Handler (VIDA)**
+    -   Added `GoogleMSBuildingsHandler` (`gigaspatial/handlers/google_ms_combined_buildings.py`) to access the merged Google V3 Open Buildings (1.8B footprints) and Microsoft Global Building Footprints (1.24B footprints) dataset hosted by VIDA/source.coop.
+    -   Supports multiple data formats: GeoParquet (default), FlatGeobuf, and PMTiles.
+    -   Flexible partition strategies: country-level (single file per country) or S2 grid partitioning (tiled by S2 cells for large countries).
+    -   Download strategies: S3 (default) or HTTPS for cloud-native access.
+    -   Source filtering: filter buildings by data source (`google`, `microsoft`, or both).
+    -   Integrated with `BaseHandler` architecture for consistent data lifecycle management (download, cache, read).
+    -   Automatic partition discovery: resolves relevant S2 tiles or country files based on query geometry.
+    -   Streaming support: can stream GeoParquet row groups directly from cloud storage without full download.
+
+-   **Shared Building-Processing Engine**
+    -   Added `GoogleMSBuildingsEngine` (`gigaspatial/processing/buildings_engine.py`) as a reusable, high-performance building workflow engine.
+    -   Encapsulates common building-processing logic (S2 tile job creation, per-tile processing loops, and result accumulation) previously duplicated across view generators.
+    -   Provides two main entrypoints:
+        -   `count_buildings_in_zones()`: Efficiently counts buildings intersecting zones using `STRtree` spatial indexing.
+        -   `nearest_buildings_to_pois()`: Computes nearest-building distances for POIs using KD-tree nearest-neighbor search with haversine distance calculation.
+    -   Handles both single-file countries (processes entire dataset) and partitioned countries (loads only intersecting S2 tiles).
+    -   Supports source filtering (`google`, `microsoft`, or both) at the engine level.
+    -   Designed for reuse: both zonal and POI view generators now delegate to this engine, reducing code duplication and ensuring consistent performance optimizations.
+
+-   **High-Performance Buildings Mapping for View Generators**
+    -   Added `GeometryBasedZonalViewGenerator.map_buildings()` to efficiently count buildings per zone using the combined dataset.
+        -   Uses S2 grid partitioning to load only intersecting building tiles for partitioned countries.
+        -   Leverages `STRtree` spatial indexing for fast intersection queries between buildings and zones.
+        -   Supports source filtering to count buildings from specific providers.
+    -   Added `PoiViewGenerator.find_nearest_buildings()` to efficiently compute nearest-building distances for POIs.
+        -   Uses S2 grid partitioning with configurable search radius to limit tile processing.
+        -   Implements KD-tree nearest-neighbor search for fast candidate selection.
+        -   Computes final distances using haversine (great-circle) distance in meters.
+        -   Supports global nearest-building search with progressive radius expansion for partitioned countries.
+        -   Returns distance metrics and boolean flags indicating buildings within specified search radius.
+
+-   **Geo Processing Utilities**
+    -   Added `estimate_utm_crs_with_fallback()` (`gigaspatial/processing/geo.py`) as a robust utility for UTM CRS estimation.
+        -   Wraps `GeoDataFrame.estimate_utm_crs()` with comprehensive error handling and fallback logic.
+        -   Automatically falls back to a configurable CRS (default: Web Mercator EPSG:3857) when UTM estimation fails or returns `None`.
+        -   Handles edge cases: empty GeoDataFrames, estimation exceptions, and `None` return values.
+        -   Centralizes the common UTM estimation pattern used across the codebase, reducing duplication.
+        -   Provides optional logger parameter for warning messages when fallbacks occur.
+
+### Fixed
+
+-   **Spatial Matching Graph Construction (`build_distance_graph`)**
+    -   Fixed critical bug where `exclude_same_index=True` returned fewer matches than requested when querying same dataframe against itself.
+    -   Previously, when excluding self-matches, the function would query for `max_k` neighbors and then filter out self-matches, resulting in only `max_k - 1` actual matches returned.
+    -   Most critically, `max_k=1` with `exclude_same_index=True` would always return zero matches (since the only neighbor found was the point itself).
+    -   Now queries for `max_k + 1` neighbors when `exclude_same_index=True`, ensuring `max_k` valid matches are returned after self-match removal.
+    -   Affects `build_distance_graph()` in spatial matching workflows where the same dataframe is matched against itself.
+
+- **S2 cell polygon generation (`to_geoms`)**
+    -   Now conversion of S2 cells to Shapely polygons enforces a consistent counter‑clockwise winding order using  shapely.geometry.polygon.orient() , avoiding accidental orientation flips or hole-like polygons when rendering or exporting.
+    -   Added validation and automatic repair of invalid polygons via  buffer(0)  to handle rare projection-related self-intersections, logging the number of repaired cells and skipping any that remain invalid after repair.
+    -   Improved logging for debugging by including the S2 token in warnings and errors when a cell fails conversion or cannot be repaired.
+
+### Performance
+
+-   **Significant speedups for buildings enrichment**
+    -   Zonal building counts and POI nearest-building mapping are now substantially faster than mapping Google and Microsoft buildings separately, achieving performance gains through:
+        -   **Single combined dataset**: Eliminates redundant I/O and repeated processing of overlapping building footprints from separate sources.
+        -   **S2 tile filtering**: For partitioned countries, loads only intersecting S2 building tiles instead of scanning entire country files, dramatically reducing memory usage and processing time.
+        -   **Spatial indexing**: Uses `STRtree` for O(log k) zone intersection queries and KD-tree for fast nearest-neighbor search, replacing slower sequential scans.
+        -   **Shared engine architecture**: Centralized optimizations benefit both zonal and POI workflows, ensuring consistent performance improvements across use cases.
+
+### Dependencies
+
+-   Added `s3fs>=2024.12.0` as a new dependency
+
 ## [v0.7.4] - 2025-11-24
 
 ### Added

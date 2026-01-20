@@ -364,6 +364,7 @@ class BaseHandlerReader(ABC):
         read_function: Callable = read_dataset,
         show_progress: bool = True,
         progress_desc: Optional[str] = None,
+        **kwargs,
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
         Load and concatenate tabular data from multiple files.
@@ -389,7 +390,7 @@ class BaseHandlerReader(ABC):
             )
 
         for file_path in iterator:
-            all_data.append(read_function(self.data_store, file_path))
+            all_data.append(read_function(self.data_store, file_path, **kwargs))
 
         if not all_data:
             return pd.DataFrame()

@@ -97,7 +97,7 @@ class GHSLDataConfig(BaseHandlerConfig):
         try:
             # Try with SSL verification first
             try:
-                self.logger.info("Attempting download with SSL verification")
+                self.logger.info("Attempting download GHSL tile grid with SSL verification")
                 # Set up SSL context before any requests
                 ssl._create_default_https_context = ssl._create_unverified_context
                 self.tiles_gdf = gpd.read_file(self.TILES_URL)
@@ -109,7 +109,7 @@ class GHSLDataConfig(BaseHandlerConfig):
                     f"Geopandas download with SSL verification failed ({type(e).__name__}): {e}"
                 )
                 self.logger.warning(
-                    "Retrying download with requests and without SSL verification"
+                    "Retrying GHSL tile grid download with requests and without SSL verification"
                 )
 
                 # Download tiles with requests
@@ -262,6 +262,12 @@ class GHSLDataConfig(BaseHandlerConfig):
         )
 
         return tile_path
+    
+    def extract_search_geometry(self, source, **kwargs):
+        source_crs = kwargs.pop("crs", None)
+        if not source_crs:
+            source_crs = "EPSG:4326" if self.coord_system==4326 else "ESRI:54009"
+        return super().extract_search_geometry(source, crs=source_crs, **kwargs)
 
     def compute_dataset_url(self, tile_id=None) -> str:
         """Compute the download URL for a GHSL dataset."""

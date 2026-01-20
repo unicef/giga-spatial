@@ -94,6 +94,7 @@ class Config(BaseSettings):
             "google_open_buildings": "google_open_buildings",
             "mapbox_image": "mapbox_images",
             "microsoft_global_buildings": "microsoft_global_buildings",
+            "google_microsoft_buildings": "google_microsoft_buildings",
             "ookla_speedtest": "ookla",
             "srtm": "srtm",
             "worldpop": "worldpop",
