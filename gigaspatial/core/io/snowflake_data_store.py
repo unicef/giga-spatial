@@ -5,8 +5,8 @@ import os
 import io
 import contextlib
 import logging
+import threading
 from typing import Union, Optional, List, Generator, Tuple
-from pathlib import Path
 
 from .data_store import DataStore
 from gigaspatial.config import config
@@ -40,12 +40,34 @@ class SnowflakeDataStore(DataStore):
         :param database: Snowflake database name
         :param schema: Snowflake schema name
         :param stage_name: Name of the Snowflake stage to use for file storage
+
+        Note: Connection is created lazily to support multiprocessing. The connection
+        parameters are stored (all picklable), and the actual connection is created
+        on first use. This allows the DataStore to be pickled and sent to worker
+        processes, where each process creates its own connection.
         """
-        if not all([account, user, password, warehouse, database, schema, stage_name]):
-            raise ValueError(
-                "Snowflake connection parameters (account, user, password, warehouse, "
-                "database, schema, stage_name) must be provided via config or constructor."
-            )
+        # Check if running in SPCS mode (user/password not required)
+        import os
+
+        spcs_run = os.getenv("SPCS_RUN", "false").lower() == "true"
+
+        if spcs_run:
+            # SPCS mode: user/password not required, but other params are
+            if not all([account, warehouse, database, schema, stage_name]):
+                raise ValueError(
+                    "Snowflake connection parameters (account, warehouse, "
+                    "database, schema, stage_name) must be provided via config or constructor. "
+                    "User/password not required in SPCS mode."
+                )
+        else:
+            # Non-SPCS mode: all parameters including user/password required
+            if not all(
+                [account, user, password, warehouse, database, schema, stage_name]
+            ):
+                raise ValueError(
+                    "Snowflake connection parameters (account, user, password, warehouse, "
+                    "database, schema, stage_name) must be provided via config or constructor."
+                )
 
         self.account = account
         self.user = user
@@ -55,28 +77,100 @@ class SnowflakeDataStore(DataStore):
         self.schema = schema
         self.stage_name = stage_name
 
-        # Create connection
-        self.connection = self._create_connection()
+        # Connection created lazily (not in __init__) to support multiprocessing
+        # When pickled and sent to a worker process, only parameters are serialized
+        # Each process creates its own connection on first use
+        self._connection = None
+        self._lock = None  # Lock created lazily to avoid pickling issues
+
         self.logger = config.get_logger(self.__class__.__name__)
 
         # Temporary directory for file operations
         self._temp_dir = tempfile.mkdtemp()
 
+    def _get_lock(self):
+        """Get or create the lock for thread safety (created per process)."""
+        if self._lock is None:
+            self._lock = threading.Lock()
+        return self._lock
+
+    def _get_connection(self):
+        """
+        Get or create the Snowflake connection (lazy initialization).
+
+        This method ensures the connection is created on first use, which allows
+        the DataStore to be pickled and sent to worker processes. Each process
+        creates its own connection.
+        """
+        if self._connection is None:
+            with self._get_lock():
+                # Double-check pattern for thread safety within a process
+                if self._connection is None:
+                    self._connection = self._create_connection()
+        return self._connection
+
+    @property
+    def connection(self):
+        """
+        Property accessor for connection (for backward compatibility).
+
+        This allows existing code that accesses self.connection to continue working,
+        while using lazy initialization internally.
+        """
+        return self._get_connection()
+
     def _create_connection(self):
         """Create and return a Snowflake connection."""
-        conn_params = {
-            "account": self.account,
-            "user": self.user,
-            "password": self.password,
-            "warehouse": self.warehouse,
-            "database": self.database,
-            "schema": self.schema,
-        }
+        spcs_run = os.getenv("SPCS_RUN", "false").lower() == "true"
 
-        connection = snowflake.connector.connect(**conn_params)
-        
+        if spcs_run:
+            # SPCS mode: use snowflake_utils which handles OAuth authentication
+            # Import here to avoid circular dependencies
+            try:
+                from snowflake_utils import get_snowflake_connection
+
+                connection = get_snowflake_connection()
+            except ImportError:
+                # Fallback: try to create connection with OAuth token
+                token_path = os.getenv("SPCS_TOKEN_PATH", "/snowflake/session/token")
+                try:
+                    with open(token_path, "r") as f:
+                        token = f.read().strip()
+
+                    conn_params = {
+                        "host": os.getenv("SNOWFLAKE_HOST"),
+                        "port": os.getenv("SNOWFLAKE_PORT"),
+                        "protocol": "https",
+                        "account": self.account,
+                        "authenticator": "oauth",
+                        "token": token,
+                        "warehouse": self.warehouse,
+                        "database": self.database,
+                        "schema": self.schema,
+                        "client_session_keep_alive": True,
+                    }
+                    # Remove None values
+                    conn_params = {
+                        k: v for k, v in conn_params.items() if v is not None
+                    }
+                    connection = snowflake.connector.connect(**conn_params)
+                except Exception as e:
+                    raise ValueError(f"Failed to create SPCS connection: {str(e)}")
+        else:
+            # Non-SPCS mode: use password authentication
+            conn_params = {
+                "account": self.account,
+                "user": self.user,
+                "password": self.password,
+                "warehouse": self.warehouse,
+                "database": self.database,
+                "schema": self.schema,
+            }
+            connection = snowflake.connector.connect(**conn_params)
+
         # Explicitly set the database and schema context
         # This ensures the session knows which database/schema to use
+        # (Even though connection params may include them, explicitly setting ensures consistency)
         cursor = connection.cursor()
         try:
             # Use database first
@@ -94,15 +188,22 @@ class SnowflakeDataStore(DataStore):
                 f"Current config - Database: {self.database}, Schema: {self.schema}, Stage: {self.stage_name}"
             )
             raise IOError(error_msg)
-        
+
         return connection
 
     def _ensure_connection(self):
         """Ensure the connection is active, reconnect if needed."""
         try:
-            self.connection.cursor().execute("SELECT 1")
+            self._get_connection().cursor().execute("SELECT 1")
         except Exception:
-            self.connection = self._create_connection()
+            # Reset connection and create a new one
+            if self._connection:
+                try:
+                    self._connection.close()
+                except:
+                    pass
+            self._connection = None
+            self._get_connection()
 
     def _get_stage_path(self, path: str) -> str:
         """Convert a file path to a Snowflake stage path."""
@@ -124,7 +225,7 @@ class SnowflakeDataStore(DataStore):
         :return: File contents as string or bytes
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -139,7 +240,7 @@ class SnowflakeDataStore(DataStore):
             temp_dir_normalized = temp_download_dir.replace("\\", "/")
             if not temp_dir_normalized.endswith("/"):
                 temp_dir_normalized += "/"
-            
+
             get_command = f"GET {stage_path} 'file://{temp_dir_normalized}'"
             cursor.execute(get_command)
 
@@ -149,7 +250,9 @@ class SnowflakeDataStore(DataStore):
                 for f in files:
                     file_path = os.path.join(root, f)
                     # Check if this file matches our expected filename
-                    if os.path.basename(normalized_path) in f or normalized_path.endswith(f):
+                    if os.path.basename(
+                        normalized_path
+                    ) in f or normalized_path.endswith(f):
                         downloaded_files.append(file_path)
 
             if not downloaded_files:
@@ -164,7 +267,9 @@ class SnowflakeDataStore(DataStore):
             os.remove(downloaded_path)
             # Clean up empty directories
             try:
-                if os.path.exists(temp_download_dir) and not os.listdir(temp_download_dir):
+                if os.path.exists(temp_download_dir) and not os.listdir(
+                    temp_download_dir
+                ):
                     os.rmdir(temp_download_dir)
             except OSError:
                 pass
@@ -187,7 +292,7 @@ class SnowflakeDataStore(DataStore):
         :param data: File contents
         """
         self._ensure_connection()
-        cursor = self.connection.cursor()
+        cursor = self._get_connection().cursor()
 
         try:
             # Convert to bytes if string
@@ -196,7 +301,9 @@ class SnowflakeDataStore(DataStore):
             elif isinstance(data, bytes):
                 binary_data = data
             else:
-                raise ValueError('Unsupported data type. Only "bytes" or "string" accepted')
+                raise ValueError(
+                    'Unsupported data type. Only "bytes" or "string" accepted'
+                )
 
             normalized_path = self._normalize_path(path)
 
@@ -212,7 +319,7 @@ class SnowflakeDataStore(DataStore):
             # Snowflake PUT requires the local file path and the target stage path
             # Convert Windows paths to Unix-style for Snowflake
             temp_file_normalized = os.path.abspath(temp_file_path).replace("\\", "/")
-            
+
             # PUT command: PUT 'file://<absolute_local_path>' @stage_name/<path>
             # The file will be stored at the specified path in the stage
             stage_target = f"@{self.stage_name}/"
@@ -220,7 +327,7 @@ class SnowflakeDataStore(DataStore):
                 # Include directory structure in stage path
                 dir_path = os.path.dirname(normalized_path)
                 stage_target = f"@{self.stage_name}/{dir_path}/"
-            
+
             # Snowflake PUT syntax: PUT 'file://<path>' @stage/path
             put_command = f"PUT 'file://{temp_file_normalized}' {stage_target} OVERWRITE=TRUE AUTO_COMPRESS=FALSE"
             cursor.execute(put_command)
@@ -278,7 +385,9 @@ class SnowflakeDataStore(DataStore):
                 local_file_path = os.path.join(root, file)
                 relative_path = os.path.relpath(local_file_path, dir_path)
                 # Normalize path separators for stage
-                stage_file_path = os.path.join(stage_dir_path, relative_path).replace("\\", "/")
+                stage_file_path = os.path.join(stage_dir_path, relative_path).replace(
+                    "\\", "/"
+                )
 
                 self.upload_file(local_file_path, stage_file_path)
 
@@ -300,7 +409,7 @@ class SnowflakeDataStore(DataStore):
                 # Get the relative path from the stage directory
                 if stage_dir_path:
                     if file_path.startswith(stage_dir_path):
-                        relative_path = file_path[len(stage_dir_path):].lstrip("/")
+                        relative_path = file_path[len(stage_dir_path) :].lstrip("/")
                     else:
                         # If file_path doesn't start with stage_dir_path, use it as is
                         relative_path = os.path.basename(file_path)
@@ -320,7 +429,9 @@ class SnowflakeDataStore(DataStore):
                     else:
                         f.write(data)
 
-            self.logger.info(f"Downloaded directory {stage_dir_path} to {local_dir_path}")
+            self.logger.info(
+                f"Downloaded directory {stage_dir_path} to {local_dir_path}"
+            )
         except Exception as e:
             self.logger.error(f"Failed to download directory {stage_dir_path}: {e}")
             raise
@@ -344,7 +455,7 @@ class SnowflakeDataStore(DataStore):
                 # Get relative path from source directory
                 if source_dir:
                     if file_path.startswith(source_dir):
-                        relative_path = file_path[len(source_dir):].lstrip("/")
+                        relative_path = file_path[len(source_dir) :].lstrip("/")
                     else:
                         relative_path = os.path.basename(file_path)
                 else:
@@ -352,7 +463,9 @@ class SnowflakeDataStore(DataStore):
 
                 # Construct the destination file path
                 if destination_dir:
-                    dest_file_path = f"{destination_dir}/{relative_path}".replace("//", "/")
+                    dest_file_path = f"{destination_dir}/{relative_path}".replace(
+                        "//", "/"
+                    )
                 else:
                     dest_file_path = relative_path
 
@@ -365,7 +478,7 @@ class SnowflakeDataStore(DataStore):
             raise
 
     def copy_file(
-            self, source_path: str, destination_path: str, overwrite: bool = False
+        self, source_path: str, destination_path: str, overwrite: bool = False
     ):
         """
         Copies a single file within the Snowflake stage.
@@ -404,7 +517,7 @@ class SnowflakeDataStore(DataStore):
         :return: True if file exists, False otherwise
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -417,7 +530,10 @@ class SnowflakeDataStore(DataStore):
 
             # Check if exact file exists
             for result in results:
-                if result["name"].endswith(normalized_path) or result["name"] == stage_path:
+                if (
+                    result["name"].endswith(normalized_path)
+                    or result["name"] == stage_path
+                ):
                     return True
 
             return False
@@ -436,7 +552,7 @@ class SnowflakeDataStore(DataStore):
         :return: File size in kilobytes
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -450,7 +566,9 @@ class SnowflakeDataStore(DataStore):
             # Find the matching file and get its size
             for result in results:
                 file_path = result["name"]
-                if normalized_path in file_path.lower() or file_path.endswith(normalized_path):
+                if normalized_path in file_path.lower() or file_path.endswith(
+                    normalized_path
+                ):
                     # Size is in bytes, convert to kilobytes
                     size_bytes = result.get("size", 0)
                     size_kb = size_bytes / 1024.0
@@ -471,7 +589,7 @@ class SnowflakeDataStore(DataStore):
         :return: List of file paths
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -494,10 +612,10 @@ class SnowflakeDataStore(DataStore):
                     f"{self.stage_name.lower()}/",
                     f"@{self.stage_name.lower()}/",
                 ]
-                
+
                 for prefix in stage_prefixes:
                     if file_path.startswith(prefix):
-                        relative_path = file_path[len(prefix):]
+                        relative_path = file_path[len(prefix) :]
                         files.append(relative_path)
                         break
                 else:
@@ -509,7 +627,9 @@ class SnowflakeDataStore(DataStore):
                         idx = file_path.lower().find(stage_name_lower)
                         if idx != -1:
                             # Get everything after stage name and '/'
-                            after_stage = file_path[idx + len(stage_name_lower):].lstrip("/")
+                            after_stage = file_path[
+                                idx + len(stage_name_lower) :
+                            ].lstrip("/")
                             if after_stage.startswith(normalized_path):
                                 relative_path = after_stage
                                 files.append(relative_path)
@@ -531,31 +651,33 @@ class SnowflakeDataStore(DataStore):
         """
         try:
             normalized_top = self._normalize_path(top)
-            
+
             # Use list_files to get all files (it handles path parsing correctly)
             all_files = self.list_files(normalized_top)
-            
+
             # Organize into directory structure
             dirs = {}
-            
+
             for file_path in all_files:
                 # Ensure we're working with paths relative to the top
                 if normalized_top and not file_path.startswith(normalized_top):
                     continue
-                
+
                 # Get relative path from top
                 if normalized_top and file_path.startswith(normalized_top):
-                    relative_path = file_path[len(normalized_top):].lstrip("/")
+                    relative_path = file_path[len(normalized_top) :].lstrip("/")
                 else:
                     relative_path = file_path
-                
+
                 if not relative_path:
                     continue
-                
+
                 # Get directory and filename
                 if "/" in relative_path:
                     dir_path, filename = os.path.split(relative_path)
-                    full_dir_path = f"{normalized_top}/{dir_path}" if normalized_top else dir_path
+                    full_dir_path = (
+                        f"{normalized_top}/{dir_path}" if normalized_top else dir_path
+                    )
                     if full_dir_path not in dirs:
                         dirs[full_dir_path] = []
                     dirs[full_dir_path].append(filename)
@@ -570,7 +692,7 @@ class SnowflakeDataStore(DataStore):
                 # Extract subdirectories (simplified - Snowflake stages are flat)
                 subdirs = []
                 yield (dir_path, subdirs, files)
-                
+
         except Exception as e:
             self.logger.warning(f"Error walking directory {top}: {e}")
             yield (top, [], [])
@@ -591,7 +713,7 @@ class SnowflakeDataStore(DataStore):
             # Get relative path from the search path
             if normalized_path:
                 if file_path.startswith(normalized_path):
-                    relative_path = file_path[len(normalized_path):].lstrip("/")
+                    relative_path = file_path[len(normalized_path) :].lstrip("/")
                 else:
                     continue
             else:
@@ -648,7 +770,7 @@ class SnowflakeDataStore(DataStore):
         :return: File metadata dictionary
         """
         self._ensure_connection()
-        cursor = self.connection.cursor(DictCursor)
+        cursor = self._get_connection().cursor(DictCursor)
 
         try:
             normalized_path = self._normalize_path(path)
@@ -662,7 +784,9 @@ class SnowflakeDataStore(DataStore):
             # Find the matching file
             for result in results:
                 file_path = result["name"]
-                if normalized_path in file_path.lower() or file_path.endswith(normalized_path):
+                if normalized_path in file_path.lower() or file_path.endswith(
+                    normalized_path
+                ):
                     return {
                         "name": path,
                         "size_bytes": result.get("size", 0),
@@ -686,17 +810,17 @@ class SnowflakeDataStore(DataStore):
         # First check if it's actually a file (exact match)
         if self.file_exists(path):
             return False
-        
+
         # In Snowflake stages, directories are conceptual
         # Check if there are files with this path prefix
         normalized_path = self._normalize_path(path)
         files = self.list_files(normalized_path)
-        
+
         # Filter out files that are exact matches (they're files, not directories)
         exact_match = any(f == normalized_path or f == path for f in files)
         if exact_match:
             return False
-            
+
         return len(files) > 0
 
     def rmdir(self, dir: str) -> None:
@@ -706,7 +830,7 @@ class SnowflakeDataStore(DataStore):
         :param dir: Path to the directory to remove
         """
         self._ensure_connection()
-        cursor = self.connection.cursor()
+        cursor = self._get_connection().cursor()
 
         try:
             normalized_dir = self._normalize_path(dir)
@@ -747,7 +871,7 @@ class SnowflakeDataStore(DataStore):
         :param path: Path to the file to remove
         """
         self._ensure_connection()
-        cursor = self.connection.cursor()
+        cursor = self._get_connection().cursor()
 
         try:
             normalized_path = self._normalize_path(path)
@@ -770,7 +894,7 @@ class SnowflakeDataStore(DataStore):
     ) -> None:
         """
         Rename (move) a single file by copying to the new path and deleting the source.
-        
+
         :param source_path: Existing file path in the stage
         :param destination_path: Target file path in the stage
         :param overwrite: Overwrite destination if it already exists
@@ -778,23 +902,48 @@ class SnowflakeDataStore(DataStore):
         """
         if not self.file_exists(source_path):
             raise FileNotFoundError(f"Source file not found: {source_path}")
-        
+
         if self.file_exists(destination_path) and not overwrite:
             raise FileExistsError(
                 f"Destination already exists and overwrite is False: {destination_path}"
             )
-        
+
         # Copy file to new location
         self.copy_file(source_path, destination_path, overwrite=overwrite)
-        
+
         # Delete source if requested
         if delete_source:
             self.remove(source_path)
 
     def close(self):
         """Close the Snowflake connection."""
-        if self.connection:
-            self.connection.close()
+        if self._connection:
+            self._connection.close()
+            self._connection = None
+
+    def __getstate__(self):
+        """
+        Custom pickling: exclude connection and lock to allow multiprocessing.
+
+        When pickled, only store connection parameters (all picklable).
+        The connection and lock will be recreated in the worker process.
+        """
+        state = self.__dict__.copy()
+        # Remove connection and lock (they can't be pickled)
+        state["_connection"] = None
+        state["_lock"] = None
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom unpickling: restore state without connection.
+
+        Connection will be created lazily on first use in the worker process.
+        """
+        self.__dict__.update(state)
+        # Ensure connection and lock are None (will be created on first use)
+        self._connection = None
+        self._lock = None
 
     def __enter__(self):
         """Context manager entry."""
@@ -803,4 +952,3 @@ class SnowflakeDataStore(DataStore):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.close()
-

@@ -14,25 +14,53 @@ class Config(BaseSettings):
     and their subpaths. All paths can be overridden through environment variables.
     """
 
+    # Azure Data Lake Storage (ADLS) configuration
+    # Used for accessing and storing data in Azure Data Lake Storage
     ADLS_CONNECTION_STRING: str = Field(default="", alias="ADLS_CONNECTION_STRING")
     ADLS_CONTAINER_NAME: str = Field(default="", alias="ADLS_CONTAINER_NAME")
     ADLS_ACCOUNT_URL: str = Field(default="", alias="ADLS_ACCOUNT_URL")
     ADLS_SAS_TOKEN: str = Field(default="", alias="ADLS_SAS_TOKEN")
+
+    # Google Cloud Platform (GCP) configuration
+    # Used for accessing Google Cloud services and APIs
+    GOOGLE_CLOUD_PROJECT: str = Field(default="", alias="GOOGLE_CLOUD_PROJECT")
     GOOGLE_SERVICE_ACCOUNT: str = Field(default="", alias="GOOGLE_SERVICE_ACCOUNT")
+    GOOGLE_SERVICE_ACCOUNT_KEY_PATH: str = Field(
+        "", alias="GOOGLE_SERVICE_ACCOUNT_KEY_PATH"
+    )
+
+    # API configuration
+    # Used for accessing internal APIs and data sharing services
     API_PROFILE_FILE_PATH: Path = Field(
         default=Path("profile.share"), alias="API_PROFILE_FILE_PATH"
     )
     API_SHARE_NAME: str = Field(default="", alias="API_SHARE_NAME")
     API_SCHEMA_NAME: str = Field(default="", alias="API_SCHEMA_NAME")
+
+    # Mapbox configuration
+    # Used for accessing Mapbox imagery and mapping services
     MAPBOX_ACCESS_TOKEN: str = Field(default="", alias="MAPBOX_ACCESS_TOKEN")
-    MAXAR_USERNAME: str = Field(default="", alias="MAXAR_USERNAME")
-    MAXAR_PASSWORD: str = Field(default="", alias="MAXAR_PASSWORD")
-    MAXAR_CONNECTION_STRING: str = Field(default="", alias="MAXAR_CONNECTION_STRING")
+
+    # Maxar configuration
+    # Used for accessing Maxar satellite imagery and services
+    MAXAR_API_KEY: str = Field("", alias="MAXAR_API_KEY")
+
+    # NASA Earthdata configuration
+    # Used for accessing NASA Earthdata services (e.g., SRTM elevation data)
     EARTHDATA_USERNAME: str = Field(default="", alias="EARTHDATA_USERNAME")
     EARTHDATA_PASSWORD: str = Field(default="", alias="EARTHDATA_PASSWORD")
+
+    # OpenCellID configuration
+    # Used for accessing OpenCellID mobile network cell tower data
     OPENCELLID_ACCESS_TOKEN: str = Field(default="", alias="OPENCELLID_ACCESS_TOKEN")
+
+    # GeoRepo configuration
+    # Used for accessing UNICEF GeoRepo administrative boundaries API
     GEOREPO_API_KEY: str = Field(default="", alias="GEOREPO_API_KEY")
     GEOREPO_USER_EMAIL: str = Field(default="", alias="GEOREPO_USER_EMAIL")
+
+    # GIGA School APIs configuration
+    # Used for accessing GIGA school location, profile, and measurements APIs
     GIGA_SCHOOL_LOCATION_API_KEY: str = Field(
         default="", alias="GIGA_SCHOOL_LOCATION_API_KEY"
     )
@@ -42,7 +70,13 @@ class Config(BaseSettings):
     GIGA_SCHOOL_MEASUREMENTS_API_KEY: str = Field(
         default="", alias="GIGA_SCHOOL_MEASUREMENTS_API_KEY"
     )
+
+    # Healthsites configuration
+    # Used for accessing Healthsites global health facility data
     HEALTHSITES_API_KEY: str = Field(default="", alias="HEALTHSITES_API_KEY")
+
+    # Snowflake configuration
+    # Used for connecting to Snowflake data warehouse
     SNOWFLAKE_ACCOUNT: str = Field(default="", alias="SNOWFLAKE_ACCOUNT")
     SNOWFLAKE_USER: str = Field(default="", alias="SNOWFLAKE_USER")
     SNOWFLAKE_PASSWORD: str = Field(default="", alias="SNOWFLAKE_PASSWORD")
