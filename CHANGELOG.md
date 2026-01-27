@@ -91,6 +91,14 @@ All notable changes to this project will be documented in this file.
         -   `count_files()`: Memory-efficient file counting using generator iteration.
         -   `count_files_with_extension()`: Memory-efficient counting of files by extension.
 
+-   **SnowflakeDataStore: Multiprocessing Support**
+    -   Implemented lazy connection initialization enabling safe pickling and multiprocessing usage.
+    -   Added thread-safe connection creation via `_get_connection()` with double-check locking pattern.
+    -   Implemented custom `__getstate__()` and `__setstate__()` for proper serialization, excluding non-picklable connection and lock objects.
+    -   Each worker process creates its own database connection on first access.
+    -   Maintained full backward compatibility via `connection` property accessor.
+    -   Improved startup performance by deferring connection creation until first use.
+
 ### Performance
 
 -   **Significant speedups for Azure Blob Storage operations:**
@@ -99,6 +107,9 @@ All notable changes to this project will be documented in this file.
     -   Memory usage reduced by 100-500x for large directory operations (2-5MB vs 500MB-1GB).
     -   Directory tree walking now 2-3x faster with lazy evaluation via `list_files_iter()`.
     -   Benefits scale with directory size—most dramatic improvements for directories with 100K+ files.
+
+-   **Improved startup time for SnowflakeDataStore:**
+    -   Lazy connection initialization eliminates unnecessary connection overhead when data store is instantiated but not immediately used.
 
 ### Developer Notes
 
