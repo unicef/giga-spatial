@@ -12,8 +12,8 @@ Requests==2.32.3
 scipy>=1.15.1
 Shapely>=2.0.7
 networkx>=3.2.1
-tqdm==4.65.0
-OWSLib==0.32.1
+tqdm>=4.65.0
+OWSLib>=0.31.0
 pydantic-settings>=2.7.1
 hdx-python-api>=6.3.8
 bs4==0.0.2
