@@ -1169,7 +1169,9 @@ class PoiViewGenerator:
             GoogleMSBuildingsHandler,
         )
 
-        handler = GoogleMSBuildingsHandler(partition_strategy="s2_grid")
+        handler = GoogleMSBuildingsHandler(
+            partition_strategy="s2_grid", data_store=self.data_store
+        )
 
         if self.config.ensure_available:
             if not handler.ensure_data_available(country, **kwargs):
@@ -1215,7 +1217,9 @@ class PoiViewGenerator:
             GoogleMSBuildingsHandler,
         )
 
-        handler = GoogleMSBuildingsHandler(partition_strategy="s2_grid")
+        handler = GoogleMSBuildingsHandler(
+            partition_strategy="s2_grid", data_store=self.data_store
+        )
         building_files = handler.reader.resolve_source_paths(country, **kwargs)
 
         # Single file: use optimized path

@@ -109,7 +109,19 @@ class BaseHandlerConfig(ABC):
         return [self.get_data_unit_path(unit=unit, **kwargs) for unit in units]
 
     def extract_search_geometry(self, source, **kwargs):
-        """General method to extract a canonical geometry from supported source types."""
+        """
+        General method to extract a canonical geometry from supported source types.
+
+        Notes
+        -----
+        - For ``gpd.GeoDataFrame`` inputs, an optional ``crs`` keyword
+          argument is interpreted as the *target* CRS. If provided and
+          different from ``source.crs``, the GeoDataFrame is reprojected
+          before unioning the geometry.
+        - For bare geometries and point collections, no CRS transformation
+          is performed here; subclasses can add handler-specific CRS
+          normalization if needed (see e.g. ``GHSLDataConfig``).
+        """
         if isinstance(source, str):
             # Use the admin boundary as geometry
             from gigaspatial.handlers.boundaries import AdminBoundaries

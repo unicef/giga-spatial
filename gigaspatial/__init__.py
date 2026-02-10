@@ -1,12 +1,25 @@
-__version__ = "0.7.6"
+__version__ = "0.8.0"
 
 import gigaspatial.core.io as io
+import gigaspatial.processing.algorithms as algorithms
+import gigaspatial.processing.geo as geo
+
+from .core.io import (
+    ADLSDataStore,
+    LocalDataStore,
+    SnowflakeDataStore,
+    DeltaSharingDataStore,
+    DBConnection,
+    read_dataset,
+    write_dataset,
+)
 
 from .handlers import (
     AdminBoundaries,
     GoogleOpenBuildingsHandler,
     MSBuildingsHandler,
     GoogleMSBuildingsHandler,
+    GEEProfiler,
     GHSLDataHandler,
     GigaSchoolLocationFetcher,
     GigaSchoolMeasurementsFetcher,
@@ -31,18 +44,33 @@ from .generators import (
 from .grid import MercatorTiles, H3Hexagons, S2Cells
 
 from .processing import TifProcessor
-import gigaspatial.processing.algorithms as algorithms
-import gigaspatial.processing.geo as geo_processing
+from .processing.geo import (
+    convert_to_geodataframe,
+    buffer_geodataframe,
+    aggregate_points_to_zones,
+    aggregate_polygons_to_zones,
+    calculate_distance,
+    map_points_within_polygons,
+)
 
 __all__ = [
     "__version__",
+    # io
     "io",
+    "ADLSDataStore",
+    "LocalDataStore",
+    "SnowflakeDataStore",
+    "DeltaSharingDataStore",
+    "DBConnection",
+    "read_dataset",
+    "write_dataset",
     "algorithms",
     # handlers
     "AdminBoundaries",
     "GoogleOpenBuildingsHandler",
     "MSBuildingsHandler",
     "GoogleMSBuildingsHandler",
+    "GEEProfiler",
     "GHSLDataHandler",
     "GigaSchoolLocationFetcher",
     "GigaSchoolMeasurementsFetcher",
@@ -66,5 +94,11 @@ __all__ = [
     "S2Cells",
     # processing
     "TifProcessor",
-    "geo_processing",
+    "geo",
+    "convert_to_geodataframe",
+    "buffer_geodataframe",
+    "aggregate_points_to_zones",
+    "aggregate_polygons_to_zones",
+    "calculate_distance",
+    "map_points_within_polygons",
 ]

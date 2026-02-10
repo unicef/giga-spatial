@@ -66,7 +66,7 @@ class RWIConfig(HDXConfig):
                 resources = [latest_resource]
 
             # Update the cache to the latest only
-            self._unit_cache[key] = resources
+            self._unit_cache[key] = (resources, self._unit_cache[key][1])
             return resources
 
         return resources

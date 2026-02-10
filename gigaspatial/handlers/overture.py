@@ -17,11 +17,46 @@ from gigaspatial.core.io.data_store import DataStore
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class OvertureAmenityFetcher:
     """
-    A class to fetch and process amenity locations from Overture.
+    Fetch and process amenity locations from the Overture Places theme.
+
+    This handler queries the Overture Places GeoParquet on S3, filters by a
+    country boundary, and returns a GeoDataFrame of point locations for the
+    requested amenity categories.
+
+    Amenity categories
+    ------------------
+    The `amenity_types` parameter should contain values from
+    `categories.primary` in the Overture Places schema (for example
+    "hospital", "clinic", "school", "restaurant").
+
+    Overture maintains the authoritative category list here:
+    https://github.com/OvertureMaps/schema/blob/main/docs/schema/concepts/by-theme/places/overture_categories.csv
+
+    Each entry in that CSV corresponds to a valid value you can pass in
+    `amenity_types`.
+
+    Examples
+    --------
+    Fetch hospitals in Senegal:
+
+        fetcher = OvertureAmenityFetcher(
+            country="SEN",
+            amenity_types=["hospital"],
+        )
+        hospitals = fetcher.fetch_locations()
+
+    Fetch multiple health‑related categories:
+
+        fetcher = OvertureAmenityFetcher(
+            country="SEN",
+            amenity_types=["hospital", "clinic", "pharmacy"],
+        )
+        facilities = fetcher.fetch_locations()
     """
 
     # constants
-    release: Optional[str] = "2024-12-18.0"
+    release: Optional[str] = "2026-01-21.0"
+
     base_url: Optional[str] = (
         "s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
     )
@@ -55,19 +90,38 @@ class OvertureAmenityFetcher:
         db.load_extension("spatial")
         return db
 
+    def _set_connection(self):
+        """Set the connection to the DB"""
+        db = duckdb.connect()
+
+        # CRITICAL: Install httpfs for S3 access
+        db.install_extension("httpfs")
+        db.load_extension("httpfs")
+
+        db.install_extension("spatial")
+        db.load_extension("spatial")
+
+        # Configure S3 region
+        db.execute("SET s3_region='us-west-2'")
+
+        return db
+
     def _load_country_geometry(
         self,
     ) -> Union[Polygon, MultiPolygon]:
         """Load country boundary geometry from DataStore or GADM."""
 
-        gdf_admin0 = AdminBoundaries.create(
-            country_code=pycountry.countries.lookup(self.country).alpha_3,
-            admin_level=0,
-            data_store=self.data_store,
-            path=self.country_geom_path,
-        ).to_geodataframe()
+        country_geom = (
+            AdminBoundaries.create(
+                country_code=self.country,
+                data_store=self.data_store,
+                path=self.country_geom_path,
+            )
+            .boundaries[0]
+            .geometry
+        )
 
-        return gdf_admin0.geometry.iloc[0]
+        return country_geom
 
     def _build_query(self, match_pattern: bool = False, **kwargs) -> str:
         """Constructs and returns the query"""
@@ -81,25 +135,26 @@ class OvertureAmenityFetcher:
                 [f"category == '{amenity}'" for amenity in self.amenity_types]
             )
 
-        query = """
+        if not self.geom:
+            self.geom = self._load_country_geometry()
+
+        bounds = self.geom.bounds
+
+        query = f"""
         SELECT id,
             names.primary AS name,
             ROUND(confidence,2) as confidence,
             categories.primary AS category,
             ST_AsText(geometry) as geometry,
-        FROM read_parquet('s3://overturemaps-us-west-2/release/2024-12-18.0/theme=places/type=place/*',
-            hive_partitioning=1)
-        WHERE bbox.xmin > {}
-            AND bbox.ymin > {} 
-            AND bbox.xmax <  {}
-            AND bbox.ymax < {}
-            AND ({})
+        FROM read_parquet('{self.base_url}')
+        WHERE bbox.xmin > {bounds[0]}
+            AND bbox.ymin > {bounds[1]}
+            AND bbox.xmax < {bounds[2]}
+            AND bbox.ymax < {bounds[3]}
+            AND ({amenity_query})
         """
 
-        if not self.geom:
-            self.geom = self._load_country_geometry()
-
-        return query.format(*self.geom.bounds, amenity_query)
+        return query
 
     def fetch_locations(
         self, match_pattern: bool = False, **kwargs

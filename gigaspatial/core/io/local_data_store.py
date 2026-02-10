@@ -2,8 +2,12 @@ from pathlib import Path
 import os
 import shutil
 from typing import Any, List, Generator, Tuple, Union, IO
+from os import PathLike
+from typing import Union
 
 from .data_store import DataStore
+
+Pathish = Union[str, PathLike[str]]
 
 
 class LocalDataStore(DataStore):
@@ -13,9 +17,15 @@ class LocalDataStore(DataStore):
         super().__init__()
         self.base_path = Path(base_path).resolve()
 
-    def _resolve_path(self, path: str) -> Path:
-        """Resolve path relative to base directory."""
-        return self.base_path / path
+    def _resolve_path(self, path: Pathish) -> Path:
+        path_obj = Path(path)
+
+        # If absolute, return as-is
+        if path_obj.is_absolute():
+            return path_obj.resolve()
+
+        # Otherwise, resolve relative to base_path
+        return (self.base_path / path_obj).resolve()
 
     def read_file(self, path: str) -> bytes:
         full_path = self._resolve_path(path)

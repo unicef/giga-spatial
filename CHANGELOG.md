@@ -2,6 +2,82 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.0] - 2026-02-10
+
+### Added
+
+-   **Google Earth Engine Handler (`GEEProfiler`)**
+    -   **Complete GEE Integration**: New `gigaspatial/handlers/gee/` module with full Google Earth Engine support via `GEEProfiler` class.
+    -   **Context & Impact: Multi-Sector GEE Intelligence**
+        -   **Critical Data Access**: Built-in support for global infrastructure and environmental datasets (Nightlights, Population, Land Cover) provides instant, ready-to-use insights for emergency response, climate resilience, and urban development.  
+        -   **Beyond Built-ins**: While the registry comes pre-configured for high-value datasets, `GEEProfiler` is fully flexible, unlocking the entire multi-petabyte Google Earth Engine public catalog (Landsat, Sentinel, MODIS, etc.) for custom analysis.
+    -   **Intelligent Asset Handling**: Robust initialization automatically distinguishes `ee.Image` vs `ee.ImageCollection`, preventing backend loading errors during band validation.
+    -   **Dataset Registry**: `GEEDatasetRegistry` and `GEEDatasetEntry` for managing built-in datasets (nightlights, population, etc.) with metadata (bands, scales, temporal coverage).
+    -   **Inspection Utilities**: Comprehensive collection inspection including `display_collection_info()`, `get_band_names()`, `get_date_range()`, `display_band_names()`, `display_properties()`.
+    -   **`map_to_points()`**: Extracts GEE raster values at point locations with optional circular buffers (metric CRS buffering, automatic UTM reprojection).
+    -   **`map_to_zones()`**: Spatial aggregation of GEE rasters within polygon boundaries (admin zones, grids) using configurable reducers.
+    -   **Automatic Chunking**: Handles GEE API limits with intelligent chunking (`chunk_size=1000` default), processing large feature sets without timeouts.
+    -   **Unified Processing Pipeline**: Single `_reduce_regions_with_chunking()` core handles both points and zones with robust error recovery per chunk.
+    -   **Temporal Filtering**: `start_date`/`end_date` filtering with automatic temporal reduction (`mean`, `median`, etc.) for ImageCollections.
+    -   **NRT-Ready Logic**: Advanced date handling for Near Real-Time datasets, automatically defaulting to most recent data windows.
+    -   **Config-Driven**: `GEEConfig` supports dataset lookup, authentication (service accounts), and defaults (band, reducer, scale, chunk_size).
+    -   **Production-Ready**: Full validation (bands, dates, geometries), detailed logging, error handling, and config fallbacks.
+
+-   **GEE Built-in Datasets**
+    -   Pre-configured registry entries for popular datasets: `nightlights` (VIIRS), `population` (various sources), land cover, etc.
+    -   Automatic collection loading via `dataset_id`: `profiler = GEEProfiler("nightlights")`.
+    -   Standardized metadata: resolution, default bands, reducers, temporal cadence.
+
+-   **DeltaSharingDataStore (formerly GigaDataAPI)**
+    -   Refactored internal `GigaDataAPI` into public `DeltaSharingDataStore` as a reusable data-access layer for Delta Sharing tables.
+    -   Replaced hardcoded global config with flexible initialization supporting global config (`API_PROFILE_FILE_PATH`, `API_SHARE_NAME`, `API_SCHEMA_NAME`) + selective per-instance overrides via keyword arguments.
+    -   Added `DeltaSharingConfig` (Pydantic model) for validated configuration with profile file existence checks and `enable_cache` flag for in-memory table caching.
+    -   Implemented lazy `SharingClient` initialization via `client` property and comprehensive cache management (`get_table_metadata()`, `clear_cache()`, `get_cached_tables()`, `cache_size_mb`).
+    -   Maintained backward-compatible API: `list_tables()` → `get_country_list()`, `load_table()` → `load_country_data()`.
+
+### Changed
+
+-   **OvertureAmenityFetcher: Updated to latest Overture Places release and S3 layout**
+    -   Updated default Overture release to `2026-01-21.0` for Places theme queries.
+    -   Switched to the current S3 URL pattern for Places GeoParquet (`release/{release}/theme=places/...`) and now build the read path via a configurable `base_url` instead of hardcoding it in the SQL query.
+    -   Fixed IO errors caused by outdated bucket patterns by reading directly from the official Overture S3 bucket with DuckDB’s `read_parquet()`.
+    -   Enabled S3 access in DuckDB by installing and loading the `httpfs` extension and configuring the AWS region (`s3_region='us-west-2'`) during connection setup.
+
+-   **DeltaSharingDataStore: Robust table discovery**
+    -   Enhanced `list_tables()` to handle `SharingClient.list_all_tables()` returning empty lists (common in constrained shares) by falling back to explicit `list_shares()` → `list_schemas()` → `list_tables()` enumeration on configured share/schema.
+    -   Added structured logging for debugging share/schema mismatches while preserving stable public API contract.
+
+-   **DataStore: Cross-Platform Path Handling**
+    -   **`ADLSDataStore` and `LocalDataStore`: Enhanced path type support**
+        -   All path-accepting methods now support both `str` and `PathLike` objects (e.g., `pathlib.Path`) for improved type flexibility and cross-platform compatibility.
+        -   Introduced `Pathish = Union[str, PathLike[str]]` type alias for consistent path parameter signatures across both data store implementations.
+    
+    -   **`ADLSDataStore`: Centralized blob key normalization**
+        -   Added `_to_blob_key()` method as the single source of truth for converting input paths to Azure-compatible blob keys.
+        -   Automatically handles Windows backslashes → forward slashes conversion via `PurePosixPath` for cross-platform compatibility.
+        -   Strips leading slashes (Azure convention) and optionally ensures trailing slashes for directory operations.
+        -   All methods now use `_to_blob_key()` internally, eliminating inconsistent path handling across different operations.
+        -   `_normalize_path()` deprecated in favor of `_to_blob_key()` but kept for backward compatibility.
+    
+    -   **`LocalDataStore`: Improved path resolution**
+        -   Enhanced `_resolve_path()` to accept `PathLike` objects alongside strings.
+        -   Properly handles both absolute and relative paths with automatic resolution relative to `base_path`.
+        -   All methods updated to use `Pathish` type signature for consistency with `ADLSDataStore`.
+    
+    -   **Benefits:**
+        -   **Cross-platform safety**: Eliminates Windows vs. Linux path separator issues when handlers build paths using `pathlib` and pass to data stores.
+        -   **Type flexibility**: Handlers can now pass `Path` objects, strings, or any `PathLike` without manual `str()` conversion.
+        -   **Backward compatible**: Existing handler code with `str()` wrappers continues to work unchanged.
+        -   **Maintainability**: Path normalization logic centralized in data store boundary, not scattered across handlers.
+
+
+### Documentation
+
+-   **OvertureAmenityFetcher: Amenity category documentation**
+    -   Expanded the class docstring to explain that `amenity_types` should correspond to `categories.primary` values in the Overture Places schema.
+    -   Linked to the authoritative Overture category list CSV on GitHub so users can discover all valid amenity categories without hardcoding them in giga-spatial:  
+        `https://github.com/OvertureMaps/schema/blob/main/docs/schema/concepts/by-theme/places/overture_categories.csv`.
+
 ## [v0.7.6] - 2026-01-27
 
 ### Changed

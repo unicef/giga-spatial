@@ -66,3 +66,9 @@ from gigaspatial.handlers.srtm import (
     SRTMParser,
     SRTMManager,
 )
+from gigaspatial.handlers.gee import (
+    GEEDatasetEntry,
+    GEEDatasetRegistry,
+    GEEConfig,
+    GEEProfiler,
+)

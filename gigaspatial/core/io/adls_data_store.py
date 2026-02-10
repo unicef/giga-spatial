@@ -4,6 +4,7 @@ import io
 import contextlib
 import logging
 import os
+from pathlib import PurePosixPath
 from typing import Union, Optional, Iterator
 
 from .data_store import DataStore
@@ -12,6 +13,8 @@ from gigaspatial.config import config
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
     logging.WARNING
 )
+
+Pathish = Union[str, os.PathLike[str]]
 
 
 class ADLSDataStore(DataStore):
@@ -48,7 +51,35 @@ class ADLSDataStore(DataStore):
         )
         self.container = container
 
-    def read_file(self, path: str, encoding: Optional[str] = None) -> Union[str, bytes]:
+    def _to_blob_key(self, path: Pathish, *, ensure_dir: bool = False) -> str:
+        """
+        Convert an input path (str or PathLike) to a normalized ADLS blob key.
+
+        Rules:
+        - Accepts str, pathlib.Path, PurePath, etc.
+        - Converts Windows backslashes to '/' via PurePosixPath.
+        - Strips any leading '/'.
+        - Optionally enforces a trailing '/' for directory prefixes.
+        """
+        # Convert any PathLike to str in OS-native form first
+        raw = os.fspath(path)
+
+        # Normalize to POSIX-style using pathlib semantics
+        # This handles backslashes and redundant separators.
+        posix = PurePosixPath(raw).as_posix()
+
+        # Strip leading slash (Azure blob keys don’t need it)
+        if posix.startswith("/"):
+            posix = posix.lstrip("/")
+
+        if ensure_dir and posix and not posix.endswith("/"):
+            posix = posix + "/"
+
+        return posix
+
+    def read_file(
+        self, path: Pathish, encoding: Optional[str] = None
+    ) -> Union[str, bytes]:
         """
         Read file with flexible encoding support.
 
@@ -57,7 +88,8 @@ class ADLSDataStore(DataStore):
         :return: File contents as string or bytes
         """
         try:
-            blob_client = self.container_client.get_blob_client(path)
+            blob_key = self._to_blob_key(path)
+            blob_client = self.container_client.get_blob_client(blob_key)
             blob_data = blob_client.download_blob().readall()
 
             # If no encoding specified, return raw bytes
@@ -70,15 +102,16 @@ class ADLSDataStore(DataStore):
         except Exception as e:
             raise IOError(f"Error reading file {path}: {e}")
 
-    def write_file(self, path: str, data) -> None:
+    def write_file(self, path: Pathish, data) -> None:
         """
         Write file with support for content type and improved type handling.
 
         :param path: Destination path in blob storage
         :param data: File contents
         """
+        blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
-            container=self.container, blob=path, snapshot=None
+            container=self.container, blob=blob_key, snapshot=None
         )
 
         if isinstance(data, str):
@@ -93,7 +126,8 @@ class ADLSDataStore(DataStore):
     def upload_file(self, file_path, blob_path):
         """Uploads a single file to Azure Blob Storage."""
         try:
-            blob_client = self.container_client.get_blob_client(blob_path)
+            blob_key = self._to_blob_key(blob_path)
+            blob_client = self.container_client.get_blob_client(blob_key)
             with open(file_path, "rb") as data:
                 blob_client.upload_blob(data, overwrite=True)
             print(f"Uploaded {file_path} to {blob_path}")
@@ -102,30 +136,31 @@ class ADLSDataStore(DataStore):
 
     def upload_directory(self, dir_path, blob_dir_path):
         """Uploads all files from a directory to Azure Blob Storage."""
+        blob_dir_key = self._to_blob_key(blob_dir_path, ensure_dir=True)
         for root, dirs, files in os.walk(dir_path):
             for file in files:
                 local_file_path = os.path.join(root, file)
                 relative_path = os.path.relpath(local_file_path, dir_path)
-                blob_file_path = os.path.join(blob_dir_path, relative_path).replace(
-                    "\\", "/"
-                )
+                # Construct blob path and normalize
+                blob_file_path = PurePosixPath(blob_dir_key) / relative_path
+                blob_file_key = self._to_blob_key(blob_file_path)
 
-                self.upload_file(local_file_path, blob_file_path)
+                self.upload_file(local_file_path, blob_file_key)
 
-    def download_directory(self, blob_dir_path: str, local_dir_path: str):
+    def download_directory(self, blob_dir_path: Pathish, local_dir_path: str):
         """Downloads all files from a directory in Azure Blob Storage to a local directory."""
         try:
+            blob_dir_key = self._to_blob_key(blob_dir_path, ensure_dir=True)
+
             # Ensure the local directory exists
             os.makedirs(local_dir_path, exist_ok=True)
 
             # List all files in the blob directory
-            blob_items = self.container_client.list_blobs(
-                name_starts_with=blob_dir_path
-            )
+            blob_items = self.container_client.list_blobs(name_starts_with=blob_dir_key)
 
             for blob_item in blob_items:
                 # Get the relative path of the blob file
-                relative_path = os.path.relpath(blob_item.name, blob_dir_path)
+                relative_path = os.path.relpath(blob_item.name, blob_dir_key)
                 # Construct the local file path
                 local_file_path = os.path.join(local_dir_path, relative_path)
                 # Create directories if needed
@@ -136,7 +171,7 @@ class ADLSDataStore(DataStore):
                 with open(local_file_path, "wb") as file:
                     file.write(blob_client.download_blob().readall())
 
-            print(f"Downloaded directory {blob_dir_path} to {local_dir_path}")
+            print(f"Downloaded directory {blob_dir_key} to {local_dir_path}")
         except Exception as e:
             print(f"Failed to download directory {blob_dir_path}: {e}")
 
@@ -224,7 +259,7 @@ class ADLSDataStore(DataStore):
         size_in_kb = size_in_bytes / 1024.0
         return size_in_kb
 
-    def list_files(self, dir_path: str) -> list:
+    def list_files(self, dir_path: Pathish) -> list:
         """
         List all files in a directory.
 
@@ -241,10 +276,10 @@ class ADLSDataStore(DataStore):
         Returns:
             List of file paths
         """
-        prefix = self._normalize_path(dir_path)
+        prefix = self._to_blob_key(dir_path, ensure_dir=True)
         return list(self.container_client.list_blob_names(name_starts_with=prefix))
 
-    def list_files_iter(self, dir_path: str) -> Iterator[str]:
+    def list_files_iter(self, dir_path: Pathish) -> Iterator[str]:
         """
         Iterate over files with lazy evaluation (memory efficient).
 
@@ -263,10 +298,10 @@ class ADLSDataStore(DataStore):
                     process(file)
                     break  # Early exit possible
         """
-        prefix = self._normalize_path(dir_path)
+        prefix = self._to_blob_key(dir_path, ensure_dir=True)
         return self.container_client.list_blob_names(name_starts_with=prefix)
 
-    def has_files_with_extension(self, dir_path: str, extension: str) -> bool:
+    def has_files_with_extension(self, dir_path: Pathish, extension: str) -> bool:
         """
         Check if ANY file with given extension exists (early exit).
 
@@ -298,7 +333,7 @@ class ADLSDataStore(DataStore):
 
         return False
 
-    def count_files(self, dir_path: str) -> int:
+    def count_files(self, dir_path: Pathish) -> int:
         """
         Count total files in a directory (memory efficient).
 
@@ -321,7 +356,7 @@ class ADLSDataStore(DataStore):
         """
         return sum(1 for _ in self.list_files_iter(dir_path))
 
-    def count_files_with_extension(self, dir_path: str, extension: str) -> int:
+    def count_files_with_extension(self, dir_path: Pathish, extension: str) -> int:
         """
         Count files with specific extension (memory efficient).
 
@@ -345,7 +380,7 @@ class ADLSDataStore(DataStore):
             if blob_name.endswith(extension)
         )
 
-    def walk(self, top: str):
+    def walk(self, top: Pathish):
         """
         Walk through directory tree yielding (dirpath, dirnames, filenames).
 
@@ -355,11 +390,11 @@ class ADLSDataStore(DataStore):
             dirpath, filename = os.path.split(blob_name)
             yield (dirpath, [], [filename])
 
-    def list_directories(self, path: str) -> list:
+    def list_directories(self, path: Pathish) -> list:
         """
         List only directory names using Azure's hierarchical listing.
         """
-        prefix = self._normalize_path(path)
+        prefix = self._to_blob_key(path, ensure_dir=True)
         directories = set()
 
         # Use walk_blobs with delimiter - Azure returns directories directly!
@@ -379,75 +414,83 @@ class ADLSDataStore(DataStore):
         return sorted(list(directories))
 
     @contextlib.contextmanager
-    def open(self, path: str, mode: str = "r"):
+    def open(self, path: Pathish, mode: str = "r"):
         """
         Context manager for file operations with enhanced mode support.
 
         :param path: File path in blob storage
         :param mode: File open mode (r, rb, w, wb)
         """
+        blob_key = self._to_blob_key(path)
+
         if mode == "w":
             file = io.StringIO()
             yield file
-            self.write_file(path, file.getvalue())
+            self.write_file(blob_key, file.getvalue())
 
         elif mode == "wb":
             file = io.BytesIO()
             yield file
-            self.write_file(path, file.getvalue())
+            self.write_file(blob_key, file.getvalue())
 
         elif mode == "r":
-            data = self.read_file(path, encoding="UTF-8")
+            data = self.read_file(blob_key, encoding="UTF-8")
             file = io.StringIO(data)
             yield file
 
         elif mode == "rb":
-            data = self.read_file(path)
+            data = self.read_file(blob_key)
             file = io.BytesIO(data)
             yield file
 
-    def get_file_metadata(self, path: str) -> dict:
+    def get_file_metadata(self, path: Pathish) -> dict:
         """
         Retrieve comprehensive file metadata.
 
         :param path: File path in blob storage
         :return: File metadata dictionary
         """
-        blob_client = self.container_client.get_blob_client(path)
+        blob_key = self._to_blob_key(path)
+        blob_client = self.container_client.get_blob_client(blob_key)
         properties = blob_client.get_blob_properties()
 
         return {
-            "name": path,
+            "name": blob_key,
             "size_bytes": properties.size,
             "content_type": properties.content_settings.content_type,
             "last_modified": properties.last_modified,
             "etag": properties.etag,
         }
 
-    def is_file(self, path: str) -> bool:
+    def is_file(self, path: Pathish) -> bool:
         return self.file_exists(path)
 
-    def is_dir(self, path: str) -> bool:
-        dir_path = path.rstrip("/") + "/"
+    def is_dir(self, path: Pathish) -> bool:
+        dir_key = self._to_blob_key(path, ensure_dir=True)
 
-        existing_blobs = self.list_files(dir_path)
+        existing_blobs = self.list_files(dir_key)
 
         if len(existing_blobs) > 1:
             return True
         elif len(existing_blobs) == 1:
-            if existing_blobs[0] != path.rstrip("/"):
+            # Check if the single blob is not the path itself (indicating it's a file)
+            if (
+                existing_blobs[0] != path.rstrip("/")
+                if isinstance(path, str)
+                else str(path).rstrip("/")
+            ):
                 return True
 
         return False
 
-    def rmdir(self, dir: str) -> None:
+    def rmdir(self, dir: Pathish) -> None:
         # Normalize directory path to ensure it targets all children
-        dir_path = dir.rstrip("/") + "/"
+        dir_key = self._to_blob_key(dir, ensure_dir=True)
 
         # Azure Blob batch delete has a hard limit on number of sub-requests
         # per batch (currently 256). Delete in chunks to avoid
         # ExceedsMaxBatchRequestCount errors.
-        blobs = list(self.list_files(dir_path))
+        blobs = list(self.list_files(dir_key))
         if not blobs:
             return
 
@@ -456,7 +499,7 @@ class ADLSDataStore(DataStore):
             batch = blobs[start_idx : start_idx + BATCH_LIMIT]
             self.container_client.delete_blobs(*batch)
 
-    def mkdir(self, path: str, exist_ok: bool = False) -> None:
+    def mkdir(self, path: Pathish, exist_ok: bool = False) -> None:
         """
         Create a directory in Azure Blob Storage.
 
@@ -465,37 +508,39 @@ class ADLSDataStore(DataStore):
         :param path: Path of the directory to create
         :param exist_ok: If False, raise an error if the directory already exists
         """
-        dir_path = path.rstrip("/") + "/"
+        dir_key = self._to_blob_key(path, ensure_dir=True)
 
-        existing_blobs = list(self.list_files(dir_path))
+        existing_blobs = list(self.list_files(dir_key))
 
         if existing_blobs and not exist_ok:
             raise FileExistsError(f"Directory {path} already exists")
 
         # Create a placeholder blob to represent the directory
-        placeholder_blob_path = os.path.join(dir_path, ".placeholder")
+        placeholder_blob_path = PurePosixPath(dir_key) / ".placeholder"
+        placeholder_blob_key = self._to_blob_key(placeholder_blob_path)
 
         # Only create placeholder if it doesn't already exist
-        if not self.file_exists(placeholder_blob_path):
+        if not self.file_exists(placeholder_blob_key):
             placeholder_content = (
                 b"This is a placeholder blob to represent a directory."
             )
             blob_client = self.blob_service_client.get_blob_client(
-                container=self.container, blob=placeholder_blob_path
+                container=self.container, blob=placeholder_blob_key
             )
             blob_client.upload_blob(placeholder_content, overwrite=True)
 
-    def remove(self, path: str) -> None:
+    def remove(self, path: Pathish) -> None:
+        blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
-            container=self.container, blob=path, snapshot=None
+            container=self.container, blob=blob_key, snapshot=None
         )
         if blob_client.exists():
             blob_client.delete_blob()
 
     def rename(
         self,
-        source_path: str,
-        destination_path: str,
+        source_path: Pathish,
+        destination_path: Pathish,
         overwrite: bool = False,
         delete_source: bool = True,
         wait: bool = True,
@@ -513,21 +558,23 @@ class ADLSDataStore(DataStore):
         :param timeout_seconds: Max time to wait for copy to succeed
         :param poll_interval_seconds: Polling interval while waiting
         """
+        source_key = self._to_blob_key(source_path)
+        destination_key = self._to_blob_key(destination_path)
 
-        if not self.file_exists(source_path):
-            raise FileNotFoundError(f"Source file not found: {source_path}")
+        if not self.file_exists(source_key):
+            raise FileNotFoundError(f"Source file not found: {source_key}")
 
-        if self.file_exists(destination_path) and not overwrite:
+        if self.file_exists(destination_key) and not overwrite:
             raise FileExistsError(
-                f"Destination already exists and overwrite is False: {destination_path}"
+                f"Destination already exists and overwrite is False: {destination_key}"
             )
 
         # Use copy_file method to copy the file
-        self.copy_file(source_path, destination_path, overwrite=overwrite)
+        self.copy_file(source_key, destination_key, overwrite=overwrite)
 
         if wait:
             # Wait for copy to complete if requested
-            dest_client = self.container_client.get_blob_client(destination_path)
+            dest_client = self.container_client.get_blob_client(destination_key)
             deadline = time.time() + timeout_seconds
             while True:
                 props = dest_client.get_blob_properties()
@@ -536,20 +583,23 @@ class ADLSDataStore(DataStore):
                     break
                 if status in {"aborted", "failed"}:
                     raise IOError(
-                        f"Copy failed with status {status} from {source_path} to {destination_path}"
+                        f"Copy failed with status {status} from {source_key} to {destination_key}"
                     )
                 if time.time() > deadline:
                     raise TimeoutError(
-                        f"Timed out waiting for copy to complete for {destination_path}"
+                        f"Timed out waiting for copy to complete for {destination_key}"
                     )
                 time.sleep(poll_interval_seconds)
 
         if delete_source:
-            self.remove(source_path)
+            self.remove(source_key)
 
     def _normalize_path(self, path: str) -> str:
         """
         Normalize a path for Azure Blob Storage.
+
+        DEPRECATED: Use _to_blob_key() instead for better type support.
+        This method is kept for backward compatibility.
 
         Ensures the path:
         - Ends with '/' if it's a directory
@@ -566,19 +616,6 @@ class ADLSDataStore(DataStore):
             _normalize_path('data') -> 'data/'
             _normalize_path('data/') -> 'data/'
             _normalize_path('/data/') -> 'data/'
-            _normalize_path('data\\subdir') -> 'data/subdir/'
+            _normalize_path('data\\\\subdir') -> 'data/subdir/'
         """
-        if not path:
-            return ""
-
-        # Remove leading slash (Azure blob storage doesn't use them)
-        path = path.lstrip("/")
-
-        # Convert backslashes to forward slashes
-        path = path.replace("\\", "/")
-
-        # Ensure directory paths end with /
-        if path and not path.endswith("/"):
-            path = path + "/"
-
-        return path
+        return self._to_blob_key(path, ensure_dir=True)

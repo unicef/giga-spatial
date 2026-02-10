@@ -78,7 +78,7 @@ class GHSLDataConfig(BaseHandlerConfig):
         cache_dir = self.base_path / "cache"
         tiles_cache = cache_dir / f"tiles_{self.coord_system.value}.geojson"
 
-        if self.data_store.file_exists(tiles_cache):
+        if self.data_store.file_exists(str(tiles_cache)):
 
             try:
                 self.tiles_gdf = gpd.read_file(tiles_cache)
@@ -97,7 +97,9 @@ class GHSLDataConfig(BaseHandlerConfig):
         try:
             # Try with SSL verification first
             try:
-                self.logger.info("Attempting download GHSL tile grid with SSL verification")
+                self.logger.info(
+                    "Attempting download GHSL tile grid with SSL verification"
+                )
                 # Set up SSL context before any requests
                 ssl._create_default_https_context = ssl._create_unverified_context
                 self.tiles_gdf = gpd.read_file(self.TILES_URL)
@@ -231,12 +233,22 @@ class GHSLDataConfig(BaseHandlerConfig):
     ) -> List[dict]:
         """
         Return intersecting tiles for a given geometry or GeoDataFrame.
+
+        Notes
+        -----
+        - The input ``geometry`` is expected to already be in the GHSL CRS
+          (see :meth:`extract_search_geometry`), i.e. ``self.crs``.
+        - Callers should normally use :meth:`get_relevant_data_units`, which
+          routes through ``extract_search_geometry`` and ensures CRS
+          normalization, instead of calling this method directly.
         """
-        crs = kwargs.get("crs", "EPSG:4326")  # assume WGS84 4326 if no crs passed
-        if self.tiles_gdf.crs != crs:
+        # Defensive: if tiles have a CRS different from the GHSL config CRS,
+        # reproject the input geometry to the tiles CRS.
+        tiles_crs = getattr(self.tiles_gdf, "crs", None)
+        if tiles_crs is not None and tiles_crs != self.crs:
             geometry = (
-                gpd.GeoDataFrame(geometry=[geometry], crs=crs)
-                .to_crs(self.tiles_gdf.crs)
+                gpd.GeoDataFrame(geometry=[geometry], crs=self.crs)
+                .to_crs(tiles_crs)
                 .geometry[0]
             )
 
@@ -262,12 +274,56 @@ class GHSLDataConfig(BaseHandlerConfig):
         )
 
         return tile_path
-    
+
     def extract_search_geometry(self, source, **kwargs):
+        """
+        Extract a canonical search geometry for GHSL and normalize it to
+        the GHSL grid CRS.
+
+        Parameters
+        ----------
+        source :
+            Any supported source type from ``BaseHandlerConfig``:
+            country code (str), GeoDataFrame, shapely geometry, or iterable
+            of points.
+        crs : str, optional
+            CRS of the input coordinates when the source itself does not
+            carry CRS information (e.g. bare shapely geometry or list of
+            points). For GeoDataFrames, ``source.crs`` is preferred.
+
+        Returns
+        -------
+        shapely.geometry.base.BaseGeometry
+            Geometry normalized to the GHSL CRS (``self.crs``).
+        """
+        # Treat any passed ``crs`` as the *source* CRS for CRS-less inputs.
         source_crs = kwargs.pop("crs", None)
-        if not source_crs:
-            source_crs = "EPSG:4326" if self.coord_system==4326 else "ESRI:54009"
-        return super().extract_search_geometry(source, crs=source_crs, **kwargs)
+
+        # Determine the CRS of the input coordinates before we lose that
+        # information in the base implementation (which returns a bare
+        # shapely geometry without CRS metadata).
+        #
+        # - If the source is a GeoDataFrame, trust its .crs
+        # - Else, fall back to the explicitly provided source_crs
+        # - If neither is available, assume WGS84 for raw lon/lat coords
+        if isinstance(source, gpd.GeoDataFrame) and source.crs is not None:
+            geom_crs = source.crs
+        else:
+            geom_crs = source_crs or "EPSG:4326"
+
+        # Let the base class build a single geometry (union, etc.) in the
+        # same coordinate space; we will reproject afterwards if needed.
+        geometry = super().extract_search_geometry(source, **kwargs)
+
+        # Normalize into the GHSL CRS if needed.
+        if geom_crs != self.crs:
+            geometry = (
+                gpd.GeoDataFrame(geometry=[geometry], crs=geom_crs)
+                .to_crs(self.crs)
+                .geometry[0]
+            )
+
+        return geometry
 
     def compute_dataset_url(self, tile_id=None) -> str:
         """Compute the download URL for a GHSL dataset."""
