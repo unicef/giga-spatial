@@ -13,6 +13,7 @@ from shapely.geometry.base import BaseGeometry
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
+from gigaspatial.grid.mercator_tiles import MercatorTiles
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -159,3 +160,35 @@ class RWIHandler(HDXHandler):
             logger=logger,
             **kwargs,
         )
+
+    def load_data(
+        self,
+        source,
+        crop_to_source: bool = False,
+        ensure_available: bool = True,
+        **kwargs,
+    ):
+        data = super().load_data(source, crop_to_source, ensure_available, **kwargs)
+        if "quadkey" not in data:
+            quadkeys = MercatorTiles.get_quadkeys_from_points(
+                data[["latitude", "longitude"]].to_numpy(), zoom_level=14
+            )
+            if len(quadkeys) != len(data):
+                self.logger.warning(
+                    "Number of data points does not match the quadkey count returning original dataframe"
+                )
+                return data
+            data["quadkey"] = quadkeys
+            return data
+
+    def load_as_geodataframe(
+        self,
+        source,
+        crop_to_source: bool = False,
+        ensure_available: bool = True,
+        **kwargs,
+    ):
+        data = self.load_data(source, crop_to_source, ensure_available, **kwargs)
+        tiles = MercatorTiles.from_quadkeys(data.quadkey.to_list()).to_geodataframe()
+        gdf_rwi = tiles.merge(data, on="quadkey")
+        return gdf_rwi

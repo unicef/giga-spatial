@@ -41,9 +41,10 @@ Giga maps schools' Internet access in real time, creates models for innovative f
 
 ### Who is this for?
 
-- Data engineers building reproducible geospatial pipelines.
-- Data scientists analyzing school connectivity and infrastructure.
-- Researchers working with large, multi‑source spatial datasets.
+- Data engineers building reproducible geospatial pipelines
+- Data scientists analyzing school connectivity and infrastructure
+- Researchers working with large, multi‑source spatial datasets
+- GIS analysts requiring planetary-scale Earth observation data
 
 ## Installation
 
@@ -59,6 +60,7 @@ The package depends on:
 - pandas
 - shapely
 - rasterio
+- earthengine-api (optional, for Google Earth Engine features)
 
 For detailed setup instructions (including recommended environments and system dependencies), see the [installation docs](https://unicef.github.io/giga-spatial/getting-started/installation/).
 
@@ -107,9 +109,10 @@ print(buildings_mapping.head())
   - Enrich spatial context with POI (Point of Interest) data
   - Support for raster point sampling and zonal statistics
   - Area-weighted aggregation for polygon-based statistics
+  - Temporal aggregation for time-series Earth observation data
 
 - **Grid System**
-  Create and manipulate grid-based geospatial data for analysis and modeling.
+  Create and manipulate grid-based geospatial data for analysis and modeling using H3, S2, or Mercator tile systems.
 
 - **Data Storage**
   Flexible storage options with local, cloud (ADLS), and Snowflake stage support.
@@ -124,7 +127,10 @@ print(buildings_mapping.head())
   Retrieve points of interest from OpenStreetMap, Healthsites.io, and Giga-maintained sources for any area of interest.
 
 - **Enrich POI locations**
-  Join POIs with Google/Microsoft building footprints, GHSL population and settlement layers, and other contextual datasets.
+  Join POIs with Google/Microsoft building footprints, GHSL population and settlement layers, Earth Engine satellite data, and other contextual datasets.
+
+- **Analyze Earth observation time series**
+  Extract and analyze multi-temporal satellite data (vegetation indices, land surface temperature, precipitation, etc.) for any location using Google Earth Engine
 
 - **Build and analyze grids**
   Generate national or sub‑national grids and aggregate multi‑source indicators (e.g. coverage, population, infrastructure) into each cell.
@@ -148,6 +154,19 @@ The `gigaspatial` package supports data from the following providers:
 <div align="center">
     <img src="https://raw.githubusercontent.com/unicef/giga-spatial/main/docs/assets/datasets.png" alt="Dataset Providers" style="width: 75%; height: auto;"/>
 </div>
+
+**Google Earth Engine Catalog**
+
+GigaSpatial now provides access to Google Earth Engine’s comprehensive data catalog, including:
+
+- **Satellite imagery**: Landsat (30+ years), Sentinel-1/2, MODIS, Planet
+- **Climate & weather**: ERA5, CHIRPS precipitation, NOAA temperature
+- **Land cover**: Dynamic World, ESA WorldCover, MODIS land cover
+- **Terrain**: SRTM, ASTER DEM, ALOS elevation data
+- **Population & infrastructure**: GHSL, WorldPop, nighttime lights
+- **Environmental**: Soil properties, vegetation indices, surface water
+
+For a complete list of available datasets, visit the [Earth Engine Data Catalog](https://developers.google.com/earth-engine/datasets).
 
 ---
 
@@ -173,6 +192,8 @@ The **view generators** in GigaSpatial are designed to enrich the spatial contex
 ## Why use GigaSpatial?
 
 - **End-to-end geospatial pipelines**: Go from raw open datasets (OSM, GHSL, global buildings, HDX, etc.) to analysis-ready tables with a consistent set of handlers, readers, and view generators.
+
+- **Planetary-scale analysis**: Leverage Google Earth Engine’s cloud infrastructure to process petabytes of satellite imagery without downloading data or managing compute resources.
 
 - **Scalable analysis**: Work seamlessly with both point and grid representations, making it easy to aggregate indicators at national scale or zoom into local POIs.
 

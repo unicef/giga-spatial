@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.1] - 2026-02-19
+
+### Added
+
+-   **GeometryBasedZonalViewGenerator: Relative Wealth Index mapping**
+    -   Added `map_rwi()` helper to aggregate Relative Wealth Index values to arbitrary zones using `RWIHandler` as the data source.
+    -   Supports both point-based (`predicate="centroid_within"`, using quadkey centroids) and polygon-based (`"intersects"`, `"within"`) enrichment with configurable aggregations (`mean`, `median`, `max`, `min`) into a new output column (e.g., `rwi_mean`).
+
+### Changed
+
+-   **WorldPop Handler (`WPPopulationConfig`): Multi-release support with GR1/GR2**
+    -   Introduced a `release` field (`Literal["GR1", "GR2"]`, default `"GR2"`) to `WPPopulationConfig` and `WPPopulationHandler` to explicitly select between the two WorldPop Global dataset releases, replacing the previous implicit year-based release inference.
+    -   **GR1** (legacy release): covers years 2000–2020 for both `pop` and `age_structures` projects, with constrained and unconstrained variants and full UN adjustment support. All previously supported dataset categories (`wpgp`, `wpic1km`, `cic2020_100m`, `aswpgp`, `ascic_2020`, `sapya1km`, etc.) are preserved unchanged under this release.
+    -   **GR2** (WorldPop R2025A v1): covers years 2015–2030, constrained only, no UN adjustment. Supports:
+        -   `pop`: 100m (`G2_CN_POP_R25A_100m`) and 1km (`G2_CN_POP_R25A_1km`) resolution.
+        -   `age_structures` (full age breakdown): 100m (`G2_CN_Age_R25A_100m`) and 1km (`G2_CN_Age_R25A_1km`) resolution.
+        -   `age_structures` (under-18 population, `under_18=True`): 100m only (`G2_Age_U18_R25A_100m`).
+    -   Added `under_18: bool` field (default `False`) to `WPPopulationConfig` and `WPPopulationHandler` for accessing WorldPop R2025A under-18 population datasets (`project="age_structures"`, `release="GR2"` only).
+    -   Removed the R2024-specific special-case branches (`year == 2024`, `G2_CN_POP_2024_100m`, `G2_UC_POP_2024_100m`, `G2_CN_Age_2024_100m`, `G2_UC_Age_2024_100m`) from `validate_configuration`; users requiring those datasets should remain on GR1 with `year=2020` or use GR2 for the overlapping year range.
+    -   Updated `AVAILABLE_YEARS_GR1` (formerly `AVAILABLE_YEARS`) to `range(2000, 2021)` and added `AVAILABLE_YEARS_GR2` as `range(2015, 2031)`.
+    -   Extended `_filter_age_sex_paths` to correctly handle under-18 filename patterns (`ISO3_T/F/M_Under_18_YEAR_...tif`): detects `UNDER_18` keyword to avoid misclassification as non-school-age files, supports `T` (total) sex value, and defaults to returning only the `T` aggregate file when no sex filter is provided.
+    -   Extended the zip-extraction branch in `get_data_unit_paths` to cover `under_18=True` datasets (previously only `school_age=True`).
+    -   Extended `get_relevant_data_units_by_geometry` zip passthrough guard to include `G2_Age_U18_R25A_100m` alongside `sapya1km`.
+    -   Updated `validate_configuration` docstring to reflect GR1/GR2 availability matrix for all project and resolution combinations.
+
+-   **Relative Wealth Index Handler (`RWIHandler`): Quadkey-enriched loading**
+    -   Updated `load_data()` to automatically compute and attach a `quadkey` column (zoom level 14) for all RWI records when only `latitude`/`longitude` are present, making tiled aggregation the default behavior.
+    -   Added `load_as_geodataframe()` convenience method to return RWI data as a `GeoDataFrame` with Mercator quadkey geometries joined to the underlying `rwi` and `error` attributes for direct spatial analysis.
+
+-   **`aggregate_points_to_zones` / `aggregate_polygons_to_zones`: Semantically correct fill values for empty zones**
+    -   Changed the fill behavior for zones with no overlapping point or polygon data: non-`count` aggregations (e.g., `mean`, `sum`, `min`, `max`) now correctly fill missing values with `np.nan` instead of `0`, distinguishing "no data" from a true zero measurement.
+    -   `count` aggregation continues to fill with `0`, preserving the expected behavior that a zone with no matched features has a count of zero.
+    -   Updated docstrings for both functions to explicitly document the `np.nan` vs. `0` fill semantics per aggregation method.
+    -   Fixed a missing column rename step in `aggregate_points_to_zones` for non-MultiIndex aggregation results, ensuring `output_suffix` is consistently applied to all output columns.
+    -   Fixed geometry column drop in `aggregate_points_to_zones` being incorrectly gated on aggregation type; geometry is now always dropped before non-count aggregation to avoid pandas errors.
+
+### Fixed
+
+-   **BaseHandler.ensure_data_available: Correct handling of post-download paths**
+    -   Fixed an issue where `ensure_data_available()` could still report missing data on the first download for handlers whose `get_data_unit_paths()` mapping changes after download (e.g., WorldPop `age_structures` with `school_age=True`, where ZIP resources are extracted to `.tif` files).
+    -   After downloading, the method now refreshes the resolved data paths before performing the final existence check, ensuring that ZIP → `.tif` extraction workflows correctly pass availability checks on the first run.
+
 ## [v0.8.0] - 2026-02-10
 
 ### Added

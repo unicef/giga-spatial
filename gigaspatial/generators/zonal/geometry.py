@@ -14,6 +14,7 @@ from gigaspatial.handlers.ghsl import GHSLDataHandler
 from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
 from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
 from gigaspatial.handlers.worldpop import WPPopulationHandler
+from gigaspatial.handlers.rwi import RWIHandler
 from gigaspatial.processing.buildings_engine import GoogleMSBuildingsEngine
 from gigaspatial.generators.zonal.base import (
     ZonalViewGenerator,
@@ -703,7 +704,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 # Existing behavior for non-age_structures projects or if merging is fine
                 tif_processors = []
                 for c in countries_list:
-                    tif_processors.extend(
+                    tif_processors.append(
                         handler.load_data(
                             c,
                             ensure_available=self.config.ensure_available,
@@ -736,5 +737,36 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             )
 
         self.add_variable_to_view(result, output_column)
+
+        return self.view
+
+    def map_rwi(
+        self,
+        country: Union[str, List[str]],
+        predicate: Literal["intersects", "within", "centroid_within"] = "intersects",
+        aggregation: Literal["mean", "median", "max", "min"] = "mean",
+        output_column: str = "rwi",
+        **kwargs,
+    ):
+
+        handler = RWIHandler(
+            data_store=self.data_store,
+            **kwargs,
+        )
+
+        if not handler.config.get_relevant_data_units(country):
+            self.logger.warning("Country not exist in rwi context - abort mission")
+            return
+
+        if predicate == "centroid_within":
+            data = handler.load_data(country)
+            result = self.map_points(data, value_columns="rwi", aggregation=aggregation)
+        else:
+            data = handler.load_as_geodataframe(country)
+            result = self.map_polygons(
+                data, value_columns="rwi", aggregation=aggregation, predicate=predicate
+            )
+
+        self.add_variable_to_view(result, f"{output_column}_{aggregation}")
 
         return self.view

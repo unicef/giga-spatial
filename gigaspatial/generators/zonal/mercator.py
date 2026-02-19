@@ -123,3 +123,16 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
         return super().map_wp_pop(
             country, resolution, predicate, output_column, **kwargs
         )
+
+    def map_rwi(
+        self,
+        country=None,
+        predicate="intersects",
+        aggregation="mean",
+        output_column: str = "rwi",
+        **kwargs,
+    ):
+        if hasattr(self, "_country") and country is None:
+            country = self._country
+
+        return super().map_rwi(country, predicate, aggregation, output_column, **kwargs)

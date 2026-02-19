@@ -1175,7 +1175,20 @@ class PoiViewGenerator:
 
         if self.config.ensure_available:
             if not handler.ensure_data_available(country, **kwargs):
-                raise RuntimeError("Could not ensure data availability for loading")
+                self.logger.warning(
+                    "No Google/Microsoft building data available for %s; "
+                    "returning empty POI–building mapping.",
+                    country,
+                )
+                empty_df = pd.DataFrame(
+                    {
+                        "poi_id": self.points_gdf.index,
+                        "nearest_building_distance_m": np.nan,
+                        f"building_within_{search_radius}m": False,
+                    }
+                )
+                self._update_view(empty_df)
+                return self.view
 
         building_files = handler.reader.resolve_source_paths(country, **kwargs)
 
@@ -1220,6 +1233,24 @@ class PoiViewGenerator:
         handler = GoogleMSBuildingsHandler(
             partition_strategy="s2_grid", data_store=self.data_store
         )
+
+        if self.config.ensure_available:
+            if not handler.ensure_data_available(country, **kwargs):
+                self.logger.warning(
+                    "No Google/Microsoft building data available for %s; "
+                    "returning empty POI–building mapping.",
+                    country,
+                )
+                empty_df = pd.DataFrame(
+                    {
+                        "poi_id": self.points_gdf.index,
+                        "nearest_building_distance_m": np.nan,
+                        f"building_within_{max_global_search}m": False,
+                    }
+                )
+                self._update_view(empty_df)
+                return self.view
+
         building_files = handler.reader.resolve_source_paths(country, **kwargs)
 
         # Single file: use optimized path

@@ -15,8 +15,6 @@ import pandas as pd
 import geopandas as gpd
 import pycountry
 import requests
-from shapely.geometry.base import BaseGeometry
-from shapely.geometry import Point
 from tqdm import tqdm
 import logging
 import zipfile
@@ -46,7 +44,7 @@ class WorldPopRestClient:
         base_url: str = "https://www.worldpop.org/rest/data",
         stats_url: str = "https://api.worldpop.org/v1/services/stats",
         api_key: Optional[str] = None,
-        timeout: int = 30,
+        timeout: int = 600,
         logger: Optional[logging.Logger] = None,
     ):
         """
@@ -365,24 +363,50 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     client = WorldPopRestClient()
 
-    AVAILABLE_YEARS: List = Field(default=np.append(np.arange(2000, 2021), 2024))
+    AVAILABLE_YEARS_GR1: List = Field(default=list(range(2000, 2021)))  # 2000–2020
+    AVAILABLE_YEARS_GR2: List = Field(default=list(range(2015, 2031)))  # 2015–2030
     AVAILABLE_RESOLUTIONS: List = Field(default=[100, 1000])
 
     # user config
     base_path: Path = Field(default=global_config.get_path("worldpop", "bronze"))
+
+    release: Literal["GR1", "GR2"] = Field(
+        ...,
+        description=(
+            "WorldPop dataset release. "
+            "'GR1': years 2000-2020, pop & age_structures, constrained & unconstrained. "
+            "'GR2': years 2015-2030, pop only, constrained only, no UN adjustment."
+        ),
+    )
     project: Literal["pop", "age_structures"] = Field(...)
     year: int = Field(...)
     resolution: int = Field(...)
     un_adjusted: bool = Field(...)
     constrained: bool = Field(...)
     school_age: bool = Field(...)
+    under_18: bool = Field(
+        ...,
+        description=(
+            "If True, fetch under-18 population datasets. "
+            "Only available for project='age_structures' with release='GR2'."
+        ),
+    )
 
     def _filter_age_sex_paths(self, paths: List[Path], filters: Dict) -> List[Path]:
         """
-        Helper to filter a list of WorldPop age_structures paths based on sex, age, and education level filters.
+        Helper to filter a list of WorldPop age_structures paths based on sex, age,
+        and education level filters.
+
+        Supported filename patterns:
+        - School age:  DJI_M_SECONDARY_2020_1km.tif       (ISO3_SEX_LEVEL_YEAR_RES.tif)
+                    DJI_F_M_SECONDARY_2020_1km.tif
+        - Under-18:    rwa_T_Under_18_2020_CN_100m.tif     (ISO3_SEX_Under_18_YEAR_...tif)
+                    rwa_F_Under_18_2020_CN_100m.tif
+                    rwa_M_Under_18_2020_CN_100m.tif
+        - Non-school:  RWA_F_25_2020.tif                  (ISO3_SEX_AGE_YEAR.tif)
         """
         sex_filters = filters.get("sex_filters")
-        level_filters = filters.get("level_filters")  # For school_age=True
+        level_filters = filters.get("level_filters")
         ages_filter = filters.get("ages_filter")
         min_age = filters.get("min_age")
         max_age = filters.get("max_age")
@@ -390,41 +414,39 @@ class WPPopulationConfig(BaseHandlerConfig):
         filtered_paths: List[Path] = []
 
         for p in paths:
-            # Expected basename patterns:
-            # - School age: DJI_M_SECONDARY_2020_1km.tif (ISO3_SEX_EDUCATIONLEVEL_YEAR_RES.tif)
-            # - Non-school age: RWA_F_25_2020.tif (ISO3_SEX_AGE_YEAR.tif)
             bn = p.name
             stem = os.path.splitext(bn)[0]
             parts = stem.split("_")
 
             sex_val, age_val, education_level_val = None, None, None
 
-            # Simple heuristic to differentiate school_age vs non-school_age filenames
-            # Check for keywords related to education levels (assuming these are unique to school_age files)
+            # Detect file type by keywords in the stem
             is_school_age_filename = any(
                 lvl in stem.upper() for lvl in ["PRIMARY", "SECONDARY"]
             )
+            is_under_18_filename = "UNDER_18" in stem.upper() or "UNDER" in stem.upper()
 
-            if (
-                is_school_age_filename
-            ):  # Filenames like DJI_M_SECONDARY_2020_1km.tif, DJI_F_M_SECONDARY_2020_1km.tif
+            if is_under_18_filename:
+                # Pattern: ISO3_SEX_Under_18_YEAR_... where SEX is T, F, or M
+                if len(parts) > 1:
+                    sex_val = parts[1].upper()  # T, F, or M
+
+            elif is_school_age_filename:
                 if len(parts) >= 4:
-                    # Determine sex_val and education_level_val based on patterns
                     if (
                         len(parts) > 2
                         and parts[1].upper() == "F"
                         and parts[2].upper() == "M"
                     ):
-                        # Pattern: ISO3_F_M_EDUCATIONLEVEL_YEAR...
                         sex_val = "F_M"
-                        if len(parts) > 3:  # Ensure index exists
+                        if len(parts) > 3:
                             education_level_val = parts[3].upper()
                     elif len(parts) > 1:
-                        # Pattern: ISO3_SEX_EDUCATIONLEVEL_YEAR... (SEX is F or M)
                         sex_val = parts[1].upper()
-                        if len(parts) > 2:  # Ensure index exists
+                        if len(parts) > 2:
                             education_level_val = parts[2].upper()
-            else:  # Filenames like RWA_F_25_2020.tif
+
+            else:  # Non-school age: RWA_F_25_2020.tif
                 if len(parts) >= 4:
                     sex_val = parts[1].upper()
                     try:
@@ -432,25 +454,26 @@ class WPPopulationConfig(BaseHandlerConfig):
                     except (ValueError, IndexError):
                         age_val = None
 
-            # --- Apply sex filter ---
+            # ── Sex filter ───────────────────────────────────────────────────────
             if sex_filters:
-                # Explicit matching for all cases
-                sex_ok = False
-                if "F_M" in sex_filters and sex_val == "F_M":
-                    sex_ok = True
-                elif "F" in sex_filters and sex_val == "F":
-                    sex_ok = True
-                elif "M" in sex_filters and sex_val == "M":
-                    sex_ok = True
-
+                sex_ok = (
+                    ("F_M" in sex_filters and sex_val == "F_M")
+                    or ("F" in sex_filters and sex_val == "F")
+                    or ("M" in sex_filters and sex_val == "M")
+                    or ("T" in sex_filters and sex_val == "T")
+                )
                 if not sex_ok:
                     continue
+            elif is_under_18_filename:
+                # Default for under-18 with no sex filter: return only the total (T) file
+                if sex_val != "T":
+                    continue
             elif self.project == "age_structures" and self.school_age:
-                # Default for school_age=True with no sex filter: only load F_M
+                # Default for school_age with no sex filter: return only F_M combined file
                 if sex_val != "F_M":
                     continue
 
-            # --- Apply education level filter (only relevant for school_age filenames) ---
+            # ── Education level filter (school_age only) ─────────────────────────
             if level_filters and is_school_age_filename:
                 if (
                     education_level_val is None
@@ -458,10 +481,12 @@ class WPPopulationConfig(BaseHandlerConfig):
                 ):
                     continue
 
-            # --- Apply age filters (only relevant for non-school_age filenames) ---
+            # ── Age filters (non-school, non-under-18 only) ───────────────────────
             if (
-                ages_filter is not None or min_age is not None or max_age is not None
-            ) and not is_school_age_filename:
+                (ages_filter is not None or min_age is not None or max_age is not None)
+                and not is_school_age_filename
+                and not is_under_18_filename
+            ):
                 if age_val is not None:
                     if ages_filter is not None and age_val not in ages_filter:
                         continue
@@ -469,9 +494,10 @@ class WPPopulationConfig(BaseHandlerConfig):
                         continue
                     if max_age is not None and age_val > int(max_age):
                         continue
-                else:  # If age filters are specified but age_val couldn't be parsed
+                else:
                     self.logger.warning(
-                        f"Could not parse age from filename {p.name} but age filters were applied. Skipping file."
+                        f"Could not parse age from filename {p.name} but age filters "
+                        f"were applied. Skipping file."
                     )
                     continue
 
@@ -480,153 +506,206 @@ class WPPopulationConfig(BaseHandlerConfig):
         return filtered_paths
 
     @field_validator("year")
-    def validate_year(cls, value: str) -> int:
-        if value in cls.AVAILABLE_YEARS:
-            return value
-        raise ValueError(
-            f"No datasets found for the provided year: {value}\nAvailable years are: {cls.AVAILABLE_YEARS}"
-        )
+    def validate_year(cls, value: int) -> int:
+        all_valid = set(range(2000, 2021)) | set(range(2015, 2031))
+        if value not in all_valid:
+            raise ValueError(
+                f"No datasets found for the provided year: {value}. "
+                f"Valid years: 2000-2020 (GR1) or 2015-2030 (GR2)."
+            )
+        return value
 
     @field_validator("resolution")
-    def validate_resolution(cls, value: str) -> int:
-        if value in cls.AVAILABLE_RESOLUTIONS:
+    def validate_resolution(cls, value: int) -> int:
+        if value in [100, 1000]:
             return value
         raise ValueError(
-            f"No datasets found for the provided resolution: {value}\nAvailable resolutions are: {cls.AVAILABLE_RESOLUTIONS}"
+            f"No datasets found for the provided resolution: {value}. "
+            f"Available resolutions: [100, 1000]."
         )
 
     @model_validator(mode="after")
     def validate_configuration(self):
         """
-        Validate that the configuration is valid based on dataset availability constraints.
+        Validate and normalise configuration based on dataset availability constraints.
 
-        Specific rules:
-        - For age_structures:
-            - School age data is only available for 2020 at 1km resolution.
-            - Non-school age data is only available at 100m resolution.
-            - Unconstrained, non-school age data is only available without UN adjustment.
-            - Constrained, non-school age data with UN adjustment is only available for 2020.
-            - Constrained, non-school age data without UN adjustment is only available for 2020 and 2024.
-        - For pop:
-            - 2024 data is only available at 100m resolution and without UN adjustment.
-            - Constrained data (other than 2024) is only available for 2020 at 100m resolution.
-            - Unconstrained data at 100m or 1km is available for other years, with or without UN adjustment.
+        GR1 (pop):
+        - Constrained: only 2020 at 100m, with or without UN adjustment.
+        - Unconstrained: 100m or 1km, with or without UN adjustment, years 2000-2020.
+
+        GR1 (age_structures):
+        - School age: only 2020, 1km, unconstrained, no UN adjustment.
+        - Non-school age: 100m only.
+        - Unconstrained: no UN adjustment.
+        - Constrained + UN adjusted: only 2020.
+        - Constrained, no UN adjustment: only 2020.
+
+        GR2 (pop):
+        - Constrained datasets only.
+        - Years 2015-2030 at 100m or 1km.
+        - No UN adjustment.
+
+        GR2 (age_structures):
+        - Constrained datasets only, no UN adjustment, no school age.
+        - Years 2015-2030.
+        - Full age structures: 100m or 1km.
+        - Under-18 population (under_18=True): 100m only.
         """
 
-        if self.project == "age_structures":
+        # ── GR2 branch ───────────────────────────────────────────────────────
+        if self.release == "GR2":
+            if self.school_age:
+                raise ValueError(
+                    "School age population datasets are not available in the GR2 release. "
+                    "Use project='age_structures' with release='GR1'."
+                )
+            if self.year not in self.AVAILABLE_YEARS_GR2:
+                raise ValueError(
+                    f"GR2 release supports years 2015-2030, got year={self.year}."
+                )
+            if not self.constrained:
+                raise ValueError(
+                    "GR2 release is currently only available as constrained datasets. "
+                    "Set constrained=True, or switch to release='GR1' for unconstrained data."
+                )
+            if self.un_adjusted:
+                self.logger.warning(
+                    "GR2 datasets do not support UN adjustment. `un_adjusted` set to False."
+                )
+                self.un_adjusted = False
 
+            if self.project == "pop":
+                if self.under_18:
+                    raise ValueError(
+                        "`under_18=True` is only valid for project='age_structures'. "
+                        "Set project='age_structures' or under_18=False."
+                    )
+                self.dataset_category = (
+                    "G2_CN_POP_R25A_100m"
+                    if self.resolution == 100
+                    else "G2_CN_POP_R25A_1km"
+                )
+
+            elif self.project == "age_structures":
+                if self.under_18:
+                    if self.resolution != 100:
+                        self.logger.warning(
+                            "Under-18 datasets are only available at 100m resolution. "
+                            "`resolution` set to 100."
+                        )
+                        self.resolution = 100
+                    self.dataset_category = "G2_Age_U18_R25A_100m"
+                else:
+                    self.dataset_category = (
+                        "G2_CN_Age_R25A_100m"
+                        if self.resolution == 100
+                        else "G2_CN_Age_R25A_1km"
+                    )
+
+            return self
+
+        # ── GR1 branch ───────────────────────────────────────────────────────
+        if self.year not in self.AVAILABLE_YEARS_GR1:
+            raise ValueError(
+                f"Year {self.year} is not available in the GR1 release. "
+                f"Available years: 2000-2020. "
+                f"For years 2015-2030 use release='GR2'."
+            )
+
+        if self.project == "age_structures":
             if self.school_age:
                 if self.resolution == 100:
                     self.logger.warning(
-                        "School age population datasets are only available at 1km `resolution`, resolution is set as 1000"
+                        "School age datasets are only available at 1km resolution. "
+                        "`resolution` set to 1000."
                     )
                     self.resolution = 1000
-
                 if self.year != 2020:
                     self.logger.warning(
-                        "School age population datasets are only available for 2020, `year` is set as 2020"
+                        "School age datasets are only available for 2020. "
+                        "`year` set to 2020."
                     )
                     self.year = 2020
-
                 if self.un_adjusted:
                     self.logger.warning(
-                        "School age population datasets are only available without UN adjustment, `un_adjusted` is set as False"
+                        "School age datasets are only available without UN adjustment. "
+                        "`un_adjusted` set to False."
                     )
                     self.un_adjusted = False
-
                 if self.constrained:
                     self.logger.warning(
-                        "School age population datasets are only available unconstrained, `constrained` is set as False"
+                        "School age datasets are only available unconstrained. "
+                        "`constrained` set to False."
                     )
                     self.constrained = False
-
                 self.dataset_category = "sapya1km"
-            else:
+
+            else:  # non-school age_structures
                 if self.resolution == 1000:
                     self.logger.warning(
-                        "Age structures datasets are only available at 100m resolution, `resolution` is set as 100"
+                        "Age structures datasets are only available at 100m resolution. "
+                        "`resolution` set to 100."
                     )
                     self.resolution = 100
-
                 if not self.constrained:
                     if self.un_adjusted:
                         self.logger.warning(
-                            "Age structures unconstrained datasets are only available without UN adjustment, `un_adjusted` is set as False"
+                            "Age structures unconstrained datasets are only available without "
+                            "UN adjustment. `un_adjusted` set to False."
                         )
                         self.un_adjusted = False
-
-                    self.dataset_category = (
-                        "G2_UC_Age_2024_100m" if self.year == 2024 else "aswpgp"
-                    )
+                    self.dataset_category = "aswpgp"
                 else:
                     if self.un_adjusted:
                         if self.year != 2020:
                             self.logger.warning(
-                                "Age structures constrained datasets with UN adjustment are only available for 2020, `year` is set as 2020"
+                                "Age structures constrained datasets with UN adjustment are only "
+                                "available for 2020. `year` set to 2020."
                             )
                             self.year = 2020
                         self.dataset_category = "ascicua_2020"
                     else:
-                        if self.year == 2024:
-                            self.dataset_category = "G2_CN_Age_2024_100m"
-                        elif self.year == 2020:
-                            self.dataset_category = "ascic_2020"
-                        else:
+                        if self.year != 2020:
                             raise ValueError(
-                                "Age structures constrained datasets without UN adjustment are only available for 2020 and 2024, please set `year` to one of the available options: 2020, 2024"
+                                "Age structures constrained datasets without UN adjustment are "
+                                "only available for 2020. Please set `year` to 2020."
                             )
+                        self.dataset_category = "ascic_2020"
 
         elif self.project == "pop":
-
             if self.school_age:
                 raise ValueError(
-                    f"""
-                    Received unexpected value of `{self.school_age}` for project: `{self.project}`.
-                    For school age population datasets, please set project as `age_structures`.
-                    """
+                    f"Received unexpected value '{self.school_age}' for `school_age` with "
+                    f"project='pop'. For school age population, use project='age_structures'."
                 )
-
-            if self.year == 2024:
-                if self.resolution == 1000:
+            if self.under_18:
+                raise ValueError(
+                    "`under_18=True` is only available with release='GR2' and project='age_structures'."
+                )
+            if self.constrained:
+                if self.year != 2020:
                     self.logger.warning(
-                        "2024 datasets are only available at 100m resolution, `resolution` is set as 100m"
+                        "Population constrained datasets are only available for 2020. "
+                        "`year` set to 2020."
+                    )
+                    self.year = 2020
+                if self.resolution != 100:
+                    self.logger.warning(
+                        "Population constrained datasets are only available at 100m resolution. "
+                        "`resolution` set to 100."
                     )
                     self.resolution = 100
-                if self.un_adjusted:
-                    self.logger.warning(
-                        "2024 datasets are only available without UN adjustment, `un_adjusted` is set as False"
-                    )
-                    self.un_adjusted = False
-
                 self.dataset_category = (
-                    "G2_CN_POP_2024_100m" if self.constrained else "G2_UC_POP_2024_100m"
+                    "cic2020_UNadj_100m" if self.un_adjusted else "cic2020_100m"
                 )
             else:
-                if self.constrained:
-                    if self.year != 2020:
-                        self.logger.warning(
-                            "Population constrained datasets are only available for 2020, `year` is set as 2020"
-                        )
-                        self.year = 2020
+                self.dataset_category = (
+                    f"wpgp{'unadj' if self.un_adjusted else ''}"
+                    if self.resolution == 100
+                    else ("wpicuadj1km" if self.un_adjusted else "wpic1km")
+                )
 
-                    if self.resolution != 100:
-                        self.logger.warning(
-                            "Population constrained datasets are only available at 100m resolution, `resolution` is set as 100"
-                        )
-                        self.resolution = 100
-
-                    self.dataset_category = (
-                        "cic2020_UNadj_100m" if self.un_adjusted else "cic2020_100m"
-                    )
-                else:
-                    if self.resolution == 100:
-                        self.dataset_category = (
-                            f"wpgp{'unadj' if self.un_adjusted else ''}"
-                        )
-                    else:
-                        self.dataset_category = (
-                            "wpic1km" if not self.un_adjusted else "wpicuadj1km"
-                        )
+        return self
 
     def get_relevant_data_units_by_geometry(
         self, geometry: str, **kwargs
@@ -641,11 +720,12 @@ class WPPopulationConfig(BaseHandlerConfig):
                 f"project: {self.project}, category: {self.dataset_category}, year: {self.year}. "
                 "Please check the configuration parameters."
             )
+        ZIP_CATEGORIES = {"sapya1km", "G2_Age_U18_R25A_100m"}
 
         files = [
             file
             for file in datasets[0].get("files", [])
-            if ((self.dataset_category == "sapya1km") or file.endswith(".tif"))
+            if (self.dataset_category in ZIP_CATEGORIES or file.endswith(".tif"))
         ]
 
         return files
@@ -687,7 +767,7 @@ class WPPopulationConfig(BaseHandlerConfig):
         level_filters = _to_set(education_level)
 
         # 1) School-age branch (zip → extracted tifs)
-        if self.project == "age_structures" and self.school_age:
+        if self.project == "age_structures" and (self.school_age or self.under_18):
             resolved_paths: List[Path] = []
             for url in units:
                 output_dir = self.get_data_unit_path(url).parent
@@ -749,14 +829,16 @@ class WPPopulationConfig(BaseHandlerConfig):
     def __repr__(self) -> str:
 
         return (
-            f"WPPopulationConfig(",
+            f"WPPopulationConfig("
+            f"release={self.release}, "
             f"project={self.project}, "
             f"year={self.year}, "
             f"resolution={self.resolution}, "
             f"un_adjusted={self.un_adjusted}, "
             f"constrained={self.constrained}, "
             f"school_age={self.school_age}, "
-            f")",
+            f"under_18={self.under_18}"
+            f")"
         )
 
 
@@ -988,12 +1070,14 @@ class WPPopulationHandler(BaseHandler):
 
     def __init__(
         self,
+        release: Literal["GR1", "GR2"] = "GR1",
         project: Literal["pop", "age_structures"] = "pop",
         year: int = 2020,
         resolution: int = 1000,
         un_adjusted: bool = True,
         constrained: bool = False,
         school_age: bool = False,
+        under_18: bool = False,
         config: Optional[WPPopulationConfig] = None,
         downloader: Optional[WPPopulationDownloader] = None,
         reader: Optional[WPPopulationReader] = None,
@@ -1001,12 +1085,14 @@ class WPPopulationHandler(BaseHandler):
         logger: Optional[logging.Logger] = None,
         **kwargs,
     ):
+        self._release = release
         self._project = project
         self._year = year
         self._resolution = resolution
         self._un_adjusted = un_adjusted
         self._constrained = constrained
         self._school_age = school_age
+        self._under_18 = under_18
         super().__init__(
             config=config,
             downloader=downloader,
@@ -1030,12 +1116,14 @@ class WPPopulationHandler(BaseHandler):
             Configured WPPopulationConfig instance
         """
         return WPPopulationConfig(
+            release=self._release,
             project=self._project,
             year=self._year,
             resolution=self._resolution,
             un_adjusted=self._un_adjusted,
             constrained=self._constrained,
             school_age=self._school_age,
+            under_18=self._under_18,
             data_store=data_store,
             logger=logger,
             **kwargs,

@@ -650,22 +650,35 @@ def aggregate_points_to_zones(
     """
     Aggregate point data to zones with flexible aggregation methods.
 
+    For zones with no overlapping points:
+    - ``"count"`` aggregation fills missing values with ``0``.
+    - All other aggregations (``"mean"``, ``"sum"``, ``"min"``, ``"max"``, etc.)
+      fill missing values with ``np.nan`` to distinguish "no data" from a
+      true zero value.
+
     Args:
-        points (Union[pd.DataFrame, gpd.GeoDataFrame]): Point data to aggregate
-        zones (gpd.GeoDataFrame): Zones to aggregate points to
-        value_columns (Optional[Union[str, List[str]]]): Column(s) containing values to aggregate
-            If None, only counts will be performed.
+        points (Union[pd.DataFrame, gpd.GeoDataFrame]): Point data to aggregate.
+        zones (gpd.GeoDataFrame): Zones to aggregate points to.
+        value_columns (Optional[Union[str, List[str]]]): Column(s) containing
+            values to aggregate. If None, only counts will be performed.
         aggregation (Union[str, Dict[str, str]]): Aggregation method(s) to use:
-            - Single string: Use same method for all columns ("count", "mean", "sum", "min", "max")
-            - Dict: Map column names to aggregation methods
-        point_zone_predicate (str): Spatial predicate for point-to-zone relationship
-            Options: "within", "intersects"
-        zone_id_column (str): Column in zones containing zone identifiers
-        output_suffix (str): Suffix to add to output column names
-        drop_geometry (bool): Whether to drop the geometry column from output
+            - Single string: Same method for all columns
+              (``"count"``, ``"mean"``, ``"sum"``, ``"min"``, ``"max"``).
+            - Dict: Map column names to aggregation methods.
+        point_zone_predicate (str): Spatial predicate for point-to-zone
+            relationship. Options: ``"within"``, ``"intersects"``.
+        zone_id_column (str): Column in zones containing zone identifiers.
+        output_suffix (str): Suffix to add to output column names.
+        drop_geometry (bool): Whether to drop the geometry column from output.
 
     Returns:
-        gpd.GeoDataFrame: Zones with aggregated point values
+        gpd.GeoDataFrame: Zones with aggregated point values.
+
+    Raises:
+        TypeError: If ``zones`` is not a GeoDataFrame or ``aggregation`` is
+            not a str or dict.
+        ValueError: If ``zone_id_column`` is missing, ``value_columns`` are
+            not found, or aggregation dict keys are inconsistent.
 
     Example:
         >>> poi_counts = aggregate_points_to_zones(pois, zones, aggregation="count")
@@ -675,86 +688,79 @@ def aggregate_points_to_zones(
         >>> poi_multiple = aggregate_points_to_zones(
         ...     pois, zones,
         ...     value_columns=["score", "visits"],
-        ...     aggregation={"score": "mean", "visits": "sum"}
+        ...     aggregation={"score": "mean", "visits": "sum"},
         ... )
     """
-    # Input validation
+    # --- Input validation ---
     if not isinstance(zones, gpd.GeoDataFrame):
         raise TypeError("zones must be a GeoDataFrame")
 
     if zone_id_column not in zones.columns:
         raise ValueError(f"Zone ID column '{zone_id_column}' not found in zones")
 
-    # Convert points to GeoDataFrame if necessary
-    if not isinstance(points, gpd.GeoDataFrame):
-        points_gdf = convert_to_geodataframe(points)
-    else:
-        points_gdf = points.copy()
+    # --- Normalise points ---
+    points_gdf = (
+        convert_to_geodataframe(points)
+        if not isinstance(points, gpd.GeoDataFrame)
+        else points.copy()
+    )
 
-    # Ensure CRS match
+    # --- CRS alignment ---
     if points_gdf.crs != zones.crs:
         points_gdf = points_gdf.to_crs(zones.crs)
 
-    # Handle value columns
-    if value_columns is not None:
-        if isinstance(value_columns, str):
-            value_columns = [value_columns]
+    # --- Normalise value_columns ---
+    if isinstance(value_columns, str):
+        value_columns = [value_columns]
 
-        # Validate that all value columns exist
+    if value_columns is not None:
         missing_cols = [col for col in value_columns if col not in points_gdf.columns]
         if missing_cols:
             raise ValueError(f"Value columns not found in points data: {missing_cols}")
 
-    # Handle aggregation method
-    agg_funcs = {}
+    # --- Build agg_funcs and per-output-column method lookup ---
+    agg_funcs: Dict[str, str] = {}
+    # Maps output column name → aggregation method for fill-value decisions
+    agg_method_for_output_col: Dict[str, str] = {}
 
     if isinstance(aggregation, str):
         if aggregation == "count":
-            # Special case for count (doesn't need value columns)
             agg_funcs["__count"] = "count"
         elif value_columns is not None:
-            # Apply the same aggregation to all value columns
             agg_funcs = {col: aggregation for col in value_columns}
+            agg_method_for_output_col = {
+                f"{col}{output_suffix}": aggregation for col in value_columns
+            }
         else:
             raise ValueError(
-                "Value columns must be specified for aggregation methods other than 'count'"
+                "value_columns must be specified for aggregation methods other than 'count'"
             )
     elif isinstance(aggregation, dict):
-        # Validate dictionary keys
         if value_columns is None:
             raise ValueError(
-                "Value columns must be specified when using a dictionary of aggregation methods"
+                "value_columns must be specified when using a dict of aggregation methods"
             )
-
         missing_aggs = [col for col in value_columns if col not in aggregation]
         extra_aggs = [col for col in aggregation if col not in value_columns]
-
         if missing_aggs:
             raise ValueError(f"Missing aggregation methods for columns: {missing_aggs}")
         if extra_aggs:
             raise ValueError(
-                f"Aggregation methods specified for non-existent columns: {extra_aggs}"
+                f"Aggregation methods specified for columns not in value_columns: {extra_aggs}"
             )
-
-        agg_funcs = aggregation
+        agg_funcs = dict(aggregation)
+        agg_method_for_output_col = {
+            f"{col}{output_suffix}": method for col, method in aggregation.items()
+        }
     else:
-        raise TypeError("aggregation must be a string or dictionary")
+        raise TypeError("aggregation must be a str or dict")
 
-    # Create a copy of the zones
+    # --- Spatial join ---
     result = zones.copy()
-
-    # Spatial join
     joined = gpd.sjoin(points_gdf, zones, how="inner", predicate=point_zone_predicate)
 
-    # Perform aggregation
-    if "geometry" in joined.columns and not all(
-        value == "count" for value in agg_funcs.values()
-    ):
-        # Drop geometry for non-count aggregations to avoid errors
-        joined = joined.drop(columns=["geometry"])
-
+    # --- Aggregation ---
     if "__count" in agg_funcs:
-        # Count points per zone
         counts = (
             joined.groupby(zone_id_column)
             .size()
@@ -765,37 +771,50 @@ def aggregate_points_to_zones(
             result[f"point_count{output_suffix}"].fillna(0).astype(int)
         )
     else:
-        # Aggregate values
+        # Drop geometry before non-count aggregations to avoid errors
+        if "geometry" in joined.columns:
+            joined = joined.drop(columns=["geometry"])
+
         aggregated = joined.groupby(zone_id_column).agg(agg_funcs).reset_index()
 
-        # Rename columns to include aggregation method
-        if len(value_columns) > 0:
-            # Handle MultiIndex columns from pandas aggregation
-            if isinstance(aggregated.columns, pd.MultiIndex):
-                aggregated.columns = [
-                    (
-                        f"{col[0]}_{col[1]}{output_suffix}"
-                        if col[0] != zone_id_column
-                        else zone_id_column
-                    )
+        # Flatten MultiIndex columns produced by some pandas agg paths
+        if isinstance(aggregated.columns, pd.MultiIndex):
+            aggregated.columns = [
+                (
+                    f"{col[0]}_{col[1]}{output_suffix}"
+                    if col[0] != zone_id_column
+                    else zone_id_column
+                )
+                for col in aggregated.columns
+            ]
+        else:
+            # Single-level: rename value columns to include suffix
+            aggregated = aggregated.rename(
+                columns={
+                    col: f"{col}{output_suffix}"
                     for col in aggregated.columns
-                ]
+                    if col != zone_id_column
+                }
+            )
 
-            # Merge back to zones
-            result = result.merge(aggregated, on=zone_id_column, how="left")
+        result = result.merge(aggregated, on=zone_id_column, how="left")
 
-            # Fill NaN values with zeros
-            for col in result.columns:
-                if (
-                    col != zone_id_column
-                    and col != "geometry"
-                    and pd.api.types.is_numeric_dtype(result[col])
-                ):
-                    result[col] = result[col].fillna(0)
+        # -------------------------------------------------------
+        # Fill with 0 only for 'count', NaN for everything
+        # else so zones with no overlapping points are distinguishable
+        # from zones whose true aggregated value is zero.
+        # -------------------------------------------------------
+        for col in result.columns:
+            if col in (zone_id_column, "geometry"):
+                continue
+            if not pd.api.types.is_numeric_dtype(result[col]):
+                continue
+            method = agg_method_for_output_col.get(col, "")
+            fill_value = 0 if method == "count" else np.nan
+            result[col] = result[col].fillna(fill_value)
 
     if drop_geometry:
         result = result.drop(columns=["geometry"])
-        return result
 
     return result
 
@@ -930,9 +949,13 @@ def aggregate_polygons_to_zones(
     Aggregates polygon data to zones based on a specified spatial relationship.
 
     This function performs a spatial join between polygons and zones and then
-    aggregates values from the polygons to their corresponding zones. The aggregation
-    method depends on the `predicate` parameter, which determines the nature of the
-    spatial relationship.
+    aggregates values from the polygons to their corresponding zones.
+
+    For zones with no overlapping/contained polygons:
+    - ``"count"`` aggregation fills missing values with ``0``.
+    - All other aggregations (``"sum"``, ``"mean"``, ``"min"``, ``"max"``, etc.)
+      fill missing values with ``np.nan`` to distinguish "no data" from a
+      true zero value.
 
     Args:
         polygons (Union[pd.DataFrame, gpd.GeoDataFrame]):
@@ -940,63 +963,60 @@ def aggregate_polygons_to_zones(
         zones (gpd.GeoDataFrame):
             The target zones to which the polygon data will be aggregated.
         value_columns (Union[str, List[str]]):
-            The column(s) in `polygons` containing the numeric values to aggregate.
+            The column(s) in ``polygons`` containing the numeric values to aggregate.
         aggregation (Union[str, Dict[str, str]], optional):
-            The aggregation method(s) to use. Can be a single string (e.g., "sum",
-            "mean", "max") to apply the same method to all columns, or a dictionary
-            mapping column names to aggregation methods (e.g., `{'population': 'sum'}`).
-            Defaults to "sum".
+            The aggregation method(s) to use. Can be a single string (e.g., ``"sum"``,
+            ``"mean"``, ``"max"``) or a dict mapping column names to methods.
+            Defaults to ``"sum"``.
         predicate (Literal["intersects", "within", "fractional"], optional):
-            The spatial relationship to use for aggregation:
-            - "intersects": Aggregates values for any polygon that intersects a zone.
-            - "within": Aggregates values for polygons entirely contained within a zone.
-            - "fractional": Performs area-weighted aggregation. The value of a polygon
-              is distributed proportionally to the area of its overlap with each zone.
-              This requires calculating a UTM CRS for accurate area measurements.
-            Defaults to "intersects".
+            Spatial relationship to use for aggregation:
+            - ``"intersects"``: Any polygon that intersects the zone.
+            - ``"within"``: Polygons entirely contained within the zone.
+            - ``"fractional"``: Area-weighted aggregation distributed proportionally
+              to overlap area. Requires computing a UTM CRS for accuracy.
+            Defaults to ``"intersects"``.
         zone_id_column (str, optional):
-            The name of the column in `zones` that contains the unique zone identifiers.
-            Defaults to "zone_id".
+            Column in ``zones`` containing unique zone identifiers.
+            Defaults to ``"zone_id"``.
         output_suffix (str, optional):
-            A suffix to add to the names of the new aggregated columns in the output
-            GeoDataFrame. Defaults to "".
+            Suffix appended to aggregated output column names. Defaults to ``""``.
         drop_geometry (bool, optional):
-            If True, the geometry column will be dropped from the output GeoDataFrame.
-            Defaults to False.
+            If True, drops the geometry column from the output. Defaults to False.
 
     Returns:
         gpd.GeoDataFrame:
-            The `zones` GeoDataFrame with new columns containing the aggregated values.
-            Zones with no intersecting or contained polygons will have `0` values.
+            The ``zones`` GeoDataFrame with new columns containing aggregated values.
+            Zones with no intersecting or contained polygons will have ``np.nan``
+            for non-count aggregations and ``0`` for count aggregations.
 
     Raises:
-        TypeError: If `zones` is not a GeoDataFrame or `polygons` cannot be converted.
-        ValueError: If `zone_id_column` or any `value_columns` are not found, or
-                    if the geometry types in `polygons` are not polygons.
-        RuntimeError: If an error occurs during the area-weighted aggregation process.
+        TypeError: If ``zones`` is not a GeoDataFrame or ``polygons`` cannot be
+            converted to one.
+        ValueError: If ``zone_id_column`` or any ``value_columns`` are not found,
+            if the ``polygons`` geometry types are not polygonal, if ``zones`` is
+            empty, or if there is a column name conflict with ``zone_id_column``.
+        RuntimeError: If an error occurs during area-weighted aggregation.
 
     Example:
-        >>> import geopandas as gpd
-        >>> # Assuming 'landuse_polygons' and 'grid_zones' are GeoDataFrames
-        >>> # Aggregate total population within each grid zone using area-weighting
+        >>> # Area-weighted population aggregation
         >>> pop_by_zone = aggregate_polygons_to_zones(
         ...     landuse_polygons,
         ...     grid_zones,
         ...     value_columns="population",
         ...     predicate="fractional",
         ...     aggregation="sum",
-        ...     output_suffix="_pop"
+        ...     output_suffix="_pop",
         ... )
-        >>> # Aggregate the count of landuse parcels intersecting each zone
+        >>> # Count of parcels intersecting each zone
         >>> count_by_zone = aggregate_polygons_to_zones(
         ...     landuse_polygons,
         ...     grid_zones,
         ...     value_columns="parcel_id",
         ...     predicate="intersects",
-        ...     aggregation="count"
+        ...     aggregation="count",
         ... )
     """
-    # Input validation
+    # --- Input validation ---
     if not isinstance(zones, gpd.GeoDataFrame):
         raise TypeError("zones must be a GeoDataFrame")
 
@@ -1008,10 +1028,11 @@ def aggregate_polygons_to_zones(
 
     if predicate not in ["intersects", "within", "fractional"]:
         raise ValueError(
-            f"Unsupported predicate: {predicate}. Predicate can be one of `intersects`, `within`, `fractional`"
+            f"Unsupported predicate: '{predicate}'. "
+            "Must be one of: 'intersects', 'within', 'fractional'."
         )
 
-    # Convert polygons to GeoDataFrame if necessary
+    # --- Normalise polygons ---
     if not isinstance(polygons, gpd.GeoDataFrame):
         try:
             polygons_gdf = convert_to_geodataframe(polygons)
@@ -1026,7 +1047,7 @@ def aggregate_polygons_to_zones(
         LOGGER.warning("Empty polygons GeoDataFrame provided")
         return zones
 
-    # Validate geometry types
+    # --- Geometry type validation ---
     non_polygon_geoms = [
         geom_type
         for geom_type in polygons_gdf.geometry.geom_type.unique()
@@ -1038,31 +1059,36 @@ def aggregate_polygons_to_zones(
             "Use aggregate_points_to_zones for point data."
         )
 
-    # Process value columns
+    # --- Normalise value_columns ---
     if isinstance(value_columns, str):
         value_columns = [value_columns]
 
-    # Validate that all value columns exist
     missing_cols = [col for col in value_columns if col not in polygons_gdf.columns]
     if missing_cols:
         raise ValueError(f"Value columns not found in polygons data: {missing_cols}")
 
-    # Check for column name conflicts with zone_id_column
     if zone_id_column in polygons_gdf.columns:
         raise ValueError(
             f"Column name conflict: polygons DataFrame contains column '{zone_id_column}' "
-            f"which conflicts with the zone identifier column. Please rename this column "
-            f"in the polygons data to avoid confusion."
+            "which conflicts with the zone identifier column. "
+            "Please rename this column in the polygons data."
         )
 
-    # Ensure CRS match
+    # --- CRS alignment ---
     if polygons_gdf.crs != zones.crs:
         polygons_gdf = polygons_gdf.to_crs(zones.crs)
 
-    # Handle aggregation method
+    # --- Build aggregation functions ---
     agg_funcs = _process_aggregation_methods(aggregation, value_columns)
 
-    # Prepare minimal zones for spatial operations (only zone_id_column and geometry)
+    # Build lookup: original col name → method (before suffix is applied)
+    # Used below to decide fill value per column.
+    if isinstance(aggregation, str):
+        agg_method_for_col: Dict[str, str] = {col: aggregation for col in value_columns}
+    else:
+        agg_method_for_col = dict(aggregation)
+
+    # --- Spatial aggregation ---
     minimal_zones = zones[[zone_id_column, "geometry"]].copy()
 
     if predicate == "fractional":
@@ -1079,20 +1105,25 @@ def aggregate_polygons_to_zones(
             predicate,
         )
 
-    # Merge aggregated results back to complete zones data
+    # --- Merge back to full zones ---
     result = zones.merge(
         aggregated_data[[col for col in aggregated_data.columns if col != "geometry"]],
         on=zone_id_column,
         how="left",
     )
 
-    # Fill NaN values with zeros for the newly aggregated columns only
+    # --- Fill NaN values: 0 for count, np.nan for everything else ---
+    # NOTE: output_suffix has NOT been applied yet, so column names here
+    # still match the keys in agg_method_for_col.
     aggregated_cols = [col for col in result.columns if col not in zones.columns]
     for col in aggregated_cols:
-        if pd.api.types.is_numeric_dtype(result[col]):
-            result[col] = result[col].fillna(0)
+        if not pd.api.types.is_numeric_dtype(result[col]):
+            continue
+        method = agg_method_for_col.get(col, "")
+        fill_value = 0 if method == "count" else np.nan
+        result[col] = result[col].fillna(fill_value)
 
-    # Apply output suffix consistently to result columns only
+    # --- Apply output suffix ---
     if output_suffix:
         rename_dict = {col: f"{col}{output_suffix}" for col in aggregated_cols}
         result = result.rename(columns=rename_dict)

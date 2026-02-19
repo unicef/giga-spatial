@@ -710,6 +710,10 @@ class BaseHandler(ABC):
                 # Fallback - download by source if unit mapping isn't available
                 self.downloader.download(source, **kwargs)
 
+            # After attempted download, refresh data paths in case the mapping
+            # from units to local files has changed (e.g. ZIP → extracted .tif files)
+            data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
+
             # After attempted download, check again
             remaining_missing = [
                 path
