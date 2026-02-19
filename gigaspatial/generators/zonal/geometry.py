@@ -10,6 +10,7 @@ from gigaspatial.processing.geo import (
     add_area_in_meters,
     get_centroids,
 )
+from gigaspatial.processing.tif_processor import TifProcessor
 from gigaspatial.handlers.ghsl import GHSLDataHandler
 from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
 from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
@@ -679,12 +680,14 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
 
         if predicate == "centroid_within":
             if handler.config.project == "age_structures":
-                # Load individual tif processors for the single country
-                all_tif_processors = handler.load_data(
-                    countries_list[0],
+                # Single country enforced above
+                iso = countries_list[0]
+                raw = handler.load_data(
+                    iso,
                     ensure_available=self.config.ensure_available,
                     **kwargs,
                 )
+                all_tif_processors = self._ensure_tif_list(raw)
 
                 # Sum results from each tif_processor separately
                 all_results_by_zone = {
@@ -699,18 +702,20 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                     )
                     for zone_id, value in single_raster_result.items():
                         all_results_by_zone[zone_id] += value
+
                 result = all_results_by_zone
+
             else:
-                # Existing behavior for non-age_structures projects or if merging is fine
-                tif_processors = []
-                for c in countries_list:
-                    tif_processors.append(
-                        handler.load_data(
-                            c,
-                            ensure_available=self.config.ensure_available,
-                            **kwargs,
-                        )
+                # Non age_structures: aggregate all countries into a flat list
+                tif_processors: List[TifProcessor] = []
+                for iso in countries_list:
+                    raw = handler.load_data(
+                        iso,
+                        ensure_available=self.config.ensure_available,
+                        **kwargs,
                     )
+                    tif_processors.extend(self._ensure_tif_list(raw))
+
                 self.logger.info(
                     f"Sampling WorldPop Population data using 'sum' statistic"
                 )

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.2] - 2026-02-XX
+
+### Changed
+
+-   **WorldPop Population Mapping Robustness**
+    -   Refactored `GeometryBasedZonalViewGenerator.map_wp_pop` and `PoiViewGenerator.map_wp_pop` to safely handle `WPPopulationHandler.load_data` returning either a single `TifProcessor` or `List[TifProcessor]`.
+    -   Introduced `_ensure_tif_list` helper to normalize handler outputs into flat lists, preventing crashes when filters (e.g., `under_18=True`, `min_age`/`max_age`) yield single rasters.
+    -   Non-`age_structures` raster paths now build flat `List[TifProcessor]` across countries using `extend`, avoiding nested lists.
+    -   Preserved per-raster summing semantics for `age_structures` + `centroid_within` (zonal or POI), now robust to single/list outputs.
+
+-   **PoiViewGenerator: Removed unused kwargs from aggregation calls**
+    -   Cleaned up `map_points()` and `map_polygons()` methods by removing `**kwargs` arguments passed to `aggregate_points_to_zones()` and `aggregate_polygons_to_zones()`, which do not accept additional keyword arguments.
+
+### Fixed
+
+-   Updated `requests` dependency from 2.32.3 to 2.32.4 to address CVE-2024-47081 (URL parsing issue leaking .netrc credentials).
+
 ## [v0.8.1] - 2026-02-19
 
 ### Added

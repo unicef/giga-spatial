@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Union, Tuple, Literal
+from typing import List, Optional, Union, Tuple, Literal, Iterable
 from pydantic.dataclasses import dataclass, Field
 
 import geopandas as gpd
@@ -660,7 +660,6 @@ class PoiViewGenerator:
                     zone_id_column="poi_id",
                     output_suffix="",
                     drop_geometry=True,
-                    **kwargs,
                 )
 
                 output_col_from_agg = (
@@ -696,7 +695,6 @@ class PoiViewGenerator:
                     zone_id_column="poi_id",
                     output_suffix="",
                     drop_geometry=True,
-                    **kwargs,
                 )
 
                 output_col_from_agg = value_column
@@ -868,12 +866,14 @@ class PoiViewGenerator:
 
         if predicate == "centroid_within":
             if handler.config.project == "age_structures":
-                # Load individual tif processors for the single country
-                all_tif_processors = handler.load_data(
-                    countries_list[0],
+                # Single country enforced above
+                iso = countries_list[0]
+                raw = handler.load_data(
+                    iso,
                     ensure_available=self.config.ensure_available,
                     **kwargs,
                 )
+                all_tif_processors = self._ensure_tif_list(raw)
 
                 # Sum results from each tif_processor separately
                 summed_results_by_poi = {
@@ -904,15 +904,21 @@ class PoiViewGenerator:
                 )
 
             else:
-                # Existing behavior for non-age_structures projects or if merging is fine
-                # 'data_to_process' will be a list of TifProcessor objects, which map_zonal_stats will merge
-                data_to_process = []
-                for c in countries_list:
-                    data_to_process.extend(
-                        handler.load_data(
-                            c, ensure_available=self.config.ensure_available, **kwargs
-                        )
+                # Non age_structures: flat list across all countries
+                tif_processors: List[TifProcessor] = []
+                for iso in countries_list:
+                    raw = handler.load_data(
+                        iso,
+                        ensure_available=self.config.ensure_available,
+                        **kwargs,
                     )
+                    tif_processors.extend(self._ensure_tif_list(raw))
+
+                data_to_process = (
+                    tif_processors  # List[TifProcessor] for map_zonal_stats
+                )
+
+        # Polygon‑based path
         else:
             # 'data_to_process' will be a GeoDataFrame
             data_to_process = pd.concat(
@@ -931,16 +937,15 @@ class PoiViewGenerator:
 
         final_mapped_df: pd.DataFrame
 
-        # If 'data_to_process' is already the summed DataFrame (from age_structures/centroid_within branch),
-        # use it directly.
+        # Dispatch based on data_to_process type
         if (
             isinstance(data_to_process, pd.DataFrame)
             and output_column in data_to_process.columns
             and "poi_id" in data_to_process.columns
         ):
-            final_mapped_df = data_to_process
+            final_mapped_df = data_to_process  # Pre‑summed from age_structures branch
         else:
-            # For other cases, proceed with the original call to map_zonal_stats
+            # List of TifProcessor, GDF, or DF – let map_zonal_stats handle
             final_mapped_df = self.map_zonal_stats(
                 data=data_to_process,
                 stat="sum",
@@ -950,9 +955,8 @@ class PoiViewGenerator:
                 output_column=output_column,
                 **kwargs,
             )
-        self._update_view(
-            final_mapped_df
-        )  # Update the view with the final mapped DataFrame
+
+        self._update_view(final_mapped_df)
         return self.view
 
     def save_view(
@@ -1371,3 +1375,35 @@ class PoiViewGenerator:
 
         self._update_view(result_df)
         return self.view
+
+    @staticmethod
+    def _ensure_tif_list(obj) -> List["TifProcessor"]:
+        """
+        Normalize handler.load_data output into a flat list of TifProcessor.
+
+        - If obj is a single TifProcessor, wrap it in a list.
+        - If obj is an iterable of TifProcessor, return list(obj).
+        - If obj is None or empty, return [].
+        """
+        if obj is None:
+            return []
+        if isinstance(obj, TifProcessor):
+            return [obj]
+        if isinstance(obj, Iterable):
+            items = list(obj)
+            if not items:
+                return []
+            if isinstance(items[0], TifProcessor):
+                return items
+            # Flatten one level if nested (rare but safe)
+            flat: List[TifProcessor] = []
+            for it in items:
+                if isinstance(it, TifProcessor):
+                    flat.append(it)
+                elif isinstance(it, Iterable):
+                    flat.extend(list(it))
+            return flat
+        raise TypeError(
+            f"Unexpected type from load_data: {type(obj).__name__}; "
+            f"expected TifProcessor or iterable of TifProcessor."
+        )

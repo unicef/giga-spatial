@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 from pathlib import Path
-from typing import Dict, List, Optional, Union, TypeVar, Generic
+from typing import Dict, List, Optional, Union, TypeVar, Generic, Iterable
 from shapely.geometry import Polygon
 
 import geopandas as gpd
@@ -536,4 +536,39 @@ class ZonalViewGenerator(ABC, Generic[T]):
                 self.zone_gdf[["zone_id", "geometry"]], on="zone_id", how="left"
             ),
             crs=self.zone_gdf.crs,
+        )
+
+    @staticmethod
+    def _ensure_tif_list(obj) -> List["TifProcessor"]:
+        """
+        Normalize handler.load_data output into a flat list of TifProcessor.
+
+        - If obj is a single TifProcessor, wrap it in a list.
+        - If obj is an iterable of TifProcessor, return list(obj).
+        - If obj is None or empty, return [].
+        """
+        if obj is None:
+            return []
+        # Avoid treating strings as iterables of characters
+        if isinstance(obj, TifProcessor):
+            return [obj]
+        if isinstance(obj, Iterable):
+            items = list(obj)
+            # If it's already a flat list of TifProcessor, just return it
+            if not items:
+                return []
+            if isinstance(items[0], TifProcessor):
+                return items
+            # If for some reason handler returns nested, flatten one level
+            flat: List[TifProcessor] = []
+            for it in items:
+                if isinstance(it, TifProcessor):
+                    flat.append(it)
+                elif isinstance(it, Iterable):
+                    flat.extend(list(it))  # best‑effort flatten
+            return flat
+        # Fallback: unexpected type – be explicit
+        raise TypeError(
+            f"Unexpected type from load_data: {type(obj).__name__}; "
+            f"expected TifProcessor or iterable of TifProcessor."
         )
