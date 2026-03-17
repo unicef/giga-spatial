@@ -1,7 +1,14 @@
+try:
+    import delta_sharing
+
+    _HAS_DELTA_SHARING = True
+except ImportError:
+    _HAS_DELTA_SHARING = False
+    delta_sharing = None
+
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-import delta_sharing
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -62,6 +69,11 @@ class DeltaSharingDataStore:
         schema_name: Optional[str] = global_config.API_SCHEMA_NAME,
         enable_cache: Optional[bool] = None,
     ):
+        if not _HAS_DELTA_SHARING:
+            raise ImportError(
+                "DeltaSharingDataStore requires 'delta-sharing'. "
+                "Install it with: pip install 'giga-spatial[delta]'"
+            )
         """
         Initialize with selective overrides of global config.
 
@@ -108,7 +120,7 @@ class DeltaSharingDataStore:
             enable_cache=enable_cache if enable_cache is not None else True,
         )
 
-        self._client: Optional[delta_sharing.SharingClient] = None
+        self._client: Optional["delta_sharing.SharingClient"] = None
         self._cache: Dict[str, pd.DataFrame] = {}
 
         LOGGER.info(
@@ -118,7 +130,7 @@ class DeltaSharingDataStore:
         )
 
     @property
-    def client(self) -> delta_sharing.SharingClient:
+    def client(self) -> "delta_sharing.SharingClient":
         """Lazy-load Delta Sharing client."""
         if self._client is None:
             self._client = delta_sharing.SharingClient(str(self.config.profile_file))

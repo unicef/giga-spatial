@@ -17,6 +17,27 @@ def read_version():
     return re.search(r'__version__ = "(.*)"', content).group(1)
 
 
+# Define optional dependencies
+EXTRAS = {
+    "gee": ["earthengine-api>=1.7.0", "geemap>=0.36.6"],
+    "bq": [
+        "google-cloud-bigquery>=3.0.0",
+        "google-cloud-bigquery-storage>=2.0.0",
+        "google-auth>=2.0.0",
+        "google-auth-oauthlib>=1.0.0",
+        "google-auth-httplib2>=0.2.0",
+        "db-dtypes>=1.0.0",
+    ],
+    "snowflake": ["snowflake-connector-python>=3.0.0"],
+    "delta": ["delta-sharing==1.2.0"],
+    "db": ["SQLAlchemy>=2.0.0", "sqlalchemy-trino==0.5.0", "dask>=2024.12.1"],
+    "duckdb": ["duckdb==1.2.0"],
+    "azure": ["azure-storage-blob>=12.22.0"],
+}
+
+# Generate 'all' extra
+EXTRAS["all"] = sorted(set(sum(EXTRAS.values(), [])))
+
 setup(
     name="giga-spatial",
     version=read_version(),
@@ -74,7 +95,33 @@ setup(
         "Changelog": "https://unicef.github.io/giga-spatial/changelog",
     },
     python_requires=">=3.10",
-    install_requires=requirements,
+    install_requires=[
+        req
+        for req in requirements
+        if not any(
+            req.startswith(p)
+            for p in [
+                "earthengine-api",
+                "geemap",
+                "google-cloud-bigquery",
+                "google-cloud-bigquery-storage",
+                "google-auth",
+                "google-auth-oauthlib",
+                "google-auth-httplib2",
+                "db-dtypes",
+                "snowflake-connector-python",
+                "delta_sharing",
+                "delta-sharing",
+                "sqlalchemy-trino",
+                "duckdb",
+                "azure-storage-blob",
+                "dask",
+                "SQLAlchemy",
+                "sqlalchemy",
+            ]
+        )
+    ],
+    extras_require=EXTRAS,
     license="AGPL-3.0-or-later",
     license_files=("LICENSE",),
 )

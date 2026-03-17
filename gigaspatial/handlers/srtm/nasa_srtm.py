@@ -1,11 +1,10 @@
-import numpy as np
 import pandas as pd
 from pathlib import Path
 import functools
 import multiprocessing
-from typing import List, Union, Iterable, Literal, Optional, Tuple
+from typing import List, Union, Iterable, Literal, Optional
 import geopandas as gpd
-from shapely.geometry import Point, MultiPoint, box
+from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 import logging
@@ -54,7 +53,6 @@ class NasaSRTMConfig(BaseHandlerConfig):
         super().__post_init__()
         self._res_arc = 3 if self.resolution == "90m" else 1
         self.BASE_URL = self.BASE_URL.format(self._res_arc)
-        # self.session = self._setup_earthdata_session()
         self.session = self._create_authenticated_session()
         self._generate_tile_grid()
 
@@ -227,41 +225,6 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
             )
 
         return [path for path in file_paths if path is not None]
-
-    # def download(
-    #     self,
-    #     source: Union[
-    #         str,  # country
-    #         List[Union[Tuple[float, float], Point]],  # points
-    #         BaseGeometry,  # shapely geoms
-    #         gpd.GeoDataFrame,
-    #     ],
-    #     **kwargs,
-    # ) -> List[str]:
-    #     """
-    #     Download NASA SRTM elevation data for a specified geographic region.
-
-    #     The region can be defined by a country, a list of points,
-    #     a Shapely geometry, or a GeoDataFrame. This method identifies the
-    #     relevant data tiles intersecting the region and downloads them in parallel.
-
-    #     Args:
-    #         source: Defines the geographic area for which to download data.
-    #                 Can be:
-    #                   - A string representing a country code or name.
-    #                   - A list of (latitude, longitude) tuples or Shapely Point objects.
-    #                   - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
-    #                   - A GeoDataFrame with a geometry column in EPSG:4326.
-    #         **kwargs: Additional parameters passed to data unit resolution methods
-
-    #     Returns:
-    #         A list of local file paths for the successfully downloaded tiles.
-    #         Returns an empty list if no data is found for the region or if
-    #         all downloads fail.
-    #     """
-
-    #     tiles = self.config.get_relevant_data_units(source, **kwargs)
-    #     return self.download_data_units(tiles, **kwargs)
 
 
 class NasaSRTMReader(BaseHandlerReader):

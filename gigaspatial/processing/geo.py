@@ -823,7 +823,7 @@ def annotate_with_admin_regions(
     gdf: gpd.GeoDataFrame,
     country_code: str,
     data_store: Optional[DataStore] = None,
-    admin_id_column_suffix="_giga",
+    admin_id_column_suffix="",
 ) -> gpd.GeoDataFrame:
     """
     Annotate a GeoDataFrame with administrative region information.
@@ -854,10 +854,10 @@ def annotate_with_admin_regions(
     ).to_geodataframe()
 
     admin1_data.rename(
-        columns={"id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"},
+        columns={"boundary_id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"},
         inplace=True,
     )
-    admin1_data.drop(columns=["name_en", "parent_id", "country_code"], inplace=True)
+    admin1_data = admin1_data[[f"admin1_id{admin_id_column_suffix}", "admin1", "geometry"]]
 
     admin2_data = AdminBoundaries.create(
         country_code=country_code, admin_level=2, data_store=data_store
@@ -865,17 +865,24 @@ def annotate_with_admin_regions(
 
     admin2_data.rename(
         columns={
-            "id": f"admin2_id{admin_id_column_suffix}",
+            "boundary_id": f"admin2_id{admin_id_column_suffix}",
             "parent_id": f"admin1_id{admin_id_column_suffix}",
             "name": "admin2",
         },
         inplace=True,
     )
-    admin2_data.drop(columns=["name_en", "country_code"], inplace=True)
+    admin2_data = admin2_data[
+        [
+            f"admin2_id{admin_id_column_suffix}",
+            "admin2",
+            f"admin1_id{admin_id_column_suffix}",
+            "geometry"
+        ]
+    ]
 
     # Join dataframes based on 'admin1_id_giga'
     admin_data = admin2_data.merge(
-        admin1_data[[f"admin1_id{admin_id_column_suffix}", "admin1", "geometry"]],
+        admin1_data,
         left_on=f"admin1_id{admin_id_column_suffix}",
         right_on=f"admin1_id{admin_id_column_suffix}",
         how="outer",
@@ -891,7 +898,7 @@ def annotate_with_admin_regions(
         crs=4326,
     )
 
-    admin_data["admin2"].fillna("Unknown", inplace=True)
+    # admin_data["admin2"].fillna("Unknown", inplace=True)
     admin_data[f"admin2_id{admin_id_column_suffix}"] = admin_data[
         f"admin2_id{admin_id_column_suffix}"
     ].replace({np.nan: None})

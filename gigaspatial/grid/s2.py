@@ -509,15 +509,11 @@ class CountryS2Cells(S2Cells):
             f"Initializing S2 cells for country: {country} at level {level}"
         )
 
-        country_geom = (
-            AdminBoundaries.create(
-                country_code=country,
-                data_store=data_store,
-                path=country_geom_path,
-            )
-            .boundaries[0]
-            .geometry
-        )
+        country_geom = AdminBoundaries.create(
+            country_code=country,
+            data_store=data_store,
+            path=country_geom_path,
+        ).to_geoms()[0]
 
         cells = S2Cells.from_geometry(country_geom, level, max_cells=max_cells)
         instance.cells = cells.cells

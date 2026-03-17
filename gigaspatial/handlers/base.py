@@ -36,6 +36,11 @@ class BaseHandlerConfig(ABC):
 
         self._unit_cache = {}
 
+    @property
+    def crs(self) -> str:
+        """The default CRS for this configuration's geometries."""
+        return "EPSG:4326"
+
     def _cache_key(self, source, **kwargs):
         """Create a canonical cache key from source."""
         if isinstance(source, str):
@@ -126,11 +131,7 @@ class BaseHandlerConfig(ABC):
             # Use the admin boundary as geometry
             from gigaspatial.handlers.boundaries import AdminBoundaries
 
-            return (
-                AdminBoundaries.create(country_code=source, **kwargs)
-                .boundaries[0]
-                .geometry
-            )
+            return AdminBoundaries.create(country_code=source, **kwargs).to_geoms()[0]
         elif isinstance(source, gpd.GeoDataFrame):
             if crs := kwargs.get("crs", None):
 
@@ -412,10 +413,10 @@ class BaseHandlerReader(ABC):
     def crop_to_geometry(self, data, geometry, predicate="intersects", **kwargs):
 
         # Project geometry to the projection of the data if data has projection
-        geom_crs = kwargs.get("crs", "EPSG:4326")
+        geom_crs = kwargs.pop("crs", "EPSG:4326")
         if hasattr(data, "crs") and data.crs != geom_crs:
             geometry = (
-                gpd.GeoDataFrame(geometry=[geometry], crs="EPSG:4326")
+                gpd.GeoDataFrame(geometry=[geometry], crs=geom_crs)
                 .to_crs(data.crs)
                 .geometry[0]
             )
@@ -498,15 +499,20 @@ class BaseHandlerReader(ABC):
         # Apply cropping if requested
         if crop_to_source and loaded_data is not None:
             search_geometry = self.config.get_cached_search_geometry(source)
+            geom_crs = getattr(self.config, "crs", "EPSG:4326")
             if search_geometry is not None and isinstance(
                 search_geometry, BaseGeometry
             ):
-                loaded_data = self.crop_to_geometry(loaded_data, search_geometry)
+                loaded_data = self.crop_to_geometry(
+                    loaded_data, search_geometry, crs=geom_crs
+                )
             else:
                 # If no cached geometry, compute it
                 search_geometry = self.config.extract_search_geometry(source, **kwargs)
                 if isinstance(search_geometry, BaseGeometry):
-                    loaded_data = self.crop_to_geometry(loaded_data, search_geometry)
+                    loaded_data = self.crop_to_geometry(
+                        loaded_data, search_geometry, crs=geom_crs
+                    )
 
         return loaded_data
 

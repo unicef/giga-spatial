@@ -1,11 +1,27 @@
 from typing import List, Dict, Optional, Union, Literal
 
 import pandas as pd
-import dask.dataframe as dd
 
-from sqlalchemy import inspect, MetaData, Table, select, create_engine, event, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+try:
+    import dask.dataframe as dd
+
+    _HAS_DASK = True
+except ImportError:
+    dd = None
+    _HAS_DASK = False
+
+try:
+    from sqlalchemy import inspect, MetaData, Table, select, create_engine, event, text
+    from sqlalchemy.engine import Engine
+    from sqlalchemy.exc import SQLAlchemyError
+
+    _HAS_SQLALCHEMY = True
+except ImportError:
+    # Set to None for type checking but avoid runtime failure
+    inspect = MetaData = Table = select = create_engine = event = text = None
+    Engine = SQLAlchemyError = None
+    _HAS_SQLALCHEMY = False
+
 from urllib.parse import quote_plus
 import warnings
 
@@ -35,6 +51,11 @@ class DBConnection:
         sslmode: str = DB_CONFIG.get("sslmode", "require"),  # For PostgreSQL
         **kwargs,
     ):
+        if not _HAS_SQLALCHEMY:
+            raise ImportError(
+                "DBConnection requires 'sqlalchemy'. "
+                "Install it with: pip install 'giga-spatial[db]'"
+            )
         """
         Initialize a database connection for either Trino or PostgreSQL.
 
@@ -71,8 +92,15 @@ class DBConnection:
 
         self._add_event_listener()
 
-    def _create_trino_engine(self, **kwargs) -> Engine:
+    def _create_trino_engine(self, **kwargs) -> "Engine":
         """Create a Trino SQLAlchemy engine."""
+        try:
+            import trino
+        except ImportError:
+            raise ImportError(
+                "Trino support requires 'sqlalchemy-trino'. "
+                "Install it with: pip install 'giga-spatial[db]'"
+            )
         self._connection_string = (
             f"trino://{self.user}:{self.password}@{self.host}:{self.port}/"
             f"{self.catalog}/{self.default_schema}"
@@ -83,7 +111,7 @@ class DBConnection:
             **kwargs,
         )
 
-    def _create_postgresql_engine(self, **kwargs) -> Engine:
+    def _create_postgresql_engine(self, **kwargs) -> "Engine":
         """Create a PostgreSQL SQLAlchemy engine."""
         self._connection_string = (
             f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/"
@@ -276,7 +304,12 @@ class DBConnection:
         columns: Optional[List[str]] = None,
         limit: Optional[int] = None,
         **kwargs,
-    ) -> pd.DataFrame:
+    ) -> "dd.DataFrame":
+        if not _HAS_DASK:
+            raise ImportError(
+                "read_sql_to_dask_dataframe requires 'dask'. "
+                "Install it with: pip install 'giga-spatial[db]'"
+            )
         """
         Reads data to Dask DataFrame (works for both, but connection string differs).
 

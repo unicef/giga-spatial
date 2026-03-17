@@ -1,350 +1,392 @@
-import requests
-import pandas as pd
-import geopandas as gpd
-import time
-from typing import List, Optional, Union, Tuple
-from pydantic.dataclasses import dataclass, Field
-from pydantic import ConfigDict
-import pycountry
+# gigaspatial/handlers/healthsites/api_client.py
 
-from gigaspatial.config import config
+from typing import Any, Optional, Tuple, Union
+
+import httpx
+import logging
+
+import geopandas as gpd
+import pandas as pd
+import pycountry
+from pydantic import ConfigDict, Field
+from pydantic.dataclasses import dataclass
+
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from gigaspatial.config import config as global_config
 from gigaspatial.handlers import OSMLocationFetcher
+from gigaspatial.core.http import BaseRestApiClient, RestApiClientConfig, BasePaginationStrategy, AuthConfig, AuthType
+
+
+class _HealthSitesPaginationStrategy(BasePaginationStrategy):
+    """
+    Page-number pagination for the Healthsites API.
+
+    Handles both GeoJSON (records under 'features') and JSON
+    (records as a direct list) response formats.
+
+    Parameters
+    ----------
+    page_size : int
+        Expected number of records per full page.
+    output_format : str
+        Either 'geojson' or 'json'.
+    """
+
+    def __init__(self, page_size: int = 100, output_format: str = "geojson") -> None:
+        self.page_size = page_size
+        self.output_format = output_format
+
+    def extract_records(self, response: httpx.Response) -> list[dict]:
+        parsed = response.json()
+        if self.output_format == "geojson":
+            return parsed.get("features", [])
+        return parsed if isinstance(parsed, list) else []
+
+    def next_request(
+        self,
+        response: httpx.Response,
+        current_params: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        records = self.extract_records(response)
+        if len(records) < self.page_size:
+            return None  # partial page — last page reached
+        return {**current_params, "page": current_params.get("page", 1) + 1}
+
+
+class _HealthSitesApiClient(BaseRestApiClient):
+    """
+    Internal HTTP client for the Healthsites.io API.
+
+    Uses API key query-param auth and format-aware page-number pagination.
+    """
+
+    def __init__(
+        self,
+        config: RestApiClientConfig,
+        page_size: int,
+        output_format: str,
+    ) -> None:
+        super().__init__(config)
+        self._page_size = page_size
+        self._output_format = output_format
+
+    @property
+    def pagination_strategy(self) -> _HealthSitesPaginationStrategy:
+        return _HealthSitesPaginationStrategy(
+            page_size=self._page_size,
+            output_format=self._output_format,
+        )
+
+_API_BASE_URL = "https://healthsites.io/api/v3/facilities"
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class HealthSitesFetcher:
     """
-    Fetch and process health facility location data from the Healthsites.io API.
+    Fetch and process health facility data from the Healthsites.io API.
+
+    Supports both GeoJSON and JSON output formats, bounding box filtering,
+    date range filtering, and per-facility lookups.
+
+    Parameters
+    ----------
+    country : str, optional
+        Country name or ISO 3166 code. Converted to OSM English name internally.
+    api_key : str
+        Healthsites API key. Defaults to HEALTHSITES_API_KEY from global config.
+    extent : tuple of float, optional
+        Bounding box as (minLng, minLat, maxLng, maxLat).
+    page_size : int
+        Number of records per API page. Defaults to 100.
+    flat_properties : bool
+        Return properties in flat format. Defaults to True.
+    tag_format : str
+        Tag format, either 'osm' or 'hxl'. Defaults to 'osm'.
+    output_format : str
+        Response format, either 'geojson' or 'json'. Defaults to 'geojson'.
+    max_retries : int
+        Maximum retry attempts on transient errors. Defaults to 3.
+    logger : logging.Logger, optional
+        Logger instance. Defaults to global config logger.
+
+    Examples
+    --------
+    >>> fetcher = HealthSitesFetcher(country="Kenya")
+    >>> gdf = fetcher.fetch_facilities()
+    >>> gdf = fetcher.fetch_facilities(max_pages=3, output_format="geojson")
+    >>> df = fetcher.fetch_facilities(output_format="json")
     """
 
     country: Optional[str] = Field(default=None, description="Country to filter")
-    api_url: str = Field(
-        default="https://healthsites.io/api/v3/facilities/",
-        description="Base URL for the Healthsites API",
-    )
-    api_key: str = config.HEALTHSITES_API_KEY
+    api_key: str = Field(default=global_config.HEALTHSITES_API_KEY)
     extent: Optional[Tuple[float, float, float, float]] = Field(
         default=None, description="Bounding box as (minLng, minLat, maxLng, maxLat)"
     )
     page_size: int = Field(default=100, description="Number of records per API page")
-    flat_properties: bool = Field(
-        default=True, description="Show properties in flat format"
-    )
-    tag_format: str = Field(default="osm", description="Tag format (osm/hxl)")
-    output_format: str = Field(
-        default="geojson", description="Output format (json/geojson)"
-    )
-    sleep_time: float = Field(
-        default=0.2, description="Sleep time between API requests"
-    )
+    flat_properties: bool = Field(default=True, description="Flat property format")
+    tag_format: str = Field(default="osm", description="Tag format: 'osm' or 'hxl'")
+    output_format: str = Field(default="geojson", description="Response format: 'geojson' or 'json'")
+    max_retries: int = Field(default=3, description="Max retry attempts on errors")
+    logger: Optional[logging.Logger] = Field(default=None, repr=False)
 
-    def __post_init__(self):
-        self.logger = config.get_logger(self.__class__.__name__)
-        # Convert country code to OSM English name if provided
+    def __post_init__(self) -> None:
+        if self.logger is None:
+            self.logger = global_config.get_logger(self.__class__.__name__)
         if self.country:
             self.country = self._convert_country(self.country)
 
-    def fetch_facilities(self, **kwargs) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-        """
-        Fetch and process health facility locations.
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-        Args:
-            **kwargs: Additional parameters for customization
-                - country: Override country filter
-                - extent: Override extent filter
-                - from_date: Get data modified from this timestamp (datetime or string)
-                - to_date: Get data modified to this timestamp (datetime or string)
-                - page_size: Override default page size
-                - sleep_time: Override default sleep time between requests
-                - max_pages: Limit the number of pages to fetch
-                - output_format: Override output format ('json' or 'geojson')
-                - flat_properties: Override flat properties setting
+    def _build_client(self, output_format: str) -> _HealthSitesApiClient:
+        config = RestApiClientConfig(
+            base_url=_API_BASE_URL,
+            auth=AuthConfig(
+                auth_type=AuthType.API_KEY_QUERY,
+                api_key=self.api_key,
+                api_key_param="api-key",
+            ),
+            max_retries=self.max_retries,
+            default_headers={"Accept": "application/json"},
+        )
+        return _HealthSitesApiClient(config, page_size=self.page_size, output_format=output_format)
 
-        Returns:
-            Union[pd.DataFrame, gpd.GeoDataFrame]: Health facilities data.
-                Returns GeoDataFrame for geojson format, DataFrame for json format.
-        """
-        # Override defaults with kwargs if provided
-        country = kwargs.get("country", self.country)
-        extent = kwargs.get("extent", self.extent)
-        from_date = kwargs.get("from_date", None)
-        to_date = kwargs.get("to_date", None)
-        page_size = kwargs.get("page_size", self.page_size)
-        sleep_time = kwargs.get("sleep_time", self.sleep_time)
-        max_pages = kwargs.get("max_pages", None)
-        output_format = kwargs.get("output_format", self.output_format)
-        flat_properties = kwargs.get("flat_properties", self.flat_properties)
-
-        # Convert country if provided in kwargs
-        if country:
-            country = self._convert_country(country)
-
-        # Prepare base parameters
-        base_params = {
-            "api-key": self.api_key,
+    def _build_base_params(
+        self,
+        country: Optional[str],
+        extent: Optional[Tuple[float, float, float, float]],
+        output_format: str,
+        flat_properties: bool,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Assemble query parameters shared across paginated requests."""
+        params: dict[str, Any] = {
             "tag-format": self.tag_format,
             "output": output_format,
+            "page": 1,
         }
-
-        # Only add flat-properties if True (don't send it as false, as that makes it flat anyway)
         if flat_properties:
-            base_params["flat-properties"] = "true"
-
-        # Add optional filters
-        if country:
-            base_params["country"] = country
-
-        if extent:
-            if len(extent) != 4:
-                raise ValueError(
-                    "Extent must be a tuple of 4 values: (minLng, minLat, maxLng, maxLat)"
-                )
-            base_params["extent"] = ",".join(map(str, extent))
-
-        if from_date:
-            base_params["from"] = self._format_timestamp(from_date)
-
-        if to_date:
-            base_params["to"] = self._format_timestamp(to_date)
-
-        all_data = []
-        page = 1
-
-        self.logger.info(
-            f"Starting to fetch health facilities for country: {country or 'all countries'}"
-        )
-        self.logger.info(
-            f"Output format: {output_format}, Flat properties: {flat_properties}"
-        )
-
-        while True:
-            # Check if we've reached max_pages limit
-            if max_pages and page > max_pages:
-                self.logger.info(f"Reached maximum pages limit: {max_pages}")
-                break
-
-            # Add page parameter
-            params = base_params.copy()
-            params["page"] = page
-
-            try:
-                self.logger.debug(f"Fetching page {page} with params: {params}")
-                response = requests.get(self.api_url, params=params)
-                response.raise_for_status()
-
-                parsed = response.json()
-
-                # Handle different response structures based on output format
-                if output_format == "geojson":
-                    # GeoJSON returns FeatureCollection with features list
-                    data = parsed.get("features", [])
-                else:
-                    # JSON returns direct list
-                    data = parsed if isinstance(parsed, list) else []
-
-            except requests.exceptions.RequestException as e:
-                self.logger.error(f"Request failed on page {page}: {e}")
-                break
-            except ValueError as e:
-                self.logger.error(f"Failed to parse JSON response on page {page}: {e}")
-                break
-
-            # Check if we got any data
-            if not data or not isinstance(data, list):
-                self.logger.info(f"No data on page {page}. Stopping.")
-                break
-
-            all_data.extend(data)
-            self.logger.info(f"Fetched page {page} with {len(data)} records")
-
-            # If we got fewer records than page_size, we've reached the end
-            if len(data) < page_size:
-                self.logger.info("Reached end of data (partial page received)")
-                break
-
-            page += 1
-
-            # Sleep to be respectful to the API
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-        self.logger.info(f"Finished fetching. Total records: {len(all_data)}")
-
-        # Convert to DataFrame/GeoDataFrame based on format
-        if not all_data:
-            self.logger.warning("No data fetched, returning empty DataFrame")
-            if output_format == "geojson":
-                return gpd.GeoDataFrame()
-            return pd.DataFrame()
-
-        if output_format == "geojson":
-            # Use GeoDataFrame.from_features for GeoJSON format
-            gdf = gpd.GeoDataFrame.from_features(all_data, crs="EPSG:4326")
-            self.logger.info(f"Created GeoDataFrame with {len(gdf)} records")
-            return gdf
-        else:
-            # For JSON format, handle nested structure if flat_properties is False
-            if not flat_properties:
-                df = self._process_json_with_centroid(all_data)
-            else:
-                df = pd.DataFrame(all_data)
-
-            self.logger.info(f"Created DataFrame with {len(df)} records")
-            return df
-
-    def fetch_statistics(self, **kwargs) -> dict:
-        """
-        Fetch statistics for health facilities.
-
-        Args:
-            **kwargs: Same filtering parameters as fetch_facilities
-
-        Returns:
-            dict: Statistics data
-        """
-        country = kwargs.get("country", self.country)
-        extent = kwargs.get("extent", self.extent)
-        from_date = kwargs.get("from_date", None)
-        to_date = kwargs.get("to_date", None)
-
-        # Convert country if provided
-        if country:
-            country = self._convert_country(country)
-
-        params = {
-            "api-key": self.api_key,
-        }
-
-        # Add optional filters
+            params["flat-properties"] = "true"
         if country:
             params["country"] = country
         if extent:
+            if len(extent) != 4:
+                raise ValueError("Extent must be (minLng, minLat, maxLng, maxLat)")
             params["extent"] = ",".join(map(str, extent))
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+        return params
+    
+    def _convert_country(self, country: str) -> str:
+        """Resolve any country identifier to its OSM English name."""
+        try:
+            iso3 = pycountry.countries.lookup(country).alpha_3
+        except LookupError:
+            raise ValueError(f"Invalid country code: {country}")
+
+        return self._fetch_osm_country_name(iso3, country)
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    def _fetch_osm_country_name(self, iso3: str, original_input: str) -> str:
+        """
+        Fetch the OSM English country name with retry and escalating timeout.
+
+        Retried up to 3 times with exponential backoff (2s → 4s → 8s wait).
+        Timeout escalates by 2000ms on each attempt.
+        """
+        attempt = self._fetch_osm_country_name.retry.statistics.get("attempt_number", 1)
+        timeout = 2000 + (attempt - 1) * 2000  # 2000 → 4000 → 6000ms
+
+        self.logger.debug(
+            "Fetching OSM name for %s (attempt %d, timeout %dms)", iso3, attempt, timeout
+        )
+
+        osm_data = OSMLocationFetcher.get_osm_countries(iso3_code=iso3, timeout=timeout)
+        osm_name = osm_data.get("name:en")
+
+        if not osm_name:
+            raise ValueError(f"Could not find OSM English name for: {original_input}")
+
+        self.logger.info("Resolved country to OSM name: %s", osm_name)
+        return osm_name
+
+    @staticmethod
+    def _format_timestamp(value: Any) -> str:
+        """Normalise a date/datetime/string to ISO 8601 string."""
+        if isinstance(value, str):
+            return value
+        try:
+            return value.strftime("%Y-%m-%dT%H:%M:%S")
+        except AttributeError:
+            raise ValueError(f"Cannot format timestamp from: {type(value)}")
+
+    def _to_geodataframe(self, features: list[dict]) -> gpd.GeoDataFrame:
+        gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+        self.logger.info("Created GeoDataFrame with %d records", len(gdf))
+        return gdf
+
+    def _process_json_flat(self, records: list[dict]) -> pd.DataFrame:
+        """Flatten nested 'attributes' and 'centroid' keys from JSON responses."""
+        processed = []
+        for record in records:
+            row = {k: v for k, v in record.items() if k not in ("attributes", "centroid")}
+            row.update(record.get("attributes", {}))
+            coords = record.get("centroid", {}).get("coordinates", [])
+            row["longitude"] = coords[0] if len(coords) == 2 else None
+            row["latitude"] = coords[1] if len(coords) == 2 else None
+            processed.append(row)
+        return pd.DataFrame(processed)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def fetch_facilities(
+        self,
+        max_pages: Optional[int] = None,
+        country: Optional[str] = None,
+        extent: Optional[Tuple[float, float, float, float]] = None,
+        output_format: Optional[str] = None,
+        flat_properties: Optional[bool] = None,
+        from_date: Optional[Any] = None,
+        to_date: Optional[Any] = None,
+    ) -> Union[gpd.GeoDataFrame, pd.DataFrame]:
+        """
+        Fetch health facility locations.
+
+        Parameters
+        ----------
+        max_pages : int, optional
+            Limit the number of pages fetched. Useful for testing.
+        country : str, optional
+            Override the instance-level country filter.
+        extent : tuple, optional
+            Override the instance-level bounding box.
+        output_format : str, optional
+            Override the instance-level output format ('geojson' or 'json').
+        flat_properties : bool, optional
+            Override the instance-level flat_properties setting.
+        from_date : str, date, or datetime, optional
+            Return facilities modified after this timestamp.
+        to_date : str, date, or datetime, optional
+            Return facilities modified before this timestamp.
+
+        Returns
+        -------
+        gpd.GeoDataFrame
+            When output_format is 'geojson' (default).
+        pd.DataFrame
+            When output_format is 'json'.
+        """
+        _country = self._convert_country(country) if country else self.country
+        _extent = extent or self.extent
+        _format = output_format or self.output_format
+        _flat = flat_properties if flat_properties is not None else self.flat_properties
+        _from = self._format_timestamp(from_date) if from_date else None
+        _to = self._format_timestamp(to_date) if to_date else None
+
+        base_params = self._build_base_params(_country, _extent, _format, _flat, _from, _to)
+
+        self.logger.info(
+            "Fetching health facilities — country: %s, format: %s",
+            _country or "all", _format,
+        )
+        all_records: list[dict] = []
+
+        with self._build_client(_format) as client:
+            for page_num, page in enumerate(
+                client.paginate("/", params=base_params), start=1
+            ):
+                all_records.extend(page)
+                self.logger.info("Fetched page %d — %d records", page_num, len(page))
+
+                if max_pages and page_num >= max_pages:
+                    self.logger.info("Reached max_pages limit (%d)", max_pages)
+                    break
+
+        self.logger.info("Total records fetched: %d", len(all_records))
+
+        if not all_records:
+            self.logger.warning("No data fetched")
+            return gpd.GeoDataFrame() if _format == "geojson" else pd.DataFrame()
+
+        if _format == "geojson":
+            return self._to_geodataframe(all_records)
+
+        return self._process_json_flat(all_records) if not _flat else pd.DataFrame(all_records)
+
+    def fetch_statistics(
+        self,
+        country: Optional[str] = None,
+        extent: Optional[Tuple[float, float, float, float]] = None,
+        from_date: Optional[Any] = None,
+        to_date: Optional[Any] = None,
+    ) -> dict:
+        """
+        Fetch aggregate statistics for health facilities.
+
+        Parameters
+        ----------
+        country : str, optional
+            Override the instance-level country filter.
+        extent : tuple, optional
+            Override the instance-level bounding box.
+        from_date : str, date, or datetime, optional
+            Filter by modification timestamp start.
+        to_date : str, date, or datetime, optional
+            Filter by modification timestamp end.
+
+        Returns
+        -------
+        dict
+            Statistics returned by the API.
+        """
+        _country = self._convert_country(country) if country else self.country
+        _extent = extent or self.extent
+
+        params: dict[str, Any] = {}
+        if _country:
+            params["country"] = _country
+        if _extent:
+            params["extent"] = ",".join(map(str, _extent))
         if from_date:
             params["from"] = self._format_timestamp(from_date)
         if to_date:
             params["to"] = self._format_timestamp(to_date)
 
-        try:
-            response = requests.get(f"{self.api_url}/statistic/", params=params)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Request failed for statistics: {e}")
-            raise
+        # Statistics is a single non-paginated endpoint — use client directly
+        with self._build_client(self.output_format) as client:
+            response = client.get("/statistic/", params=params)
+
+        return response.json()
 
     def fetch_facility_by_id(self, osm_type: str, osm_id: str) -> dict:
         """
-        Fetch a specific facility by OSM type and ID.
+        Fetch a single facility by its OSM type and ID.
 
-        Args:
-            osm_type: OSM type (node, way, relation)
-            osm_id: OSM ID
+        Parameters
+        ----------
+        osm_type : str
+            OSM element type: 'node', 'way', or 'relation'.
+        osm_id : str
+            OSM element ID.
 
-        Returns:
-            dict: Facility details
+        Returns
+        -------
+        dict
+            Facility detail record.
         """
-        params = {"api-key": self.api_key}
+        with self._build_client(self.output_format) as client:
+            response = client.get(f"/{osm_type}/{osm_id}/")
 
-        try:
-            url = f"{self.api_url}/{osm_type}/{osm_id}"
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Request failed for facility {osm_type}/{osm_id}: {e}")
-            raise
-
-    def _create_dataframe(self, data: List[dict]) -> pd.DataFrame:
-        """
-        Create DataFrame from API response data.
-
-        Args:
-            data: List of facility records
-
-        Returns:
-            pd.DataFrame: Processed DataFrame
-        """
-        if self.output_format == "geojson":
-            # Handle GeoJSON format
-            records = []
-            for feature in data:
-                record = feature.get("properties", {}).copy()
-                geometry = feature.get("geometry", {})
-                coordinates = geometry.get("coordinates", [])
-
-                if coordinates and len(coordinates) >= 2:
-                    record["longitude"] = coordinates[0]
-                    record["latitude"] = coordinates[1]
-
-                records.append(record)
-            return pd.DataFrame(records)
-        else:
-            # Handle regular JSON format
-            return pd.DataFrame(data)
-
-    def _process_json_with_centroid(self, data: List[dict]) -> pd.DataFrame:
-        """
-        Process JSON data to flatten 'attributes' and 'centroid' fields,
-        and extract longitude/latitude from centroid.
-
-        Args:
-            data: List of facility records, where each record might contain
-                  nested 'attributes' and 'centroid' dictionaries.
-
-        Returns:
-            pd.DataFrame: Processed DataFrame with flattened data.
-        """
-        processed_records = []
-        for record in data:
-            new_record = {}
-
-            # Flatten top-level keys
-            for key, value in record.items():
-                if key not in ["attributes", "centroid"]:
-                    new_record[key] = value
-
-            # Flatten 'attributes'
-            attributes = record.get("attributes", {})
-            for attr_key, attr_value in attributes.items():
-                new_record[f"{attr_key}"] = attr_value
-
-            # Extract centroid coordinates
-            centroid = record.get("centroid", {})
-            coordinates = centroid.get("coordinates", [])
-            if coordinates and len(coordinates) == 2:
-                new_record["longitude"] = coordinates[0]
-                new_record["latitude"] = coordinates[1]
-            else:
-                new_record["longitude"] = None
-                new_record["latitude"] = None
-
-            processed_records.append(new_record)
-
-        return pd.DataFrame(processed_records)
-
-    def _convert_country(self, country: str) -> str:
-        try:
-            # First convert to ISO3 format if needed
-            country_obj = pycountry.countries.lookup(country)
-            iso3_code = country_obj.alpha_3
-
-            # Get OSM English name using OSMLocationFetcher
-            osm_data = OSMLocationFetcher.get_osm_countries(iso3_code=iso3_code)
-            osm_name_en = osm_data.get("name:en")
-
-            if not osm_name_en:
-                raise ValueError(
-                    f"Could not find OSM English name for country: {country}"
-                )
-
-            self.logger.info(
-                f"Converted country code to OSM English name: {osm_name_en}"
-            )
-
-            return osm_name_en
-
-        except LookupError:
-            raise ValueError(f"Invalid country code provided: {country}")
-        except Exception as e:
-            raise ValueError(f"Failed to get OSM English name: {e}")
+        return response.json()

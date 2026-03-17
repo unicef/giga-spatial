@@ -378,7 +378,7 @@ class WPPopulationConfig(BaseHandlerConfig):
             "'GR2': years 2015-2030, pop only, constrained only, no UN adjustment."
         ),
     )
-    project: Literal["pop", "age_structures"] = Field(...)
+    project: Literal["pop", "age_structures", "degree_of_urbanization"] = Field(...)
     year: int = Field(...)
     resolution: int = Field(...)
     un_adjusted: bool = Field(...)
@@ -389,6 +389,14 @@ class WPPopulationConfig(BaseHandlerConfig):
         description=(
             "If True, fetch under-18 population datasets. "
             "Only available for project='age_structures' with release='GR2'."
+        ),
+    )
+    dug_level: Literal["L1", "L2"] = Field(
+        default="L1",
+        description=(
+            "Degree of Urbanisation grid level. Only applies when project='degree_of_urbanization'. "
+            "'L1': 3-class classification (urban/suburban/rural). "
+            "'L2': 7-class detailed classification."
         ),
     )
 
@@ -511,7 +519,7 @@ class WPPopulationConfig(BaseHandlerConfig):
         if value not in all_valid:
             raise ValueError(
                 f"No datasets found for the provided year: {value}. "
-                f"Valid years: 2000-2020 (GR1) or 2015-2030 (GR2)."
+                f"Valid years: 2000-2020 (GR1) or 2015-2030 (GR2/DUG)."
             )
         return value
 
@@ -528,6 +536,11 @@ class WPPopulationConfig(BaseHandlerConfig):
     def validate_configuration(self):
         """
         Validate and normalise configuration based on dataset availability constraints.
+
+        DUG (degree_of_urbanization):
+        - Only available via GR2 release, years 2015-2030.
+        - constrained, un_adjusted, school_age, under_18 are not applicable.
+        - dug_level selects between L1 (3-class) and L2 (7-class) grid tifs.
 
         GR1 (pop):
         - Constrained: only 2020 at 100m, with or without UN adjustment.
@@ -551,6 +564,33 @@ class WPPopulationConfig(BaseHandlerConfig):
         - Full age structures: 100m or 1km.
         - Under-18 population (under_18=True): 100m only.
         """
+
+        # ── DUG branch ───────────────────────────────────────────────────────
+        if self.project == "degree_of_urbanization":
+            if self.year not in self.AVAILABLE_YEARS_GR2:
+                raise ValueError(
+                    f"Degree of Urbanisation datasets support years 2015-2030, "
+                    f"got year={self.year}."
+                )
+            # Silently ignore pop-specific fields — they are not applicable
+            if self.school_age:
+                self.logger.warning(
+                    "`school_age` is not applicable for degree_of_urbanization. Ignoring."
+                )
+                self.school_age = False
+            if self.under_18:
+                self.logger.warning(
+                    "`under_18` is not applicable for degree_of_urbanization. Ignoring."
+                )
+                self.under_18 = False
+            if self.un_adjusted:
+                self.logger.warning(
+                    "`un_adjusted` is not applicable for degree_of_urbanization. Ignoring."
+                )
+                self.un_adjusted = False
+
+            self.dataset_category = "dug_g2_v1"
+            return self
 
         # ── GR2 branch ───────────────────────────────────────────────────────
         if self.release == "GR2":
@@ -710,8 +750,12 @@ class WPPopulationConfig(BaseHandlerConfig):
     def get_relevant_data_units_by_geometry(
         self, geometry: str, **kwargs
     ) -> List[Dict[str, Any]]:
+        api_dataset_type = (
+            "dug" if self.project == "degree_of_urbanization" else self.project
+        )
+
         datasets = self.client.search_datasets(
-            self.project, self.dataset_category, geometry, self.year
+            api_dataset_type, self.dataset_category, geometry, self.year
         )
 
         if not datasets:
@@ -722,11 +766,19 @@ class WPPopulationConfig(BaseHandlerConfig):
             )
         ZIP_CATEGORIES = {"sapya1km", "G2_Age_U18_R25A_100m"}
 
-        files = [
-            file
-            for file in datasets[0].get("files", [])
-            if (self.dataset_category in ZIP_CATEGORIES or file.endswith(".tif"))
-        ]
+        # For DUG: filter to only the requested grid level tif
+        if self.project == "degree_of_urbanization":
+            files = [
+                file
+                for file in datasets[0].get("files", [])
+                if file.endswith(".tif") and f"GRID_{self.dug_level}_" in file
+            ]
+        else:
+            files = [
+                file
+                for file in datasets[0].get("files", [])
+                if (self.dataset_category in ZIP_CATEGORIES or file.endswith(".tif"))
+            ]
 
         return files
 
@@ -828,17 +880,21 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     def __repr__(self) -> str:
 
-        return (
+        base = (
             f"WPPopulationConfig("
             f"release={self.release}, "
             f"project={self.project}, "
-            f"year={self.year}, "
-            f"resolution={self.resolution}, "
+            f"year={self.year}"
+        )
+        if self.project == "degree_of_urbanization":
+            return base + f", dug_level={self.dug_level})"
+
+        return (
+            base + f", resolution={self.resolution}, "
             f"un_adjusted={self.un_adjusted}, "
             f"constrained={self.constrained}, "
             f"school_age={self.school_age}, "
-            f"under_18={self.under_18}"
-            f")"
+            f"under_18={self.under_18})"
         )
 
 
@@ -1070,14 +1126,15 @@ class WPPopulationHandler(BaseHandler):
 
     def __init__(
         self,
-        release: Literal["GR1", "GR2"] = "GR1",
+        release: Literal["GR1", "GR2"] = "GR2",
         project: Literal["pop", "age_structures"] = "pop",
-        year: int = 2020,
+        year: int = 2025,
         resolution: int = 1000,
-        un_adjusted: bool = True,
-        constrained: bool = False,
+        un_adjusted: bool = False,
+        constrained: bool = True,
         school_age: bool = False,
         under_18: bool = False,
+        dug_level: Literal["L1", "L2"] = "L1",
         config: Optional[WPPopulationConfig] = None,
         downloader: Optional[WPPopulationDownloader] = None,
         reader: Optional[WPPopulationReader] = None,
@@ -1093,6 +1150,7 @@ class WPPopulationHandler(BaseHandler):
         self._constrained = constrained
         self._school_age = school_age
         self._under_18 = under_18
+        self._dug_level = dug_level
         super().__init__(
             config=config,
             downloader=downloader,
@@ -1124,6 +1182,7 @@ class WPPopulationHandler(BaseHandler):
             constrained=self._constrained,
             school_age=self._school_age,
             under_18=self._under_18,
+            dug_level=self._dug_level,
             data_store=data_store,
             logger=logger,
             **kwargs,

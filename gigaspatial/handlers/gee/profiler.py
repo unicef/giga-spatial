@@ -1,9 +1,13 @@
-# gigaspatial/handlers/gee/profiler.py
+try:
+    import ee
+    import geemap
 
-import ee
+    _HAS_GEE = True
+except ImportError:
+    _HAS_GEE = False
+
 import pandas as pd
 import geopandas as gpd
-import geemap
 from typing import Optional, Union, List, Dict, Literal
 from datetime import datetime
 import os
@@ -19,48 +23,24 @@ LOGGER = globalconfig.get_logger("GEEProfiler")
 class GEEProfiler:
     """
     Google Earth Engine profiler for inspecting and mapping datasets.
-
-    Provides comprehensive functionality to:
-    - Inspect GEE collections (bands, dates, properties, metadata)
-    - Map values to point locations with optional buffers
-    - Map values to polygon zones with spatial aggregation
-    - Extract temporal profiles and time series
-    - Download data for offline use
-
-    Examples
-    --------
-    >>> # Initialize with dataset ID (uses built-in registry)
-    >>> profiler = GEEProfiler(dataset_id="nightlights")
-    >>> profiler.display_collection_info()
-
-    >>> # Map to schools with buffers
-    >>> enriched = profiler.map_to_points(
-    ...     gdf=schools,
-    ...     band="avg_rad",
-    ...     reducer="mean",
-    ...     buffer_radius_m=1000,
-    ...     start_date="2020-01-01",
-    ...     end_date="2020-12-31"
-    ... )
-
-    >>> # Map to admin zones
-    >>> zones = profiler.map_to_zones(
-    ...     gdf=admin_boundaries,
-    ...     band="avg_rad",
-    ...     reducer="sum"
-    ... )
     """
 
     def __init__(
         self,
         dataset_id: Optional[str] = None,
-        collection: Optional[Union[str, ee.ImageCollection, ee.Image]] = None,
+        collection: Optional[Union[str, "ee.ImageCollection", "ee.Image"]] = None,
         service_account: Optional[str] = globalconfig.GOOGLE_SERVICE_ACCOUNT,
         key_path: Optional[str] = globalconfig.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
         project_id: Optional[str] = globalconfig.GOOGLE_CLOUD_PROJECT,
         data_store: Optional[DataStore] = None,
         **config_overrides,
     ):
+        if not _HAS_GEE:
+            raise ImportError(
+                "GEEProfiler requires 'earthengine-api' and 'geemap'. "
+                "Install them with: pip install 'giga-spatial[gee]'"
+            )
+
         """
         Initialize GEE profiler.
 

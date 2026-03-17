@@ -401,15 +401,11 @@ class CountryH3Hexagons(H3Hexagons):
             f"Initializing H3 hexagons for country: {country} at resolution {resolution}"
         )
 
-        country_geom = (
-            AdminBoundaries.create(
-                country_code=country,
-                data_store=data_store,
-                path=country_geom_path,
-            )
-            .boundaries[0]
-            .geometry
-        )
+        country_geom = AdminBoundaries.create(
+            country_code=country,
+            data_store=data_store,
+            path=country_geom_path,
+        ).to_geoms()[0]
 
         hexagons = H3Hexagons.from_geometry(country_geom, resolution, contain=contain)
 

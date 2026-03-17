@@ -115,7 +115,7 @@ class OSMLocationFetcher:
 
     @staticmethod
     def get_osm_countries(
-        iso3_code: Optional[str] = None, include_names: bool = True, timeout: int = 1000
+        iso3_code: Optional[str] = None, include_names: bool = True, timeout: int = 2000
     ) -> Union[str, Dict[str, str], List[str], List[Dict[str, str]]]:
         """
         Fetch countries from OpenStreetMap database.

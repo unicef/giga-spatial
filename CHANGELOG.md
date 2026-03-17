@@ -2,6 +2,132 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.0] - 2026-03-17
+
+### Added
+
+-   **Giga Spatial Entity Schemas `gigaspatial/core/schemas/`** - New core module for managing structured infrastructure and administrative entities using a Medallion Architecture (Bronze-Silver-Gold) pattern.
+    -   **Base Entity Framework (`entity.py`)**: 
+        -   `BaseGigaEntity`, `GigaEntity`, `GigaGeoEntity`, `GigaEntityNoLocation`: Pydantic-validated base models for all GigaSpatial entities, supporting stable UUID-based ID generation, coordinate validation (including "Null Island" checks), and geometry parsing (WKT/WKB/Shapely).
+        -   `EntityTable`: Generic container class for collections of entities, providing bulk loading from files/dataframes, serialization, spatial filtering (admin, polygon, bounds), and advanced spatial analysis (KDTree-based nearest neighbors, distance graph construction).
+    -   **Silver-Layer Data Processing (`gigaspatial/processing/entity_processor.py`)**:
+        -   `EntityProcessor`: A robust, multi-step cleaning pipeline designed to transform raw "Bronze" data into "Silver" validated structures. Features include:
+            -   Automatic coordinate column detection and repair (merged lat/lon columns, trailing commas).
+            -   NFKC string normalization and whitespace stripping.
+            -   Sentinel-aware null coercion (handling "n/a", "none", etc.).
+            -   Geometry-safe row operations (deduplication, empty row removal).
+            -   Change tracking via `track_changes` decorator for detailed pipeline logging of row/column shifts.
+    -   **Domain-Specific Entity Schemas**:
+        -   **Connectivity**: `CellTower`, `Cell`, `TransmissionNode`, `MobileCoverage`. Includes logic for backhaul normalization, radio technology mapping, and cross-entity enrichment (e.g., populating tower performance from child cells).
+        -   **Infrastructure**: `BuildingFootprint` for managing building geometries.
+        -   **Administrative**: `AdminBoundary` for structured administrative region management and parent/child relationship mapping.
+    -   **Shared Infrastructure**: 
+        -   Centralized enums for `DataConfidence`, `PowerSource`, `RadioType`, and `BackhaulType` ensuring cross-module consistency.
+        -   **Configurable Entity ID Namespace**: Relocated `ENTITY_UUID_NAMESPACE` to `shared.py` and linked it to a new `ENTITY_ID_NAMESPACE` global configuration field, allowing the UUID namespace used for stable ID generation to be overridden via environment variables (defaults to `uuid.NAMESPACE_DNS`).
+
+-   **BigQuery Client `gigaspatial/core/io/bigquery_client.py`** - New reusable BigQuery client layer for interacting with Google BigQuery datasets.
+    -   `BigQueryClientConfig` - Pydantic-validated configuration supporting service account key file authentication and Application Default Credentials (ADC) fallback, mirroring the credential pattern used by `GEEProfiler`. Defaults for `project`, `service_account`, and `service_account_key_path` are resolved from `global_config` (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_SERVICE_ACCOUNT`, `GOOGLE_SERVICE_ACCOUNT_KEY_PATH`).
+    -   `BigQueryClient` - Generic, dataset-agnostic client exposing:
+        -   `list_datasets(project_id)`: List available datasets within a GCP project.
+        -   `list_tables(dataset_id)`: List all tables within a dataset.
+        -   `get_table_schema(dataset_id, table_id)`: Retrieve field names, types, modes, and descriptions for a table.
+        -   `query(sql)`: Execute SQL and return a raw `RowIterator`.
+        -   `query_to_dataframe(sql)`: Execute SQL and return a `pd.DataFrame`, with optional BigQuery Storage API acceleration (`use_bq_storage`), configurable byte billing cap (`max_gb_allowed`, default 10 GB), and `tqdm` progress bar support.
+        -   `get_query_cost_estimate(sql)`: Dry-run cost estimation in USD using on-demand pricing ($6.25/TiB).
+    -   Designed for composition: dataset-specific handlers instantiate `BigQueryClient` internally rather than re-implementing auth or query logic.
+
+-   **M-Lab NDT7 Handler (`gigaspatial/handlers/mlab.py`)** - New handler for querying M-Lab network measurement data from the `measurement-lab.ndt.ndt7` BigQuery public dataset.
+    -   `MLabConfig` - Pydantic config holding dataset-level parameters (`project_id`, `dataset`, `default_start_date`). Auth and billing credentials are fully delegated to `BigQueryClientConfig` / `global_config`, keeping dataset config free of auth logic.
+    -   `MLabHandler` - Composes `BigQueryClient` to query NDT7 upload and download measurements:
+        -   `query_ndt7(country_code, start_date, end_date, measurement)`: Returns a `pd.DataFrame` of NDT7 measurements filtered by ISO alpha-2 country code and date range. Selects `id`, `date`, client geo fields (`country_code`, `city`, `lat`, `lon`, `postal_code`), `a.*` scalar metrics (`MeanThroughputMbps`, `MinRTT`, `LossRate`, `CongestionControl`), raw common fields (`ServerIP`, `ClientIP`, `StartTime`, `EndTime`), and direction-specific `ServerMeasurements` fields (AppInfo, BBRInfo, TCPInfo) based on the `measurement` parameter (`"download"`, `"upload"`, or `"both"`).
+            -   **Automatic Schema Flattening**: Handles complex BigQuery ARRAY and STRUCT navigation (e.g., `ServerMeasurements[SAFE_OFFSET(0)]`) internally, exposing a flat `pd.DataFrame` to the user.
+        -   `query_ndt7_gdf(country_code, start_date, end_date, measurement)`: Convenience wrapper returning a `gpd.GeoDataFrame` (EPSG:4326) from `client.Geo.Latitude` / `client.Geo.Longitude`; rows with null coordinates are dropped.
+        -   `estimate_query_cost(country_code, start_date, end_date, measurement)`: Pre-execution cost estimate in USD via `BigQueryClient.get_query_cost_estimate()`, recommended before running wide date-range queries given the scale of the public dataset.
+    -   Country codes validated via `pycountry` (raises `ValueError` for unknown codes).
+    -   Partition filter on `date` and direct `client.Geo.CountryCode` field filter minimise bytes scanned for cost efficiency.
+
+-   **WorldPop Handler: Degree of Urbanisation datasets (`degree_of_urbanization`)**
+    -   Added `project="degree_of_urbanization"` as a new supported project type in `WPPopulationConfig` and `WPPopulationHandler`, providing access to WorldPop's Degree of Urbanisation (DUG) datasets built on the R2025A Global2 methodology.
+    -   Covers years 2015–2030 via API category `dug_g2_v1` (`"Degree of Urbanisation 2015-2030 using WorldPop Global2 R2025A"`).
+    -   Added `dug_level: Literal["L1", "L2"]` field (default `"L1"`) to select between:
+        -   `L1`: 3-class grid classification (urban / suburban / rural) — `*_GRID_L1_R2025A_v1.tif`
+        -   `L2`: 7-class detailed grid classification — `*_GRID_L2_R2025A_v1.tif`
+    -   Only `.tif` grid files are fetched; accompanying `.zip` (entities, statistics) files are automatically excluded.
+    -   `constrained`, `un_adjusted`, `school_age`, and `under_18` fields are not applicable for DUG and are silently normalised to `False` with a warning if set.
+    -   `get_relevant_data_units_by_geometry` updated to route DUG requests to the correct API `dataset_type` (`"dug"`) and filter files by the selected `dug_level` pattern.
+    -   `__repr__` updated to show `dug_level` instead of population-specific fields when `project="degree_of_urbanization"`.
+    -   Fully compatible with existing download and reader pipeline — DUG `.tif` files follow the same `GIS/` path convention and require no changes to `get_data_unit_path`, `get_data_unit_paths`, or `WPPopulationReader`.
+
+-   **HTTP Module `gigaspatial/core/http/`** - New submodule providing a reusable, composable HTTP client layer for interacting with REST APIs across all GigaSpatial handlers.
+    -   `AuthConfig` and `AuthType` (`auth.py`) - Pydantic-validated authentication configuration supporting Bearer token, API key (header or query param), Basic auth, and no-auth modes. `AuthConfig.build()` resolves to `(headers, query_params, httpx_auth)` for direct use by `httpx.Client`.
+    -   `BaseRestApiClient` and `RestApiClientConfig` (`client.py`) - Abstract base class for REST API clients with built-in retry logic (exponential backoff), `Retry-After`-aware rate limiting, session lifecycle management via context manager (`__enter__`/`__exit__`), and convenience `get`/`post` wrappers. Configuration is fully Pydantic-validated (`base_url`, `auth`, `timeout`, `max_retries`, `retry_backoff`, `default_headers`).
+    -   `BasePaginationStrategy`, `OffsetPagination`, `CursorPagination`, `PageNumberPagination` (`pagination.py`) - Strategy-based pagination abstractions. Subclasses override `extract_records` and `next_request` to express any pagination pattern (offset/limit, cursor, page number) without modifying the client. `PageNumberPagination` added to support page/size APIs (used by Giga handlers).
+    -   All classes exported from `gigaspatial/core/http/__init__.py`.
+
+-   **Giga Handlers Submodule `gigaspatial/handlers/giga/`** - Reorganised Giga School API fetchers into a dedicated submodule with a shared internal client.
+    -   `GigaApiClient` (`api_client.py`) - Internal `BaseRestApiClient` subclass shared across all Giga fetchers. Uses Bearer token auth and `PageNumberPagination` with `records_key="data"`.
+    -   `GigaSchoolLocationFetcher` (`school_locations.py`) - Refactored to use `GigaApiClient`. Eliminates manual `requests` pagination loop; retry logic and rate limiting inherited from `BaseRestApiClient`.
+    -   `GigaSchoolProfileFetcher` (`school_profile.py`) - Refactored to use `GigaApiClient`. Supports optional `giga_id_school` filter; single-school requests are short-circuited to one page.
+    -   `GigaSchoolMeasurementsFetcher` (`school_measurements.py`) - Refactored to use `GigaApiClient`. Date range parameters (`start_date`, `end_date`) now overridable per-call in addition to instance level. `_format_date` promoted to `@staticmethod`.
+
+### Changed
+
+-   **`HealthSitesFetcher._convert_country`** - Added retry loop with exponential backoff and escalating timeouts (2000ms → 4000ms → 6000ms) for OSM country name resolution via `OSMLocationFetcher.get_osm_countries`, improving resilience against transient network timeouts.
+
+-   **Optional Dependency Implementation (Core Framework)** - Refactored the library to make heavy dependencies optional, reducing the base installation size and improving import times.
+    -   Implemented "Defensive Loading" pattern across all heavy modules: dependencies are only required when the specific functionality is accessed.
+    -   Added clear `ImportError` messages with tailored installation instructions (e.g., `pip install "giga-spatial[gee]"`) for missing optional packages.
+    -   Refactored the following modules to be optional:
+        -   **Earth Engine**: `GEEProfiler` and related GEE handlers (requires `[gee]`).
+        -   **BigQuery**: `BigQueryClient` and `MLabHandler` (requires `[bq]`).
+        -   **Azure**: `ADLSDataStore` (requires `[azure]`).
+        -   **Snowflake**: `SnowflakeDataStore` (requires `[snowflake]`).
+        -   **Delta Sharing**: `DeltaSharingDataStore` (requires `[delta]`).
+        -   **Database**: `DBConnection`, Trino support, and Dask integration (requires `[db]`).
+        -   **DuckDB**: `OvertureAmenityFetcher` (requires `[duckdb]`).
+    -   Updated `setup.py` with `extras_require` for all groups and an `[all]` extra for full installation.
+    -   Reorganized `requirements.txt` to clearly distinguish between core and optional dependencies.
+
+-   **Giga fetchers** - Removed `sleep_time` field and manual `time.sleep` calls; rate limiting is now handled transparently by `BaseRestApiClient` via `Retry-After` header respect and configurable backoff.
+
+-   **`GigaSchoolMeasurementsFetcher.get_performance_summary`** - Consolidated repetitive boolean flag summarisation into a loop over `(flag, label)` pairs for maintainability.
+
+-   **Healthsites Handler `gigaspatial/handlers/healthsites.py`** - Reorganised `HealthSitesFetcher` with its own internal client.
+    -   `_HealthSitesPaginationStrategy`: Custom `BasePaginationStrategy` handling both GeoJSON (`features[]`) and JSON (direct list) response formats from the Healthsites API.
+    -   `_HealthSitesApiClient`: Internal `BaseRestApiClient` subclass using `AuthType.API_KEY_QUERY` (`api-key` query parameter) and `_HealthSitesPaginationStrategy`.
+    -   `HealthSitesFetcher`: Refactored to use `_HealthSitesApiClient`. All fetch parameters (`country`, `extent`, `output_format`, `flat_properties`, `from_date`, `to_date`) are now overridable per call. `fetch_statistics` and `fetch_facility_by_id` use the client directly for non-paginated requests.
+
+-   **`WPPopulationConfig.validate_configuration` docstring**: Added DUG availability section:
+    ```
+    DUG (degree_of_urbanization):
+    - Only available via GR2 release, years 2015-2030.
+    - constrained, un_adjusted, school_age, under_18 are not applicable.
+    - dug_level selects between L1 (3-class) and L2 (7-class) grid tifs.
+    ```
+
+-   **WorldPop Handler default configuration**: Updated the default dataset parameters in `WPPopulationHandler` to use `release="GR2"`, `year=2025`, and `constrained=True` (with `un_adjusted=False`), shifting the default data source to the more recent R2025A series.
+
+### Fixed
+
+-   **BaseHandler: Robust CRS handling in cropping and loading**
+    -   Fixed a critical issue where `crop_to_geometry()` used a hardcoded `"EPSG:4326"` CRS when reprojecting geometries to match data projections. It now correctly uses the CRS provided in `kwargs` or falls back to the handler's default.
+    -   Added a `crs` property to `BaseHandlerConfig` (defaulting to `"EPSG:4326"`) to allow handler-specific coordinate systems (e.g., GHSL's Mollweide `ESRI:54009`) to be correctly propagated during the loading pipeline.
+    -   Updated `BaseHandlerReader.load()` to automatically retrieve and pass the configuration's CRS to `crop_to_geometry()`, ensuring that cached search geometries are correctly reprojected even when the handler uses a non-WGS84 coordinate system.
+    -   Ensured `crs` is popped from `kwargs` in `crop_to_geometry()` to avoid downstream conflicts with processing algorithms that might receive the same keyword arguments.
+
+### Dependencies
+
+-   Added `httpx>=0.27` as a new dependency.
+-   Refactored the library to use **Optional Dependencies** (Extras). See `setup.py` or `requirements.txt` for details.
+    -   `[gee]`: `earthengine-api`, `geemap`
+    -   `[bq]`: `google-cloud-bigquery`, `google-cloud-bigquery-storage`, `google-auth`, `google-auth-oauthlib`, `google-auth-httplib2`, `db-dtypes`
+    -   `[azure]`: `azure-storage-blob`
+    -   `[snowflake]`: `snowflake-connector-python`
+    -   `[delta]`: `delta-sharing`
+    -   `[db]`: `SQLAlchemy`, `sqlalchemy-trino`, `dask`
+    -   `[duckdb]`: `duckdb`
+    -   `[all]`: Install all optional dependencies.
+
 ## [v0.8.2] - 2026-02-19
 
 ### Changed

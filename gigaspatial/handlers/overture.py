@@ -7,7 +7,13 @@ from shapely.geometry import Polygon, MultiPolygon
 from shapely.strtree import STRtree
 from pathlib import Path
 import pycountry
-import duckdb
+
+try:
+    import duckdb
+
+    _HAS_DUCKDB = True
+except ImportError:
+    _HAS_DUCKDB = False
 
 from gigaspatial.config import config
 from gigaspatial.handlers.boundaries import AdminBoundaries
@@ -73,6 +79,11 @@ class OvertureAmenityFetcher:
 
     def __post_init__(self):
         """Validate inputs and set up logging."""
+        if not _HAS_DUCKDB:
+            raise ImportError(
+                "OvertureAmenityFetcher requires 'duckdb'. "
+                "Install it with: pip install 'giga-spatial[duckdb]'"
+            )
         try:
             self.country = pycountry.countries.lookup(self.country).alpha_2
         except LookupError:
@@ -111,15 +122,11 @@ class OvertureAmenityFetcher:
     ) -> Union[Polygon, MultiPolygon]:
         """Load country boundary geometry from DataStore or GADM."""
 
-        country_geom = (
-            AdminBoundaries.create(
-                country_code=self.country,
-                data_store=self.data_store,
-                path=self.country_geom_path,
-            )
-            .boundaries[0]
-            .geometry
-        )
+        country_geom = AdminBoundaries.create(
+            country_code=self.country,
+            data_store=self.data_store,
+            path=self.country_geom_path,
+        ).to_geoms()[0]
 
         return country_geom
 

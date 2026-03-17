@@ -293,15 +293,11 @@ class CountryMercatorTiles(MercatorTiles):
             f"Initializing Mercator zones for country: {country} at zoom level {zoom_level}"
         )
 
-        country_geom = (
-            AdminBoundaries.create(
-                country_code=country,
-                data_store=data_store,
-                path=country_geom_path,
-            )
-            .boundaries[0]
-            .geometry
-        )
+        country_geom = AdminBoundaries.create(
+            country_code=country,
+            data_store=data_store,
+            path=country_geom_path,
+        ).to_geoms()[0]
 
         tiles = MercatorTiles.from_geometry(country_geom, zoom_level, predicate)
 

@@ -1,4 +1,11 @@
-from azure.storage.blob import BlobServiceClient
+try:
+    from azure.storage.blob import BlobServiceClient
+
+    _HAS_AZURE = True
+except ImportError:
+    _HAS_AZURE = False
+    BlobServiceClient = None
+
 import time
 import io
 import contextlib
@@ -10,9 +17,10 @@ from typing import Union, Optional, Iterator
 from .data_store import DataStore
 from gigaspatial.config import config
 
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
-    logging.WARNING
-)
+if _HAS_AZURE:
+    logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
+        logging.WARNING
+    )
 
 Pathish = Union[str, os.PathLike[str]]
 
@@ -29,6 +37,11 @@ class ADLSDataStore(DataStore):
         account_url: str = config.ADLS_ACCOUNT_URL,
         sas_token: str = config.ADLS_SAS_TOKEN,
     ):
+        if not _HAS_AZURE:
+            raise ImportError(
+                "ADLSDataStore requires 'azure-storage-blob'. "
+                "Install it with: pip install 'giga-spatial[azure]'"
+            )
         """
         Create a new instance of ADLSDataStore
         :param container: The name of the container in ADLS to interact with.
@@ -123,7 +136,7 @@ class ADLSDataStore(DataStore):
 
         blob_client.upload_blob(binary_data, overwrite=True)
 
-    def upload_file(self, file_path, blob_path):
+    def upload_file(self, file_path: str, blob_path: Pathish):
         """Uploads a single file to Azure Blob Storage."""
         try:
             blob_key = self._to_blob_key(blob_path)
@@ -134,7 +147,7 @@ class ADLSDataStore(DataStore):
         except Exception as e:
             print(f"Failed to upload {file_path}: {e}")
 
-    def upload_directory(self, dir_path, blob_dir_path):
+    def upload_directory(self, dir_path: str, blob_dir_path: Pathish):
         """Uploads all files from a directory to Azure Blob Storage."""
         blob_dir_key = self._to_blob_key(blob_dir_path, ensure_dir=True)
         for root, dirs, files in os.walk(dir_path):
@@ -175,7 +188,7 @@ class ADLSDataStore(DataStore):
         except Exception as e:
             print(f"Failed to download directory {blob_dir_path}: {e}")
 
-    def copy_directory(self, source_dir: str, destination_dir: str):
+    def copy_directory(self, source_dir: Pathish, destination_dir: Pathish):
         """
         Copies all files from a source directory to a destination directory within the same container.
 
@@ -184,8 +197,8 @@ class ADLSDataStore(DataStore):
         """
         try:
             # Ensure source directory path ends with a trailing slash
-            source_dir = source_dir.rstrip("/") + "/"
-            destination_dir = destination_dir.rstrip("/") + "/"
+            source_dir = self._to_blob_key(source_dir, ensure_dir=True)
+            destination_dir = self._to_blob_key(destination_dir, ensure_dir=True)
 
             # List all blobs in the source directory
             source_blobs = self.container_client.list_blobs(name_starts_with=source_dir)
@@ -207,7 +220,7 @@ class ADLSDataStore(DataStore):
             print(f"Failed to copy directory {source_dir}: {e}")
 
     def copy_file(
-        self, source_path: str, destination_path: str, overwrite: bool = False
+        self, source_path: Pathish, destination_path: Pathish, overwrite: bool = False
     ):
         """
         Copies a single file from source to destination within the same container.
@@ -225,6 +238,9 @@ class ADLSDataStore(DataStore):
                     f"Destination file already exists and overwrite is False: {destination_path}"
                 )
 
+            source_path = self._to_blob_key(source_path)
+            destination_path = self._to_blob_key(destination_path)
+
             # Create source and destination blob clients
             source_blob_client = self.container_client.get_blob_client(source_path)
             destination_blob_client = self.container_client.get_blob_client(
@@ -239,18 +255,20 @@ class ADLSDataStore(DataStore):
             print(f"Failed to copy file {source_path}: {e}")
             raise
 
-    def exists(self, path: str) -> bool:
+    def exists(self, path: Pathish) -> bool:
+        blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
-            container=self.container, blob=path, snapshot=None
+            container=self.container, blob=blob_key, snapshot=None
         )
         return blob_client.exists()
 
-    def file_exists(self, path: str) -> bool:
+    def file_exists(self, path: Pathish) -> bool:
         return self.exists(path) and not self.is_dir(path)
 
-    def file_size(self, path: str) -> float:
+    def file_size(self, path: Pathish) -> float:
+        blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
-            container=self.container, blob=path, snapshot=None
+            container=self.container, blob=blob_key, snapshot=None
         )
         properties = blob_client.get_blob_properties()
 
@@ -474,11 +492,7 @@ class ADLSDataStore(DataStore):
             return True
         elif len(existing_blobs) == 1:
             # Check if the single blob is not the path itself (indicating it's a file)
-            if (
-                existing_blobs[0] != path.rstrip("/")
-                if isinstance(path, str)
-                else str(path).rstrip("/")
-            ):
+            if existing_blobs[0] != self._to_blob_key(path):
                 return True
 
         return False

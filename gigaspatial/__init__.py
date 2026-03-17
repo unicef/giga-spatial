@@ -1,4 +1,4 @@
-__version__ = "0.8.2"
+__version__ = "0.9.0"
 
 import gigaspatial.core.io as io
 import gigaspatial.processing.algorithms as algorithms
@@ -10,6 +10,8 @@ from .core.io import (
     SnowflakeDataStore,
     DeltaSharingDataStore,
     DBConnection,
+    BigQueryClientConfig,
+    BigQueryClient,
     read_dataset,
     write_dataset,
 )
@@ -31,6 +33,7 @@ from .handlers import (
     HDXHandler,
     WPPopulationHandler,
     RWIHandler,
+    MLabHandler,
 )
 
 from .generators import (
@@ -62,6 +65,8 @@ __all__ = [
     "SnowflakeDataStore",
     "DeltaSharingDataStore",
     "DBConnection",
+    "BigQueryClientConfig",
+    "BigQueryClient",
     "read_dataset",
     "write_dataset",
     "algorithms",
@@ -82,6 +87,7 @@ __all__ = [
     "HDXHandler",
     "WPPopulationHandler",
     "RWIHandler",
+    "MLabHandler",
     # generators
     "GeometryBasedZonalViewGenerator",
     "PoiViewGenerator",

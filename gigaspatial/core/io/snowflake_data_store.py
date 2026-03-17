@@ -1,5 +1,13 @@
-import snowflake.connector
-from snowflake.connector import DictCursor
+try:
+    import snowflake.connector
+    from snowflake.connector import DictCursor
+
+    _HAS_SNOWFLAKE = True
+except ImportError:
+    _HAS_SNOWFLAKE = False
+    snowflake = None
+    DictCursor = None
+
 import tempfile
 import os
 import io
@@ -11,7 +19,8 @@ from typing import Union, Optional, List, Generator, Tuple
 from .data_store import DataStore
 from gigaspatial.config import config
 
-logging.getLogger("snowflake.connector").setLevel(logging.WARNING)
+if snowflake:
+    logging.getLogger("snowflake.connector").setLevel(logging.WARNING)
 
 
 class SnowflakeDataStore(DataStore):
@@ -30,6 +39,12 @@ class SnowflakeDataStore(DataStore):
         schema: str = config.SNOWFLAKE_SCHEMA,
         stage_name: str = config.SNOWFLAKE_STAGE_NAME,
     ):
+        if not _HAS_SNOWFLAKE:
+            raise ImportError(
+                "SnowflakeDataStore requires 'snowflake-connector-python'. "
+                "Install it with: pip install 'giga-spatial[snowflake]'"
+            )
+
         """
         Create a new instance of SnowflakeDataStore.
 

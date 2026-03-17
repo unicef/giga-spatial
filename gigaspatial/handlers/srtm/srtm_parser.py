@@ -1,5 +1,3 @@
-import os
-import struct
 import zipfile
 from pathlib import Path
 from typing import Tuple, Optional, Union

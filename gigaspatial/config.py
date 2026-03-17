@@ -3,6 +3,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, Union, Literal, Dict, Any
 import io
+import uuid
 from functools import lru_cache
 import logging
 
@@ -122,6 +123,9 @@ class Config(BaseSettings):
         alias="ADMIN_BOUNDARIES_DIR",
     )
     DB_CONFIG: Optional[Dict] = Field(default=None, alias="DB_CONFIG")
+    ENTITY_ID_NAMESPACE: str = Field(
+        default=str(uuid.NAMESPACE_DNS), alias="ENTITY_ID_NAMESPACE"
+    )
 
     DATA_TYPES: Dict[str, str] = Field(
         default={
@@ -138,6 +142,10 @@ class Config(BaseSettings):
             "poi": "poi",
             "zonal": "zonal",
             "nasa_srtm": "nasa_srtm",
+            "transmission_node": "transmission_node",
+            "cell_tower": "cell_tower",
+            "cell": "cell",
+            "mobile_coverage": "mobile_coverage",
         },
         description="Mapping of data types to directory names",
     )
@@ -164,11 +172,11 @@ class Config(BaseSettings):
 
     def set_path(
         self,
-        tier: Literal["bronze", "silver", "gold", "views"],
+        tier: Literal["root", "bronze", "silver", "gold", "views"],
         path: Union[str, Path],
     ) -> None:
         """Dynamically set the base path for a given tier."""
-        if tier not in ["bronze", "silver", "gold", "views"]:
+        if tier not in ["root", "bronze", "silver", "gold", "views"]:
             raise ValueError(
                 f"Invalid tier: {tier}. Must be one of 'bronze', 'silver', 'gold', or 'views'."
             )
