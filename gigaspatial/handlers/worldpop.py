@@ -1017,34 +1017,6 @@ class WPPopulationDownloader(BaseHandlerDownloader):
             self.logger.error(f"Unexpected error downloading {url}: {e}")
             return None
 
-    def download_data_units(
-        self,
-        urls: List[str],
-        **kwargs,
-    ) -> List[str]:
-        """Download data files for multiple urls."""
-
-        with multiprocessing.Pool(self.config.n_workers) as pool:
-            download_func = functools.partial(self.download_data_unit)
-            results = list(
-                tqdm(
-                    pool.imap(download_func, urls),
-                    total=len(urls),
-                    desc=f"Downloading data",
-                )
-            )
-
-        # Flatten results and filter out None
-        flattened: List[Path] = []
-        for item in results:
-            if item is None:
-                continue
-            if isinstance(item, list):
-                flattened.extend(item)
-            else:
-                flattened.append(item)
-
-        return flattened
 
 
 class WPPopulationReader(BaseHandlerReader):

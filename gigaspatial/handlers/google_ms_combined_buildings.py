@@ -272,20 +272,6 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
             self.logger.error(f"Error downloading unit {unit}: {e}")
             raise
 
-    def download_data_units(
-        self,
-        units: List[str],
-    ) -> List[Path]:
-        """Download data files for multiple units."""
-
-        if len(units) == 0:
-            self.logger.warning(f"There is no matching data")
-            return []
-
-        return [
-            self.download_data_unit(unit)
-            for unit in tqdm(units, desc="Downloading building data")
-        ]
 
     def _download_from_s3(self, s3_uri: str, save_path: Path) -> Path:
         """

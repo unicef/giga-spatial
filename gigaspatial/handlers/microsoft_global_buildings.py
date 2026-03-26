@@ -309,35 +309,6 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
             self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
             return None
 
-    def download_data_units(
-        self,
-        tiles: Union[pd.DataFrame, List[dict]],
-        **kwargs,
-    ) -> List[str]:
-        """Download data files for multiple tiles."""
-
-        if len(tiles) == 0:
-            self.logger.warning(f"There is no matching data")
-            return []
-
-        with multiprocessing.Pool(self.config.n_workers) as pool:
-            download_func = functools.partial(self.download_data_unit)
-            file_paths = list(
-                tqdm(
-                    pool.imap(
-                        download_func,
-                        (
-                            [row for _, row in tiles.iterrows()]
-                            if isinstance(tiles, pd.DataFrame)
-                            else tiles
-                        ),
-                    ),
-                    total=len(tiles),
-                    desc=f"Downloading polygons data",
-                )
-            )
-
-        return [path for path in file_paths if path is not None]
 
     def download_by_country(
         self,

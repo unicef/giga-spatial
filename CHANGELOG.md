@@ -2,6 +2,57 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.1] - 2026-03-26
+
+### Added
+
+
+-   **`read_dataset`: New geospatial format support**
+    -   Added `.fgb` (FlatGeobuf) to `GEO_READERS` via `gpd.read_file`: FlatGeobuf is one of GigaSpatial's three primary export formats and was previously unhandled, raising an unsupported format error.
+    -   Added `.kml` (standalone KML) to `GEO_READERS` via `gpd.read_file`: previously only `.kmz` archives were supported; standalone KML exports were rejected.
+    -   Added `.geojsonl` and `.ndjson` (newline-delimited / GeoJSON lines) to `GEO_READERS` via `gpd.read_file`: supports NDJSON outputs common in data lake and streaming export pipelines.
+    -   Added `validate_crs` parameter (default `True`) to `read_dataset`: emits a `UserWarning` when a GeoDataFrame is returned with no CRS defined, surfacing silent projection issues that previously caused hard-to-debug downstream failures. Implemented via a new `_maybe_warn_crs()` internal helper applied consistently across all geo read paths.
+
+### Changed
+
+-   **Refactored BaseHandlerDownloader and Handler Cleanup**
+    -   Promoted `download_data_units` to a concrete non-abstract method in `BaseHandlerDownloader` (`gigaspatial/handlers/base.py`).
+    -   Centralized download logic including optional parallel execution (`multiprocessing.Pool`), `tqdm` progress tracking, and support for `pandas.DataFrame` units into the base class.
+    -   Added automatic result filtering (removing `None`) and flattening of list-based results (e.g., from extracted archives) to the base implementation.
+    -   Systematically removed redundant `download_data_units` logic from several subclasses, significantly reducing boilerplate and improving maintainability:
+        -   `microsoft_global_buildings.py`
+        -   `google_open_buildings.py`
+        -   `google_ms_combined_buildings.py`
+        -   `nasa_srtm.py`
+        -   `ookla_speedtest.py`
+        -   `hdx.py`
+        -   `ghsl.py`
+        -   `opencellid.py`
+        -   `worldpop.py`
+    -   Ensured proper `kwargs` propagation to `download_data_unit` in the base implementation to preserve handler-specific parameters (e.g., `extract`, `file_pattern`, `data_type`).
+
+-   **`read_dataset`: Format registry and routing improvements**
+    -   Removed `.zip` from `COMPRESSION_FORMATS`: it is a container format, not a compression wrapper like `.gz`/`.bz2`. Previously, `.zip` matched the compression branch before the geo-container branch, causing ambiguous routing and silent failures for zipped geospatial data.
+    -   Moved `.json` from `PANDAS_READERS` to `GEO_READERS` (using `gpd.read_file`): plain `.json` files in GigaSpatial pipelines are predominantly GeoJSON. The previous routing to `pd.read_json` returned geometry as raw strings with no spatial awareness. A pandas fallback remains for non-spatial JSON.
+    -   Removed `**kwargs` forwarding from `read_json`: `json.load` only accepts `cls` and `object_hook`; forwarding arbitrary kwargs (e.g. `compression=...`) caused `TypeError` at runtime.
+    -   Renamed inner `suffixes` variable in the `.shp` sidecar branch to `SHAPEFILE_SIDECAR_EXTENSIONS` (promoted to module-level constant): the previous local redeclaration silently shadowed `path_obj.suffixes` in the outer scope.
+    -   Unified bare `.gz` fallback to delegate to `read_gzipped_json_or_csv` instead of blindly assuming CSV: a `.gz` file containing JSON (without a compound `.json.gz` extension) previously returned a malformed DataFrame without error.
+    -   Replaced fragile `data_store.__class__.__name__.replace('DataStore', '').lower()` string manipulation with a `_storage_display_name()` helper using `in`-based class name detection, consistent with the DataStore cross-platform improvements in v0.9.0.
+    -   Added `raise ... from e` throughout all `except` blocks to preserve original tracebacks and improve debuggability.
+
+
+### Fixed
+
+-   **Robust Quadkey Handling in MercatorTiles and RWIHandler**
+    -   Fixed a potential `TypeError` in `MercatorTiles.from_quadkeys` by ensuring all input quadkeys are mapped to strings before calculating zoom levels. This protects the initialization workflow when quadkeys are passed as integers.
+    -   Updated RWIHandler to explicitly cast the quadkey column to strings after loading, preventing downstream failures during tiled aggregations when source data stores quadkeys in numeric format.
+
+-   **`TifProcessor._create_clipped_processor`: Robust temp file initialization and data store handling**
+    -   Fixed a `FileNotFoundError` raised during `clip_to_geometry(..., return_clipped_processor=True)` caused by the new `TifProcessor` being initialized with `data_store=self.data_store` while the placeholder file was written to a local temp path. When `data_store` is not a `LocalDataStore`, `__post_init__` routed to `data_store.file_exists()` which could not locate the locally created placeholder, raising the error.
+    -   Eliminated the unnecessary two-step placeholder pattern (create dummy `.tif` in a separate `tempfile.mkdtemp()` dir, then overwrite with clipped data). Clipped data is now written directly to a single temp file within `self._temp_dir`, matching the pattern used by `_reproject_to_temp_file`.
+    -   The new `TifProcessor` is now always initialized with `LocalDataStore()` for temp-file-backed instances, regardless of the parent processor's `data_store`, ensuring `__post_init__` correctly resolves the local absolute path.
+    -   Explicitly sets `clipped_file_path`, `dataset_path`, and `dataset_paths` on the returned processor so `open_dataset` correctly routes reads to the clipped file, consistent with the behavior of `clip_to_bounds`.
+
 ## [v0.9.0] - 2026-03-17
 
 ### Added

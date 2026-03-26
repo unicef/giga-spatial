@@ -205,12 +205,44 @@ class BaseHandlerDownloader(ABC):
         """
         pass
 
-    @abstractmethod
-    def download_data_units(self, *args, **kwargs):
+    def download_data_units(self, units: Iterable[Any], **kwargs) -> List[Any]:
         """
-        Abstract method to download data. Implement in subclasses.
+        Download multiple data units. handles optional parallelism if n_workers > 1.
         """
-        pass
+        if units is None or (hasattr(units, "__len__") and len(units) == 0):
+            self.logger.warning("There is no matching data to download.")
+            return []
+
+        # Handle pandas DataFrame by converting rows to a list of dicts
+        if isinstance(units, pd.DataFrame):
+            units_list = [row for _, row in units.iterrows()]
+        else:
+            units_list = list(units) if not isinstance(units, list) else units
+
+        desc = kwargs.get("desc", "Downloading data units")
+        n_workers = getattr(self.config, "n_workers", 1)
+
+        if n_workers > 1:
+            import multiprocessing
+            import functools
+            with multiprocessing.Pool(n_workers) as pool:
+                download_func = functools.partial(self.download_data_unit, **kwargs)
+                results = list(tqdm(pool.imap(download_func, units_list), total=len(units_list), desc=desc))
+        else:
+            results = [self.download_data_unit(unit, **kwargs) for unit in tqdm(units_list, desc=desc)]
+
+        # Filter out None and flatten any list results (e.g. from extracted archives)
+        flattened = []
+        for r in results:
+            if r is None:
+                continue
+            if isinstance(r, (list, tuple)):
+                flattened.extend(r)
+            else:
+                flattened.append(r)
+
+        return flattened
+
 
     def download(self, source, **kwargs):
         """

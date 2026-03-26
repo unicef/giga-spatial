@@ -42,6 +42,7 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
     BASE_URL = "https://ookla-open-data.s3.amazonaws.com/parquet/performance"
 
     base_path: Path = Field(default=config.get_path("ookla_speedtest", "bronze"))
+    n_workers: int = 1 # Ookla data is not parallelizable beyond single file, so just iterate.
 
     type: Literal["fixed", "mobile"] = Field(...)
     year: Optional[int] = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
@@ -153,11 +154,6 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
         except Exception as e:
             self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
             return None
-
-    def download_data_units(self, urls: List[str], **kwargs) -> List[Optional[Path]]:
-        # Ookla data is not parallelizable in a meaningful way beyond single file, so just iterate.
-        results = [self.download_data_unit(url, **kwargs) for url in urls]
-        return [path for path in results if path is not None]
 
     def download(
         self, source: Optional[Union[str, List[str]]] = None, **kwargs

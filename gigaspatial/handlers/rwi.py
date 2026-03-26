@@ -175,11 +175,13 @@ class RWIHandler(HDXHandler):
             )
             if len(quadkeys) != len(data):
                 self.logger.warning(
-                    "Number of data points does not match the quadkey count returning original dataframe"
+                    "Number of data points does not match the quadkey count, returning original dataframe"
                 )
                 return data
             data["quadkey"] = quadkeys
             return data
+        data["quadkey"] = data["quadkey"].apply(str)
+        return data
 
     def load_as_geodataframe(
         self,

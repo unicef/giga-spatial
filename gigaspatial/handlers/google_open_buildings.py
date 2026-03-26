@@ -162,42 +162,6 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
             self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
             return None
 
-    def download_data_units(
-        self,
-        tiles: Union[pd.DataFrame, List[dict]],
-        data_type: Literal["polygons", "points"] = "polygons",
-    ) -> List[str]:
-        """
-        Download data files for multiple tiles.
-
-        data_type: The type of building data to download ('polygons' or 'points').
-            Defaults to 'polygons'.
-        """
-
-        if len(tiles) == 0:
-            self.logger.warning(f"There is no matching data")
-            return []
-
-        with multiprocessing.Pool(self.config.n_workers) as pool:
-            download_func = functools.partial(
-                self.download_data_unit, data_type=data_type
-            )
-            file_paths = list(
-                tqdm(
-                    pool.imap(
-                        download_func,
-                        (
-                            [row for _, row in tiles.iterrows()]
-                            if isinstance(tiles, pd.DataFrame)
-                            else tiles
-                        ),
-                    ),
-                    total=len(tiles),
-                    desc=f"Downloading {data_type} data",
-                )
-            )
-
-        return [path for path in file_paths if path is not None]
 
     def download_by_country(
         self,

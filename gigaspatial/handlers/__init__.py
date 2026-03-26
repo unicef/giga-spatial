@@ -44,6 +44,7 @@ from gigaspatial.handlers.opencellid import (
     OpenCellIDConfig,
     OpenCellIDDownloader,
     OpenCellIDReader,
+    OpenCellIDHandler,
 )
 from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
 from gigaspatial.handlers.rwi import RWIConfig, RWIDownloader, RWIReader, RWIHandler

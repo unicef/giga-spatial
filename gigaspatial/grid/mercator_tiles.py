@@ -26,15 +26,16 @@ class MercatorTiles(BaseModel):
         arbitrary_types_allowed = True
 
     @classmethod
-    def from_quadkeys(cls, quadkeys: List[str]):
+    def from_quadkeys(cls, quadkeys: Iterable[Union[str, int]]):
         """Create MercatorTiles from list of quadkeys."""
+        quadkeys = list(set(str(q) for q in quadkeys))
         if not quadkeys:
             cls.logger.warning("No quadkeys provided to from_quadkeys.")
             return cls(zoom_level=0, quadkeys=[])
         cls.logger.info(
             f"Initializing MercatorTiles from {len(quadkeys)} provided quadkeys."
         )
-        return cls(zoom_level=len(quadkeys[0]), quadkeys=set(quadkeys))
+        return cls(zoom_level=len(quadkeys[0]), quadkeys=quadkeys)
 
     @classmethod
     def from_bounds(

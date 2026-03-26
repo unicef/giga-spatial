@@ -491,45 +491,6 @@ class GHSLDataDownloader(BaseHandlerDownloader):
                         f"Could not delete temporary file {temp_downloaded_path}: {e}"
                     )
 
-    def download_data_units(
-        self,
-        tile_ids: List[str],
-        extract: bool = True,
-        file_pattern: Optional[str] = r".*\.tif$",
-        **kwargs,
-    ) -> List[Optional[Union[Path, List[Path]]]]:
-        """
-        Downloads multiple tiles in parallel, with an option to extract them.
-
-        Args:
-            tile_ids: A list of tile IDs to download.
-            extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
-            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-            **kwargs: Additional parameters passed to download methods
-
-        Returns:
-            A list where each element corresponds to a tile ID and contains:
-            - Path to the downloaded file if extract=False.
-            - List of paths to extracted files if extract=True.
-            - None if the download or extraction failed for a tile.
-        """
-        if not tile_ids:
-            self.logger.warning("No tiles to download")
-            return []
-
-        with multiprocessing.Pool(processes=self.config.n_workers) as pool:
-            download_func = functools.partial(
-                self.download_data_unit, extract=extract, file_pattern=file_pattern
-            )
-            file_paths = list(
-                tqdm(
-                    pool.imap(download_func, tile_ids),
-                    total=len(tile_ids),
-                    desc=f"Downloading data",
-                )
-            )
-
-        return file_paths
 
     def download(
         self,

@@ -324,27 +324,6 @@ class HDXDownloader(BaseHandlerDownloader):
             self.logger.error(f"Error downloading resource {resource_name}: {str(e)}")
             return None
 
-    def download_data_units(self, resources: List[Resource], **kwargs) -> List[str]:
-        """Download multiple resources sequentially
-
-        Args:
-            resources: List of HDX Resource objects
-            **kwargs: Additional keyword arguments
-
-        Returns:
-            List of paths to downloaded files
-        """
-        if len(resources) == 0:
-            self.logger.warning("There is no resource to download")
-            return []
-
-        downloaded_paths = []
-        for resource in tqdm(resources, desc="Downloading resources"):
-            path = self.download_data_unit(resource)
-            if path:
-                downloaded_paths.append(path)
-
-        return downloaded_paths
 
 
 class HDXReader(BaseHandlerReader):
