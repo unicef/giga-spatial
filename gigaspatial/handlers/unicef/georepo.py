@@ -798,9 +798,7 @@ def get_country_boundaries_by_iso3(
                 boundaries["features"].extend(country_entity["features"])
 
             # Get all descendants
-            children_features = get_all_children(
-                country_ucode, latest_view_uuid, max_depth=5
-            )
-            boundaries["features"].extend(children_features)
+            descendants = get_all_children(country_ucode, latest_view_uuid)
+            boundaries["features"].extend(descendants)
 
     return boundaries

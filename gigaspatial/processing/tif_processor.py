@@ -1466,29 +1466,68 @@ class TifProcessor:
         Helper to create a new TifProcessor instance from clipped data.
         Saves the clipped data to a temporary file and initializes a new TifProcessor.
         """
-        # Write clipped data directly to a temp file in self._temp_dir (no separate placeholder dir)
-        clipped_file_path = os.path.join(
-            self._temp_dir, f"clipped_{os.urandom(8).hex()}.tif"
+        # Create a temporary placeholder file to initialize the processor
+        # This allows us to get the processor's temp_dir
+        placeholder_dir = tempfile.mkdtemp()
+        placeholder_path = os.path.join(
+            placeholder_dir, f"placeholder_{os.urandom(8).hex()}.tif"
         )
-        with rasterio.open(clipped_file_path, "w", **clipped_meta) as dst:
-            dst.write(clipped_data)
 
-        if not os.path.exists(clipped_file_path):
-            raise RuntimeError(f"Failed to create clipped file at {clipped_file_path}")
+        # Create a minimal valid TIF file as placeholder
+        placeholder_transform = rasterio.transform.from_bounds(0, 0, 1, 1, 1, 1)
+        with rasterio.open(
+            placeholder_path,
+            "w",
+            driver="GTiff",
+            width=1,
+            height=1,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=placeholder_transform,
+        ) as dst:
+            dst.write(np.zeros((1, 1, 1), dtype="uint8"))
 
-        # Always use LocalDataStore for local temp files, regardless of self.data_store
+        # Create a new TifProcessor instance with the placeholder
+        # ALWAYS use LocalDataStore() for local temp paths, even if self.data_store is different
         new_processor = TifProcessor(
-            dataset_path=clipped_file_path,
-            data_store=LocalDataStore(),  # Use LocalDataStore for local temp path
+            dataset_path=placeholder_path,
+            data_store=LocalDataStore(),
             mode=self.mode,
         )
 
-        # Mark the clipped file path so open_dataset routes correctly
-        new_processor.clipped_file_path = clipped_file_path
-        new_processor.dataset_path = Path(clipped_file_path)
+        # Now save the clipped file directly to the new processor's temp directory
+        clipped_file_path = os.path.join(
+            new_processor._temp_dir, f"clipped_{os.urandom(8).hex()}.tif"
+        )
+
+        with rasterio.open(clipped_file_path, "w", **clipped_meta) as dst:
+            dst.write(clipped_data)
+
+        # Verify file was created successfully
+        if not os.path.exists(clipped_file_path):
+            raise RuntimeError(f"Failed to create clipped file at {clipped_file_path}")
+
+        # Set the clipped file path and update processor attributes
+        new_processor._clipped_file_path = clipped_file_path
+        new_processor.dataset_path = clipped_file_path
         new_processor.dataset_paths = [Path(clipped_file_path)]
 
+        # Restore original data_store to the new processor
+        new_processor.data_store = self.data_store
+
+        # Clean up placeholder file and directory
+        try:
+            os.remove(placeholder_path)
+            os.rmdir(placeholder_dir)
+        except OSError:
+            pass
+
+        # Reload metadata since the path changed
+        new_processor._load_metadata()
+
         return new_processor
+
 
     def _get_basic_statistics(self, approx_ok: bool = False) -> Dict[str, Any]:
         """

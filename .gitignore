@@ -20,6 +20,7 @@ bronze/
 silver/
 gold/
 views/
+metadata/
 
 # Data files
 *.csv

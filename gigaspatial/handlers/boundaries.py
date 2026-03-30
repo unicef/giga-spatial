@@ -220,7 +220,7 @@ class AdminBoundaries(AdminBoundaryTable):
         cls.logger.info(
             f"Loading GeoRepo data for {country_code} admin_level={admin_level}"
         )
-        from gigaspatial.handlers.unicef_georepo import get_country_boundaries_by_iso3
+        from gigaspatial.handlers.unicef.georepo import get_country_boundaries_by_iso3
 
         geojson = get_country_boundaries_by_iso3(country_code, admin_level=admin_level)
         features = geojson.get("features", [])
@@ -517,7 +517,7 @@ class AdminBoundaries(AdminBoundaryTable):
             True if GeoRepo is reachable, False otherwise.
         """
         try:
-            from gigaspatial.handlers.unicef_georepo import GeoRepoClient
+            from gigaspatial.handlers.unicef.georepo import GeoRepoClient
 
             client = GeoRepoClient()
             if client.check_connection():

@@ -510,6 +510,121 @@ class OSMLocationFetcher:
         )
 
         return self._execute_and_process_queries(queries, handle_duplicates)
+    
+    def fetch_by_osmid(
+        self,
+        osmid: int,
+        element_type: Literal["node", "way", "relation"] = "node",
+        include_metadata: bool = False,
+    ) -> Optional[Dict]:
+        """
+        Fetch a single OSM element by its OSM ID and element type.
+
+        Uses the Overpass API `<type>(id:<osmid>)` filter to retrieve
+        the element and returns it as a processed dictionary matching
+        the structure produced by ``fetch_locations``.
+
+        Args:
+            osmid (int): The OSM element ID to fetch (e.g., 123456789).
+            element_type (str): The OSM element type — one of ``"node"``,
+                ``"way"``, or ``"relation"``. Defaults to ``"node"``.
+            include_metadata (bool): If ``True``, include change-tracking
+                metadata (timestamp, version, changeset, user, uid) in the
+                result. Defaults to ``False``.
+
+        Returns:
+            Optional[Dict]: A dictionary with the processed element fields
+            (``source_id``, ``name``, ``type``, ``geometry``, ``latitude``,
+            ``longitude``, and all matching OSM tag fields), or ``None`` if
+            the element was not found or could not be processed.
+
+        Raises:
+            ValueError: If ``element_type`` is not one of the accepted values.
+            RuntimeError: If the Overpass API request fails after all retries.
+
+        Example:
+            >>> fetcher = OSMLocationFetcher(
+            ...     country="TR",
+            ...     location_types={"amenity": ["school"]},
+            ... )
+            >>> element = fetcher.fetch_by_osmid(123456789, element_type="way")
+            >>> if element:
+            ...     print(element["name"], element["latitude"], element["longitude"])
+        """
+        valid_types = ("node", "way", "relation")
+        if element_type not in valid_types:
+            raise ValueError(
+                f"element_type must be one of {valid_types}, got '{element_type}'"
+            )
+
+        output_mode = "center meta" if include_metadata else "center"
+        output_mode_geom = "geom meta" if include_metadata else "geom"
+
+        # Ways need geometry output; nodes and relations use center
+        if element_type == "way":
+            out_clause = output_mode_geom
+        else:
+            out_clause = output_mode
+
+        query = f"""
+        [out:json][timeout:{self.timeout}];
+        {element_type}(id:{osmid});
+        out {out_clause};
+        """
+
+        self.logger.info(f"Fetching OSM {element_type} with id={osmid}")
+        response = self._make_request(query)
+        elements = response.get("elements", [])
+
+        if not elements:
+            self.logger.warning(f"No OSM element found for {element_type} id={osmid}")
+            return None
+
+        element = elements[0]
+
+        if element_type == "way":
+            results = self._process_way(element)
+        else:
+            results = self._process_node_relation(element)
+
+        if not results:
+            self.logger.warning(
+                f"OSM {element_type} id={osmid} found but could not be processed "
+                "(no matching location_types tags). Returning raw tags only."
+            )
+            # Fall back to a minimal dict with raw tags and geometry when the element
+            # doesn't match any configured location_types (common for ID lookups).
+            tags = element.get("tags", {})
+            if element_type == "way" and "geometry" in element:
+                from shapely.geometry import Polygon
+                polygon = Polygon([(p["lon"], p["lat"]) for p in element["geometry"]])
+                centroid = polygon.centroid
+                return {
+                    "source_id": element["id"],
+                    "type": element_type,
+                    "name": tags.get("name", ""),
+                    "name_en": tags.get("name:en", ""),
+                    "geometry": polygon,
+                    "latitude": centroid.y,
+                    "longitude": centroid.x,
+                    "tags": tags,
+                }
+            else:
+                _lat = element.get("lat") or element.get("center", {}).get("lat")
+                _lon = element.get("lon") or element.get("center", {}).get("lon")
+                return {
+                    "source_id": element["id"],
+                    "type": element_type,
+                    "name": tags.get("name", ""),
+                    "name_en": tags.get("name:en", ""),
+                    "geometry": Point(_lon, _lat) if _lat and _lon else None,
+                    "latitude": _lat,
+                    "longitude": _lon,
+                    "tags": tags,
+                }
+
+        # Return the first matching processed result
+        return results[0]
 
     def _normalize_date(self, date_input: Union[str, datetime]) -> str:
         """

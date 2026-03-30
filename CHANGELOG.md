@@ -2,10 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.9.1] - 2026-03-26
+## [v0.9.2] - 2026-03-30
 
 ### Added
 
+-   **UNICEF SDG Data Fetcher (`gigaspatial/handlers/unicef/sdg.py`)** - New stateless fetcher for the UNICEF SDMX Data Warehouse, providing access to 700+ child welfare indicators (mortality, education, nutrition, immunisation, WASH, SDGs).
+    -   `UnicefDataFetcher` - Pydantic dataclass fetcher wrapping the `unicefdata` Python package. Returns indicator data directly as a `pd.DataFrame` with no download/caching lifecycle, consistent with the GigaSpatial fetcher pattern (e.g., `GigaSchoolLocationFetcher`).
+    -   Supports indicator filtering by `countries` (ISO3, validated via `pycountry`), `year` / year range, `sex` disaggregation, `latest` / `mrv` recency filters, and `circa` approximate-year matching.
+    -   `fetch()` - Core method returning a flat `pd.DataFrame` of SDMX indicator observations.
+    -   `fetch_as_geodataframe()` - Spatially enriches fetched indicator data by left-joining to an admin boundary `GeoDataFrame` on ISO3 country code, enabling direct integration with GigaSpatial's view generator workflows.
+    -   `search_indicators()` / `list_categories()` - Static convenience wrappers exposing `unicefdata` discovery utilities without requiring fetcher instantiation.
+    -   `unicefdata` added as a new optional dependency under the `[unicef]` extra (`pip install "giga-spatial[unicef]"`).
+
+-   **`OSMLocationFetcher.fetch_by_osmid`: Fetch a single OSM element by ID**
+    -   Added `fetch_by_osmid(osmid, element_type, include_metadata)` to `gigaspatial/handlers/osm.py`, enabling direct lookup of any OSM element (node, way, or relation) by its numeric OSM ID via the Overpass API `<type>(id:<osmid>)` filter.
+    -   `element_type` accepts `"node"` (default), `"way"`, or `"relation"`, routing to the correct Overpass output mode (`center` for nodes/relations, `geom` for ways) and the appropriate internal processor (`_process_node_relation` or `_process_way`).
+    -   Returns a processed `Dict` with the same field structure as `fetch_locations` results (`source_id`, `name`, `name_en`, `type`, `geometry`, `latitude`, `longitude`, and metadata fields when `include_metadata=True`), ensuring interoperability with downstream GigaSpatial workflows.
+    -   Includes a graceful fallback for elements that do not match any configured `location_types`: returns a minimal dict with raw OSM tags and geometry instead of `None`, which is the expected behavior for direct ID-based lookups where tag filtering is not the intent.
+    -   Reuses `_make_request` for retry/backoff logic and `_process_node_relation`/`_process_way` for consistent element normalization, adding no new I/O or processing surface.
+
+### Changed
+
+-   **Optional Dependency: `unicefdata` (UNICEF SDG Handler)** - Refactored `UnicefDataFetcher` to make the `unicefdata` library optional.
+    -   Implemented defensive loading in `gigaspatial/handlers/unicef/sdg.py`: `import gigaspatial` no longer fails if `unicefdata` is missing.
+    -   Detailed `ImportError` messages now guide users to install the dependency via `pip install "giga-spatial[unicef]"` only when accessing UNICEF data functionality.
+    -   Added `unicef` extra to `setup.py` and updated `requirements.txt` with the appropriate git installation URL.
+
+-   **UNICEF Handler Reorganization** - Migrated the standalone `gigaspatial/handlers/unicef_georepo.py` to `gigaspatial/handlers/unicef/georepo.py`, centralizing all UNICEF-related providers under a single module. Updated imports in `AdminBoundaries` and top-level `__init__.py` for consistency.
+
+### Fixed
+
+-   **`TifProcessor._create_clipped_processor`: Fixed FileNotFoundError when using non-local DataStores**
+    -   Resolved a `FileNotFoundError` during `clip_to_geometry(..., return_clipped_processor=True)` that occurred when the parent processor used a cloud-based `DataStore` (e.g., `ADLSDataStore`).
+    -   Fixed the initialization of the new processor instance to use `LocalDataStore()` for its local temporary path validation, even when the parent uses a non-local store.
+    -   Restored the placeholder initialization pattern to ensure the clipped file is saved in the new processor's `_temp_dir`, preventing accidental deletion when the original processor is cleaned up.
+
+### Dependencies
+
+-   `[unicef]`: `unicefdata` (install via git URL from `unicef-drp/unicefData` or `pip install unicefdata` from source).
+
+## [v0.9.1] - 2026-03-26
+
+### Added
 
 -   **`read_dataset`: New geospatial format support**
     -   Added `.fgb` (FlatGeobuf) to `GEO_READERS` via `gpd.read_file`: FlatGeobuf is one of GigaSpatial's three primary export formats and was previously unhandled, raising an unsupported format error.
@@ -40,6 +78,13 @@ All notable changes to this project will be documented in this file.
     -   Replaced fragile `data_store.__class__.__name__.replace('DataStore', '').lower()` string manipulation with a `_storage_display_name()` helper using `in`-based class name detection, consistent with the DataStore cross-platform improvements in v0.9.0.
     -   Added `raise ... from e` throughout all `except` blocks to preserve original tracebacks and improve debuggability.
 
+-   **OpenCellID Handler Refactor** - Complete architectural refactor to align with the `BaseHandler` design pattern.
+    -   Decomposed the legacy monolithic class into specialized `OpenCellIDConfig`, `OpenCellIDDownloader`, and `OpenCellIDReader` components, orchestrating them via a new `OpenCellIDHandler`.
+    -   Updated `extract_search_geometry` to return ISO 3166-1 alpha-2 country codes, matching the OpenCellID database's primary indexing method.
+    -   Implemented `get_relevant_data_units_by_geometry` to dynamically resolve download links from the OpenCellID web portal based on the resolved country code.
+    -   Standardized the local storage hierarchy to utilize country-specific subdirectories (`bronze/opencellid/{alpha2}/`) for better data organization and multi-country support.
+    -   Decoupled processing parameters (`created_newer`, `created_before`, and `drop_duplicates`) from the static configuration, moving them to `load_from_paths` to enable granular, call-time filtering of cell tower data.
+    -   Introduced `load_as_geodataframe` as a high-level convenience method for direct loading into spatial data structures.
 
 ### Fixed
 

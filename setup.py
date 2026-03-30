@@ -33,6 +33,7 @@ EXTRAS = {
     "db": ["SQLAlchemy>=2.0.0", "sqlalchemy-trino==0.5.0", "dask>=2024.12.1"],
     "duckdb": ["duckdb==1.2.0"],
     "azure": ["azure-storage-blob>=12.22.0"],
+    "unicef": ["unicefdata>=2.4.0"],
 }
 
 # Generate 'all' extra
@@ -118,6 +119,7 @@ setup(
                 "dask",
                 "SQLAlchemy",
                 "sqlalchemy",
+                "unicefdata",
             ]
         )
     ],

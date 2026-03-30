@@ -468,7 +468,20 @@ class BaseHandlerReader(ABC):
 
         # Raster case
         if isinstance(data, TifProcessor):
-            return data.clip_to_geometry(geometry=geometry, **kwargs)
+            clip_kwargs = {
+                k: v
+                for k, v in kwargs.items()
+                if k in (
+                    "crop",
+                    "all_touched",
+                    "invert",
+                    "nodata",
+                    "pad",
+                    "pad_width",
+                    "return_clipped_processor",
+                )
+            }
+            return data.clip_to_geometry(geometry=geometry, **clip_kwargs)
 
         return data
 

@@ -1,4 +1,4 @@
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 
 import gigaspatial.core.io as io
 import gigaspatial.processing.algorithms as algorithms
@@ -35,6 +35,7 @@ from .handlers import (
     RWIHandler,
     MLabHandler,
     OpenCellIDHandler,
+    UnicefDataFetcher,
 )
 
 from .generators import (
@@ -90,6 +91,7 @@ __all__ = [
     "RWIHandler",
     "MLabHandler",
     "OpenCellIDHandler",
+    "UnicefDataFetcher",
     # generators
     "GeometryBasedZonalViewGenerator",
     "PoiViewGenerator",

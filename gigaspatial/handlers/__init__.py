@@ -48,7 +48,8 @@ from gigaspatial.handlers.opencellid import (
 )
 from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
 from gigaspatial.handlers.rwi import RWIConfig, RWIDownloader, RWIReader, RWIHandler
-from gigaspatial.handlers.unicef_georepo import (
+from gigaspatial.handlers.unicef import (
+    UnicefDataFetcher,
     GeoRepoClient,
     get_country_boundaries_by_iso3,
 )
@@ -73,3 +74,4 @@ from gigaspatial.handlers.gee import (
     GEEProfiler,
 )
 from gigaspatial.handlers.mlab import MLabConfig, MLabHandler
+from gigaspatial.handlers.unicef.sdg import UnicefDataFetcher

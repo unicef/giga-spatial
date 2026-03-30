@@ -194,8 +194,8 @@ class EntityProcessor:
         df = df.copy()
 
         # --- structural ---
-        df.columns = [c.strip().lower() for c in df.columns]
         df = self._rename_columns(df)
+        df.columns = [c.strip().lower() for c in df.columns]
 
         # --- string normalisation (geometry-safe, before numeric coercion) ---
         df = self._strip_strings(df)
