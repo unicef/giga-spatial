@@ -6,7 +6,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 import json
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Union, Iterable, Optional, Tuple, ClassVar, Literal
 import pycountry
 
@@ -16,17 +16,38 @@ from gigaspatial.config import config
 
 
 class H3Hexagons(BaseModel):
+    """
+    Representation of a collection of H3 hexagons at a specific resolution.
+
+    Provides utility methods to create, filter, manipulate, and export H3
+    hexagonal grids for spatial analysis. Handles conversion between
+    coordinate pairs, geometries, and H3 cell IDs.
+
+    Attributes:
+        resolution: H3 resolution level (0-15).
+        hexagons: List of H3 cell ID strings.
+        data_store: Storage interface for I/O operations.
+        logger: Class-level logger.
+    """
+
     resolution: int = Field(..., ge=0, le=15)
     hexagons: List[str] = Field(default_factory=list)
     data_store: DataStore = Field(default_factory=LocalDataStore, exclude=True)
     logger: ClassVar = config.get_logger("H3Hexagons")
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
-    def from_hexagons(cls, hexagons: List[str]):
-        """Create H3Hexagons from list of H3 cell IDs."""
+    def from_hexagons(cls, hexagons: List[str]) -> "H3Hexagons":
+        """
+        Create H3Hexagons from a list of H3 cell IDs.
+
+        Args:
+            hexagons: List of H3 cell hashes.
+
+        Returns:
+            A new H3Hexagons instance.
+        """
         if not hexagons:
             cls.logger.warning("No hexagons provided to from_hexagons.")
             return cls(resolution=0, hexagons=[])
@@ -41,8 +62,20 @@ class H3Hexagons(BaseModel):
     @classmethod
     def from_bounds(
         cls, xmin: float, ymin: float, xmax: float, ymax: float, resolution: int
-    ):
-        """Create H3Hexagons from boundary coordinates."""
+    ) -> "H3Hexagons":
+        """
+        Create H3Hexagons covering the specified geographic bounding box.
+
+        Args:
+            xmin: Minimum longitude.
+            ymin: Minimum latitude.
+            xmax: Maximum longitude.
+            ymax: Maximum latitude.
+            resolution: H3 resolution level.
+
+        Returns:
+            A new H3Hexagons instance covering the bounds.
+        """
         cls.logger.info(
             f"Creating H3Hexagons from bounds: ({xmin}, {ymin}, {xmax}, {ymax}) at resolution: {resolution}"
         )
@@ -68,12 +101,26 @@ class H3Hexagons(BaseModel):
         source: Union[
             BaseGeometry,
             gpd.GeoDataFrame,
-            List[Union[Point, Tuple[float, float]]],  # points
+            List[Union[Point, Tuple[float, float]]],
         ],
         resolution: int,
         contain: Literal["center", "full", "overlap", "bbox_overlap"] = "overlap",
         **kwargs,
-    ):
+    ) -> "H3Hexagons":
+        """
+        Factory method to create H3Hexagons from various spatial sources.
+
+        Handles GeoDataFrames, Shapely geometries, and lists of coordinate points.
+
+        Args:
+            source: Spatial data source.
+            resolution: Target H3 resolution.
+            contain: H3 spatial containment logic.
+            **kwargs: Forwarded to specific factory methods (e.g., from_geometry).
+
+        Returns:
+            A new H3Hexagons instance.
+        """
         cls.logger.info(
             f"Creating H3Hexagons from spatial source (type: {type(source)}) at resolution: {resolution} with predicate: {contain}"
         )
@@ -107,8 +154,19 @@ class H3Hexagons(BaseModel):
         resolution: int,
         contain: Literal["center", "full", "overlap", "bbox_overlap"] = "overlap",
         **kwargs,
-    ):
-        """Create H3Hexagons from a geometry."""
+    ) -> "H3Hexagons":
+        """
+        Create H3Hexagons from a Shapely geometry.
+
+        Args:
+            geometry: Input geometry (Polygon, MultiPolygon, etc.).
+            resolution: H3 resolution level.
+            contain: Containment logic for H3 cell generation.
+            **kwargs: Additional metadata parameters.
+
+        Returns:
+            H3Hexagons instance covering the geometry.
+        """
         cls.logger.info(
             f"Creating H3Hexagons from geometry (bounds: {geometry.bounds}) at resolution: {resolution} with predicate: {contain}"
         )
@@ -141,7 +199,17 @@ class H3Hexagons(BaseModel):
     def from_points(
         cls, points: List[Union[Point, Tuple[float, float]]], resolution: int, **kwargs
     ) -> "H3Hexagons":
-        """Create H3Hexagons from a list of points or lat-lon pairs."""
+        """
+        Create H3Hexagons from a list of point coordinates.
+
+        Args:
+            points: List of points as Shapely Points or (lon, lat) tuples.
+            resolution: H3 resolution level.
+            **kwargs: Additional metadata parameters.
+
+        Returns:
+            H3Hexagons instance containing cells for all points.
+        """
         cls.logger.info(
             f"Creating H3Hexagons from {len(points)} points at resolution: {resolution}"
         )
@@ -153,7 +221,17 @@ class H3Hexagons(BaseModel):
     def from_json(
         cls, data_store: DataStore, file: Union[str, Path], **kwargs
     ) -> "H3Hexagons":
-        """Load H3Hexagons from a JSON file."""
+        """
+        Load H3Hexagons from a JSON file in storage.
+
+        Args:
+            data_store: DataStore instance for the file.
+            file: Path to the JSON file.
+            **kwargs: Metadata overrides.
+
+        Returns:
+            H3Hexagons instance loaded from file.
+        """
         cls.logger.info(
             f"Loading H3Hexagons from JSON file: {file} using data store: {type(data_store).__name__}"
         )
@@ -177,15 +255,32 @@ class H3Hexagons(BaseModel):
             return instance
 
     @property
-    def average_hexagon_area(self):
+    def average_hexagon_area(self) -> float:
+        """Calculates the average area of hexagons at the current resolution.
+
+        Returns:
+            Average area in square kilometers.
+        """
         return h3.average_hexagon_area(self.resolution)
 
     @property
-    def average_hexagon_edge_length(self):
+    def average_hexagon_edge_length(self) -> float:
+        """Calculates the average edge length of hexagons at the current resolution.
+
+        Returns:
+            Average edge length in kilometers.
+        """
         return h3.average_hexagon_edge_length(self.resolution)
 
     def filter_hexagons(self, hexagons: Iterable[str]) -> "H3Hexagons":
-        """Filter hexagons by a given set of hexagon IDs."""
+        """Filters the current collection against a provided set of hexagon IDs.
+
+        Args:
+            hexagons: An iterable of H3 cell ID strings to keep.
+
+        Returns:
+            A new H3Hexagons instance containing only the intersecting cells.
+        """
         original_count = len(self.hexagons)
         incoming_count = len(
             list(hexagons)
@@ -202,7 +297,11 @@ class H3Hexagons(BaseModel):
         )
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Convert to pandas DataFrame with hexagon ID and centroid coordinates."""
+        """Converts the hexagon collection to a pandas DataFrame.
+
+        Returns:
+            A DataFrame with 'hexagon', 'latitude', and 'longitude' columns.
+        """
         self.logger.info(
             f"Converting {len(self.hexagons)} hexagons to pandas DataFrame."
         )
@@ -225,14 +324,22 @@ class H3Hexagons(BaseModel):
         )
 
     def to_geoms(self) -> List[Polygon]:
-        """Convert hexagons to shapely Polygon geometries."""
+        """Converts hexagons to a list of Shapely Polygon geometries.
+
+        Returns:
+            A list of Polygons representing the cell boundaries.
+        """
         self.logger.info(
             f"Converting {len(self.hexagons)} hexagons to shapely Polygon geometries."
         )
         return [shape(h3.cells_to_geo([hex_id])) for hex_id in self.hexagons]
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
-        """Convert to GeoPandas GeoDataFrame."""
+        """Converts the hexagon collection to a GeoPandas GeoDataFrame.
+
+        Returns:
+            A GeoDataFrame with 'h3' and 'geometry' columns.
+        """
         return gpd.GeoDataFrame(
             {"h3": self.hexagons, "geometry": self.to_geoms()}, crs="EPSG:4326"
         )
@@ -262,13 +369,14 @@ class H3Hexagons(BaseModel):
         return hexagons
 
     def get_neighbors(self, k: int = 1) -> "H3Hexagons":
-        """Get k-ring neighbors of all hexagons.
+        """Calculates k-ring neighbors for all hexagons in the collection.
 
         Args:
-            k: Distance of neighbors (1 for immediate neighbors, 2 for neighbors of neighbors, etc.)
+            k: The distance of neighbors to retrieve (1 for immediate neighbors).
+                Defaults to 1.
 
         Returns:
-            New H3Hexagons instance with neighbors included
+            A new H3Hexagons instance containing the neighbors.
         """
         self.logger.info(
             f"Getting k-ring neighbors (k={k}) for {len(self.hexagons)} hexagons."
@@ -285,7 +393,12 @@ class H3Hexagons(BaseModel):
         return H3Hexagons(resolution=self.resolution, hexagons=list(all_neighbors))
 
     def get_compact_representation(self) -> "H3Hexagons":
-        """Get compact representation by merging adjacent hexagons into parent cells where possible."""
+        """Merges adjacent hexagons into parent cells where possible (compacting).
+
+        Returns:
+            A new H3Hexagons instance in compacted form. Note that this may
+            result in a set containing cells of multiple resolutions.
+        """
         self.logger.info(f"Compacting {len(self.hexagons)} hexagons.")
 
         # Convert to set for h3.compact
@@ -299,13 +412,16 @@ class H3Hexagons(BaseModel):
         return H3Hexagons(resolution=self.resolution, hexagons=list(compacted))
 
     def get_children(self, target_resolution: int) -> "H3Hexagons":
-        """Get children hexagons at higher resolution.
+        """Generates all child hexagons at a higher resolution.
 
         Args:
-            target_resolution: Target resolution (must be higher than current)
+            target_resolution: The target H3 resolution (must be > current).
 
         Returns:
-            New H3Hexagons instance with children at target resolution
+            A new H3Hexagons instance with children at the target resolution.
+
+        Raises:
+            ValueError: If `target_resolution` is not higher than current resolution.
         """
         if target_resolution <= self.resolution:
             raise ValueError("Target resolution must be higher than current resolution")
@@ -323,13 +439,16 @@ class H3Hexagons(BaseModel):
         return H3Hexagons(resolution=target_resolution, hexagons=all_children)
 
     def get_parents(self, target_resolution: int) -> "H3Hexagons":
-        """Get parent hexagons at lower resolution.
+        """Retrieves parent hexagons at a lower resolution.
 
         Args:
-            target_resolution: Target resolution (must be lower than current)
+            target_resolution: The target H3 resolution (must be < current).
 
         Returns:
-            New H3Hexagons instance with parents at target resolution
+            A new H3Hexagons instance with parents at the target resolution.
+
+        Raises:
+            ValueError: If `target_resolution` is not lower than current resolution.
         """
         if target_resolution >= self.resolution:
             raise ValueError("Target resolution must be lower than current resolution")
@@ -347,7 +466,16 @@ class H3Hexagons(BaseModel):
         return H3Hexagons(resolution=target_resolution, hexagons=list(parents))
 
     def save(self, file: Union[str, Path], format: str = "json") -> None:
-        """Save H3Hexagons to file in specified format."""
+        """Saves the H3Hexagons collection to persistent storage.
+
+        Args:
+            file: The destination file path.
+            format: The output format. Supported: 'json', 'parquet', 'geojson'.
+                Defaults to 'json'.
+
+        Raises:
+            ValueError: If an unsupported format is provided.
+        """
         with self.data_store.open(str(file), "wb" if format == "parquet" else "w") as f:
             if format == "parquet":
                 self.to_geodataframe().to_parquet(f, index=False)
@@ -363,10 +491,17 @@ class H3Hexagons(BaseModel):
 
 
 class CountryH3Hexagons(H3Hexagons):
-    """H3Hexagons specialized for country-level operations.
+    """
+    H3Hexagons specialized for country-level operations.
 
-    This class extends H3Hexagons to work specifically with country boundaries.
-    It can only be instantiated through the create() classmethod.
+    Extends H3Hexagons to work specifically with country boundaries retrieved
+    from the Giga administrative boundary dataset.
+
+    Note:
+        Instances should be created using the `create()` factory method.
+
+    Attributes:
+        country: ISO 3166-1 alpha-3 country code.
     """
 
     country: str = Field(..., exclude=True)
@@ -379,14 +514,26 @@ class CountryH3Hexagons(H3Hexagons):
 
     @classmethod
     def create(
-        cls,
+        self,
         country: str,
         resolution: int,
         contain: Literal["center", "full", "overlap", "bbox_overlap"] = "overlap",
         data_store: Optional[DataStore] = None,
         country_geom_path: Optional[Union[str, Path]] = None,
-    ):
-        """Create CountryH3Hexagons for a specific country."""
+    ) -> "CountryH3Hexagons":
+        """Factory method to create H3Hexagons for a specific country's boundary.
+
+        Args:
+            country: ISO country code (3-letter alpha-3) or name.
+            resolution: Target H3 resolution (0-15).
+            contain: Containment logic for mapping the geometry to cells.
+                Defaults to 'overlap'.
+            data_store: Optional storage interface for boundary lookup.
+            country_geom_path: Optional path override for the boundary file.
+
+        Returns:
+            A new CountryH3Hexagons instance fully populated for the country.
+        """
         from gigaspatial.handlers.boundaries import AdminBoundaries
 
         instance = super().__new__(cls)

@@ -1,4 +1,13 @@
-# import requests
+"""
+Overture Maps Places theme data handler.
+
+This module provides specialized tools for querying Overture Maps datasets via
+DuckDB's spatial and S3 extensions. It facilitates:
+- Direct S3 querying of Overture Places GeoParquet files.
+- Spatial filtering by administrative boundaries or custom geometries.
+- Category-based filtering for points of interest (POIs).
+- High-performance data acquisition without local mirroring.
+"""
 import geopandas as gpd
 from typing import List, Optional, Union
 from pydantic.dataclasses import dataclass, Field
@@ -29,35 +38,14 @@ class OvertureAmenityFetcher:
     country boundary, and returns a GeoDataFrame of point locations for the
     requested amenity categories.
 
-    Amenity categories
-    ------------------
-    The `amenity_types` parameter should contain values from
-    `categories.primary` in the Overture Places schema (for example
-    "hospital", "clinic", "school", "restaurant").
-
-    Overture maintains the authoritative category list here:
-    https://github.com/OvertureMaps/schema/blob/main/docs/schema/concepts/by-theme/places/overture_categories.csv
-
-    Each entry in that CSV corresponds to a valid value you can pass in
-    `amenity_types`.
-
-    Examples
-    --------
-    Fetch hospitals in Senegal:
-
-        fetcher = OvertureAmenityFetcher(
-            country="SEN",
-            amenity_types=["hospital"],
-        )
-        hospitals = fetcher.fetch_locations()
-
-    Fetch multiple health‑related categories:
-
-        fetcher = OvertureAmenityFetcher(
-            country="SEN",
-            amenity_types=["hospital", "clinic", "pharmacy"],
-        )
-        facilities = fetcher.fetch_locations()
+    Attributes:
+        release: Overture release version (e.g., "2024-11-13.1").
+        base_url: S3 pattern for the Places theme.
+        country: ISO 3166-1 alpha-2 or alpha-3 country code.
+        amenity_types: List of primary categories to retrieve.
+        geom: Optional spatial boundary for filtering.
+        data_store: Optional storage interface for boundary retrieval.
+        country_geom_path: Path to local country boundary file.
     """
 
     # constants
@@ -95,14 +83,12 @@ class OvertureAmenityFetcher:
         self.connection = self._set_connection()
 
     def _set_connection(self):
-        """Set the connection to the DB"""
-        db = duckdb.connect()
-        db.install_extension("spatial")
-        db.load_extension("spatial")
-        return db
+        """
+        Establish a DuckDB connection with S3 and Spatial support.
 
-    def _set_connection(self):
-        """Set the connection to the DB"""
+        Returns:
+            A configured duckdb.DuckDBPyConnection.
+        """
         db = duckdb.connect()
 
         # CRITICAL: Install httpfs for S3 access
@@ -120,7 +106,12 @@ class OvertureAmenityFetcher:
     def _load_country_geometry(
         self,
     ) -> Union[Polygon, MultiPolygon]:
-        """Load country boundary geometry from DataStore or GADM."""
+        """
+        Locate and load the administrative boundary for the target country.
+
+        Returns:
+            A Shapely geometry representing the country boundary.
+        """
 
         country_geom = AdminBoundaries.create(
             country_code=self.country,
@@ -131,7 +122,16 @@ class OvertureAmenityFetcher:
         return country_geom
 
     def _build_query(self, match_pattern: bool = False, **kwargs) -> str:
-        """Constructs and returns the query"""
+        """
+        Construct the SQL query for S3 Parquet access.
+
+        Args:
+            match_pattern: If True, uses ILIKE for category matching.
+            **kwargs: Additional query parameters.
+
+        Returns:
+            A DuckDB SQL query string.
+        """
 
         if match_pattern:
             amenity_query = " OR ".join(
@@ -166,7 +166,16 @@ class OvertureAmenityFetcher:
     def fetch_locations(
         self, match_pattern: bool = False, **kwargs
     ) -> gpd.GeoDataFrame:
-        """Fetch and process amenity locations."""
+        """
+        Execute the query and return locations as a GeoDataFrame.
+
+        Args:
+            match_pattern: If True, uses ILIKE for category matching.
+            **kwargs: Additional execution parameters.
+
+        Returns:
+            A GeoDataFrame of retrieved POIs.
+        """
         self.logger.info("Fetching amenity locations from Overture DB...")
 
         query = self._build_query(match_pattern=match_pattern, **kwargs)

@@ -662,6 +662,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             **kwargs,
         )
 
+        # Force statistic based on project type: categorical data (DU) use median, population counts use sum.
+        stat = "median" if handler.config.project == "degree_of_urbanization" else "sum"
+
         # Restrict to single country for age_structures project
         if handler.config.project == "age_structures" and len(countries_list) > 1:
             raise ValueError(
@@ -694,11 +697,11 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                     zone_id: 0 for zone_id in self.get_zone_identifiers()
                 }
                 self.logger.info(
-                    f"Sampling individual age_structures rasters using 'sum' statistic and summing per zone."
+                    f"Sampling individual age_structures rasters using '{stat}' statistic and summing results per zone."
                 )
                 for tif_processor in all_tif_processors:
                     single_raster_result = self.map_rasters(
-                        raster_data=tif_processor, stat="sum"
+                        raster_data=tif_processor, stat=stat
                     )
                     for zone_id, value in single_raster_result.items():
                         all_results_by_zone[zone_id] += value
@@ -717,9 +720,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                     tif_processors.extend(self._ensure_tif_list(raw))
 
                 self.logger.info(
-                    f"Sampling WorldPop Population data using 'sum' statistic"
+                    f"Sampling WorldPop Population data using '{stat}' statistic"
                 )
-                result = self.map_rasters(raster_data=tif_processors, stat="sum")
+                result = self.map_rasters(raster_data=tif_processors, stat=stat)
         else:
             gdf_pop = pd.concat(
                 [
@@ -733,11 +736,13 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 ignore_index=True,
             )
 
-            self.logger.info(f"Aggregating WorldPop Population data to the zones.")
+            self.logger.info(
+                f"Aggregating WorldPop Population data to the zones using '{stat}' statistic."
+            )
             result = self.map_polygons(
                 gdf_pop,
                 value_columns="pixel_value",
-                aggregation="sum",
+                aggregation=stat,
                 predicate=predicate,
             )
 

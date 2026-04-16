@@ -1,3 +1,9 @@
+"""
+High-performance Raster (TIF) processing engine.
+Provides comprehensive tools for TIF data handling, including merging,
+reprojection, clipping, graph conversion, and memory-efficient sampling.
+Supports single-band, RGB, RGBA, and multi-band rasters.
+"""
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -15,6 +21,7 @@ from rasterio.merge import merge
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 from functools import partial
 import multiprocessing
+import tqdm
 from tqdm import tqdm
 import tempfile
 import shutil
@@ -32,8 +39,20 @@ memfile_handle = None
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class TifProcessor:
     """
-    A class to handle tif data processing, supporting single-band, RGB, RGBA, and multi-band data.
-    Can merge multiple rasters into one during initialization.
+    Handler for TIF data processing and analysis.
+
+    Supports advanced operations like merging multiple rasters, reprojection,
+    clipping to geometries, and converting raster data to formats like
+    DataFrames or Graphs.
+
+    Attributes:
+        dataset_path: Path(s) to the TIF file(s).
+        data_store: DataStore instance for file access.
+        mode: Processing mode ('single', 'rgb', 'rgba', 'multi').
+        merge_method: Method for merging multiple rasters.
+        target_crs: Optional CRS to reproject to.
+        resampling_method: Resampling algorithm to use.
+        reprojection_resolution: Target pixel size for reprojection.
     """
 
     dataset_path: Union[Path, str, List[Union[Path, str]]]
@@ -88,6 +107,7 @@ class TifProcessor:
 
     @field_validator("dataset_path")
     def validate_dataset_path(cls, value):
+        """Validates that at least one dataset path is provided."""
         if isinstance(value, list):
             if path_len := len(value):
                 if path_len == 1:
@@ -101,7 +121,15 @@ class TifProcessor:
 
     @contextmanager
     def open_dataset(self):
-        """Context manager for accessing the dataset, handling temporary reprojected files."""
+        """
+        Context manager for robustly accessing the TIF dataset.
+
+        Automatically handles access to original, merged, reprojected, or
+        clipped files across different data stores.
+
+        Yields:
+            A rasterio.DatasetReader object.
+        """
         if self._merged_file_path:
             with rasterio.open(self._merged_file_path) as src:
                 yield src
@@ -128,14 +156,16 @@ class TifProcessor:
         resolution: Optional[Tuple[float, float]] = None,
     ):
         """
-        Reprojects the current raster to a new CRS and optionally saves it.
+        Reproject the current raster to a new CRS.
 
         Args:
-            target_crs: The CRS to reproject to (e.g., "EPSG:4326").
-            output_path: The path to save the reprojected raster. If None,
-                         it is saved to a temporary file.
-            resampling_method: The resampling method to use.
-            resolution: The target resolution (pixel size) in the new CRS.
+            target_crs: The destination CRS (e.g., "EPSG:4326").
+            output_path: Optional path to save the result. If None, saves to temp.
+            resampling_method: Optional override for resampling.
+            resolution: Optional target pixel resolution (x, y).
+
+        Returns:
+            Path to the reprojected file.
         """
         self.logger.info(f"Reprojecting raster to {target_crs}...")
 
@@ -183,11 +213,14 @@ class TifProcessor:
         approx_ok: bool = False,
     ) -> Dict[str, Any]:
         """
-        Get comprehensive raster information.
+        Get comprehensive metadata and statistics for the raster.
 
         Args:
-            include_statistics: Whether to compute basic pixel statistics
-            approx_ok: Allow approximate statistics (leverages GDAL histogram-based stats)
+            include_statistics: Whether to compute pixel statistics (mean, std, etc.).
+            approx_ok: Whether to allow approximate statistics for speed.
+
+        Returns:
+            Dictionary containing metadata like dimensions, CRS, bounds, and optionally statistics.
         """
         info = {
             "count": self.count,
@@ -559,17 +592,20 @@ class TifProcessor:
         **kwargs,
     ) -> pd.DataFrame:
         """
-        Convert raster to DataFrame.
+        Convert the raster data into a pandas DataFrame.
 
         Args:
-            drop_nodata: Whether to drop nodata values
-            check_memory: Whether to check memory before operation (default True)
-            min_value: Optional minimum threshold for pixel values (exclusive)
-            max_value: Optional maximum threshold for pixel values (exclusive)
-            **kwargs: Additional arguments
+            drop_nodata: If True, pixels with the nodata value are excluded.
+            check_memory: If True, checks system memory availability before loading.
+            min_value: Optional minimum threshold to filter pixels.
+            max_value: Optional maximum threshold to filter pixels.
+            **kwargs: Additional arguments like `band_number` or `band_names`.
 
         Returns:
-            pd.DataFrame with raster data
+            A DataFrame with 'lon', 'lat', and band values.
+
+        Raises:
+            ValueError: If processing fails due to mode mismatch or invalid data.
         """
         # Memory guard check
         if check_memory:
@@ -609,17 +645,19 @@ class TifProcessor:
         **kwargs,
     ) -> gpd.GeoDataFrame:
         """
-        Convert the processed TIF data into a GeoDataFrame, where each row represents a pixel zone.
-        Each zone is defined by its bounding box, based on pixel resolution and coordinates.
+        Convert the raster data into a GeoDataFrame.
+
+        Each row represents a pixel, with a Point or Box geometry representing
+        its spatial extent.
 
         Args:
-            check_memory: Whether to check memory before operation
-            min_value: Optional minimum threshold for pixel values (exclusive)
-            max_value: Optional maximum threshold for pixel values (exclusive)
-            **kwargs: Additional arguments passed to to_dataframe()
+            check_memory: If True, checks system memory availability.
+            min_value: Optional minimum threshold for pixel values.
+            max_value: Optional maximum threshold for pixel values.
+            **kwargs: Additional arguments passed to `to_dataframe`.
 
         Returns:
-            gpd.GeoDataFrame with raster data
+            A GeoDataFrame containing pixel centroids or boxes and their values.
         """
         # Memory guard check
         if check_memory:
@@ -645,16 +683,16 @@ class TifProcessor:
         self, drop_nodata=True, chunk_size=None, target_memory_mb=500, **kwargs
     ):
         """
-        Convert raster to DataFrame using chunked processing for memory efficiency.
-
-        Automatically routes to the appropriate chunked method based on mode.
-        Chunk size is automatically calculated based on target memory usage.
+        Convert raster to DataFrame using memory-efficient chunked processing.
 
         Args:
-            drop_nodata: Whether to drop nodata values
-            chunk_size: Number of rows per chunk (auto-calculated if None)
-            target_memory_mb: Target memory per chunk in MB (default 500)
-            **kwargs: Additional arguments (band_number, band_names, etc.)
+            drop_nodata: Whether to exclude pixels with the nodata value.
+            chunk_size: Specific number of rows per chunk. If None, it is auto-calculated.
+            target_memory_mb: Target memory limit per chunk in megabytes.
+            **kwargs: Additional arguments like `band_number` or `band_names`.
+
+        Returns:
+            A consolidated DataFrame containing all processed chunks.
         """
 
         if chunk_size is None:
@@ -694,36 +732,24 @@ class TifProcessor:
         return_clipped_processor: bool = True,
     ) -> Union["TifProcessor", tuple]:
         """
-        Clip raster to geometry boundaries.
+        Clip the raster to the boundaries of specific geometries.
 
-        Parameters:
-        -----------
-        geometry : various
-            Geometry to clip to. Can be:
-            - Shapely Polygon or MultiPolygon
-            - GeoDataFrame or GeoSeries
-            - List of GeoJSON-like dicts
-            - Single GeoJSON-like dict
-        crop : bool, default True
-            Whether to crop the raster to the extent of the geometry
-        all_touched : bool, default True
-            Include pixels that touch the geometry boundary
-        invert : bool, default False
-            If True, mask pixels inside geometry instead of outside
-        nodata : int or float, optional
-            Value to use for masked pixels. If None, uses raster's nodata value
-        pad : bool, default False
-            Pad geometry by half pixel before clipping
-        pad_width : float, default 0.5
-            Width of padding in pixels if pad=True
-        return_clipped_processor : bool, default True
-            If True, returns new TifProcessor with clipped data
-            If False, returns (clipped_array, transform, metadata)
+        Args:
+            geometry: The geometry to clip to (Polygon, GDF, GeoSeries, etc.).
+            crop: If True, the raster's extent is reduced to the geometry's bounding box.
+            all_touched: If True, includes all pixels touched by the geometry.
+            invert: If True, masks pixels *inside* the geometry.
+            nodata: Override for the nodata value in the output.
+            pad: Whether to pad the geometry before clipping.
+            pad_width: Width of the padding in pixels.
+            return_clipped_processor: If True, returns a new TifProcessor instance.
 
         Returns:
-        --------
-        TifProcessor or tuple
-            Either new TifProcessor instance or (array, transform, metadata) tuple
+            A new TifProcessor instance (if return_clipped_processor is True) or
+            a tuple of (clipped_array, transform, metadata).
+
+        Raises:
+            ValueError: If the geometry does not overlap with the raster or CRS is incompatible.
         """
         # Handle different geometry input types
         shapes = self._prepare_geometry_for_clipping(geometry)
@@ -779,21 +805,15 @@ class TifProcessor:
         return_clipped_processor: bool = True,
     ) -> Union["TifProcessor", tuple]:
         """
-        Clip raster to rectangular bounds.
+        Clip the raster to a rectangular bounding box.
 
-        Parameters:
-        -----------
-        bounds : tuple
-            Bounding box as (minx, miny, maxx, maxy)
-        bounds_crs : str, optional
-            CRS of the bounds. If None, assumes same as raster CRS
-        return_clipped_processor : bool, default True
-            If True, returns new TifProcessor, else returns (array, transform, metadata)
+        Args:
+            bounds: Bounding box as (minx, miny, maxx, maxy).
+            bounds_crs: The CRS of the input bounds. Defaults to raster CRS.
+            return_clipped_processor: If True, returns a new TifProcessor instance.
 
         Returns:
-        --------
-        TifProcessor or tuple
-            Either new TifProcessor instance or (array, transform, metadata) tuple
+            The clipped TifProcessor or tuple of data/metadata.
         """
         # Create bounding box geometry
         bbox_geom = box(*bounds)
@@ -823,17 +843,17 @@ class TifProcessor:
         check_memory: bool = True,
     ) -> Union[nx.Graph, sp.csr_matrix]:
         """
-        Convert raster to graph based on pixel adjacency.
+        Convert the raster into a graph representation based on pixel adjacency.
 
         Args:
-            connectivity: 4 or 8-connectivity
-            band: Band number (1-indexed)
-            include_coordinates: Include x,y coordinates in nodes
-            graph_type: 'networkx' or 'sparse'
-            check_memory: Whether to check memory before operation
+            connectivity: Neighborhood connectivity (4 for von Neumann, 8 for Moore).
+            band: Band number to use for node values (1-indexed).
+            include_coordinates: If True, adds 'x' and 'y' attributes to nodes.
+            graph_type: Output type ('networkx' for Graph object, 'sparse' for CSR matrix).
+            check_memory: If True, validates memory availability before processing.
 
         Returns:
-            Graph representation of raster
+            A NetworkX Graph or a SciPy sparse CSR matrix.
         """
 
         # Memory guard check
@@ -939,6 +959,16 @@ class TifProcessor:
     def sample_by_coordinates(
         self, coordinate_list: List[Tuple[float, float]], **kwargs
     ) -> Union[np.ndarray, dict]:
+        """
+        Extract raster values at specific point coordinates.
+
+        Args:
+            coordinate_list: List of (longitude, latitude) tuples.
+            **kwargs: Additional arguments passed to rasterio.sample.
+
+        Returns:
+            Numpy array of values (single-band) or dict of band values (RGB/RGBA).
+        """
         self.logger.info("Sampling raster values at the coordinates...")
 
         with self.open_dataset() as src:
@@ -982,18 +1012,15 @@ class TifProcessor:
         stat: Union[str, Callable, List[Union[str, Callable]]] = "mean",
     ):
         """
-        Sample raster values by polygons and compute statistic(s) for each polygon.
+        Sample raster values within polygons and compute aggregate statistics.
 
         Args:
-            polygon_list: List of shapely Polygon or MultiPolygon objects.
-            stat: Statistic(s) to compute. Can be:
-                - Single string: 'mean', 'median', 'sum', 'min', 'max', 'std', 'count'
-                - Single callable: custom function that takes array and returns scalar
-                - List of strings/callables: multiple statistics to compute
+            polygon_list: List of Shapely Polygon or MultiPolygon objects.
+            stat: Statistic(s) to compute. Can be a string (e.g., 'mean'),
+                  a callable, or a list of both.
 
         Returns:
-            If single stat: np.ndarray of computed statistics for each polygon
-            If multiple stats: List of dictionaries with stat names as keys
+            Numpy array of results (if single stat) or a list of dictionaries (if multi-stat).
         """
         # Determine if single or multiple stats
         single_stat = not isinstance(stat, list)
@@ -1073,19 +1100,21 @@ class TifProcessor:
         **kwargs,
     ) -> np.ndarray:
         """
-        Sample raster values by polygons in parallel using batching.
+        Sample raster values by polygons in parallel using batch processing.
+
+        Efficiently distributes sampling tasks across multiple worker processes.
 
         Args:
-            polygon_list: List of Shapely Polygon or MultiPolygon objects
-            stat: Statistic to compute
-            batch_size: Number of polygons per batch
-            n_workers: Number of worker processes
-            show_progress: Whether to display progress bar
-            check_memory: Whether to check memory before operation
-            **kwargs: Additional arguments
+            polygon_list: List of Shapely Polygon or MultiPolygon objects.
+            stat: Statistic to compute for each polygon.
+            batch_size: Number of polygons to process in each worker batch.
+            n_workers: Number of parallel processes to use.
+            show_progress: If True, displays a progress bar.
+            check_memory: If True, validates memory availability before starting.
+            **kwargs: Additional arguments.
 
         Returns:
-            np.ndarray of statistics for each polygon
+            Numpy array of statistics for each polygon.
         """
         import sys
 
@@ -1534,8 +1563,10 @@ class TifProcessor:
         Compute per-band statistics (min, max, mean, std, sum, count).
 
         Args:
-            approx_ok: Reserved for future use (kept for API compatibility). Currently unused
-                       because statistics are computed exactly through block-wise iteration.
+            approx_ok: Whether to allow approximate statistics.
+
+        Returns:
+            Dictionary containing per-band and overall statistics.
         """
         cache_key = "statistics_exact"
         if cache_key in self._cache:
@@ -1817,14 +1848,14 @@ class TifProcessor:
         self, operation: str = "conversion", target_memory_mb: int = 500
     ) -> int:
         """
-        Calculate optimal chunk size (number of rows) based on target memory usage.
+        Calculate optimal chunk size based on target memory usage.
 
         Args:
-            operation: Type of operation ('conversion', 'graph')
-            target_memory_mb: Target memory per chunk in megabytes
+            operation: Type of operation ('conversion', 'graph').
+            target_memory_mb: Target memory per chunk in megabytes.
 
         Returns:
-            Number of rows per chunk
+            Optimal number of rows per chunk.
         """
         bytes_per_element = np.dtype(self.dtype).itemsize
         n_bands = self.count
@@ -1986,19 +2017,19 @@ class TifProcessor:
         raise_error: bool = False,
     ) -> bool:
         """
-        Check if operation is safe to perform given memory constraints.
+        Check if an operation is safe to perform given memory constraints.
 
         Args:
-            operation: Type of operation to check
-            threshold_percent: Maximum % of available memory to use (default 80%)
-            n_workers: Number of workers (for batched operations)
-            raise_error: If True, raise MemoryError instead of warning
+            operation: Type of operation to check.
+            threshold_percent: Maximum % of available memory to use.
+            n_workers: Number of workers (for parallel operations).
+            raise_error: If True, raises MemoryError if unsafe.
 
         Returns:
-            True if operation is safe, False otherwise
+            True if the operation is deemed safe, False otherwise.
 
         Raises:
-            MemoryError: If raise_error=True and memory insufficient
+            MemoryError: If raise_error is True and memory is insufficient.
         """
         import warnings
 
@@ -2064,51 +2095,21 @@ class TifProcessor:
         """
         Export the raster to a file with optimized settings.
 
-        Parameters
-        ----------
-        output_path : Union[str, Path]
-            Output file path. Can be a local path or a path in the data store.
-        compress : Optional[str], default='LZW'
-            Compression method. Options: 'LZW', 'DEFLATE', 'ZSTD', 'JPEG',
-            'WEBP', 'NONE', etc. Use None for no compression.
-        tiled : bool, default=True
-            Whether to tile the output (recommended for performance).
-        blocksize : int, default=512
-            Block size for tiled output (must be multiple of 16).
-        bigtiff : Optional[str], default=None
-            'YES', 'NO', or 'IF_NEEDED' for files >4GB.
-        predictor : Optional[int], default=None
-            Predictor for compression (2 for horizontal differencing, 3 for floating point).
-            Recommended: 2 for integer data with LZW/DEFLATE, 3 for float data.
-        num_threads : Optional[int], default=None
-            Number of threads for compression (if supported by algorithm).
-        cog : bool, default=False
-            Create a Cloud-Optimized GeoTIFF with internal overviews.
-        overviews : Optional[List[int]], default=None
-            Overview levels (e.g., [2, 4, 8, 16]). Required if cog=True.
-        overview_resampling : str, default='nearest'
-            Resampling method for overviews: 'nearest', 'bilinear', 'cubic', 'average', etc.
-        **kwargs
-            Additional creation options to pass to rasterio.
+        Args:
+            output_path: Output file path.
+            compress: Compression method (e.g., 'LZW', 'ZSTD').
+            tiled: If True, tiles the output for better performance.
+            blocksize: Block size for tiled output.
+            bigtiff: 'YES', 'NO', or 'IF_NEEDED' for large files.
+            predictor: Compression predictor (2 for int, 3 for float).
+            num_threads: Number of threads for compression.
+            cog: If True, creates a Cloud-Optimized GeoTIFF.
+            overviews: Overview levels for COG.
+            overview_resampling: Resampling method for overviews.
+            **kwargs: Additional creation options for rasterio.
 
-        Returns
-        -------
-        Path
-            Path to the created file.
-
-        Examples
-        --------
-        >>> # Basic save with LZW compression
-        >>> processor.save_to_file('output.tif')
-
-        >>> # High compression for integer data
-        >>> processor.save_to_file('output.tif', compress='ZSTD', predictor=2)
-
-        >>> # Create a Cloud-Optimized GeoTIFF
-        >>> processor.save_to_file('output.tif', cog=True, overviews=[2, 4, 8, 16])
-
-        >>> # Save with JPEG compression for RGB imagery
-        >>> processor.save_to_file('output.tif', compress='JPEG', photometric='YCBCR')
+        Returns:
+            Path to the saved TIF file.
         """
         output_path = Path(output_path)
 
@@ -2207,45 +2208,19 @@ class TifProcessor:
         """
         Save a numpy array to a raster file using metadata from this processor.
 
-        Useful for saving processed or modified raster data while preserving
-        georeferencing information.
+        Args:
+            array: 2D or 3D array of data to save.
+            output_path: Destination file path.
+            compress: Compression method.
+            tiled: If True, tiles the output.
+            blocksize: Block size for tiled output.
+            crs: Optional CRS override.
+            transform: Optional Affine transform override.
+            nodata: Optional nodata value override.
+            **kwargs: Additional creation options.
 
-        Parameters
-        ----------
-        array : np.ndarray
-            2D or 3D array to save. If 3D, first dimension is bands.
-        output_path : Union[str, Path]
-            Output file path. Can be a local path or a path in the data store.
-        compress : Optional[str], default='LZW'
-            Compression method.
-        tiled : bool, default=True
-            Whether to tile the output.
-        blocksize : int, default=512
-            Block size for tiled output.
-        crs : Optional[Any], default=None
-            CRS to use. If None, uses CRS from source raster.
-        transform : Optional[Any], default=None
-            Affine transform. If None, uses transform from source raster.
-        nodata : Optional[float], default=None
-            Nodata value. If None, uses nodata from source raster.
-        **kwargs
-            Additional creation options.
-
-        Returns
-        -------
-        Path
-            Path to the created file.
-
-        Examples
-        --------
-        >>> # Process data and save
-        >>> data = processor.to_dataframe()
-        >>> processed = data['value'].values.reshape(processor.height, processor.width)
-        >>> processor.save_array_to_file(processed, 'processed.tif')
-
-        >>> # Save multiple bands
-        >>> rgb = np.stack([red_band, green_band, blue_band])
-        >>> processor.save_array_to_file(rgb, 'rgb.tif', compress='JPEG')
+        Returns:
+            Path to the saved TIF file.
         """
         output_path = Path(output_path)
 

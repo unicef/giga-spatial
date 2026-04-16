@@ -1,3 +1,9 @@
+"""
+Base entity schemas and table containers.
+Provides the foundation for all geospatial and network entities in Giga Spatial,
+including point-based (GigaEntity) and geometry-based (GigaGeoEntity) records,
+along with generic table containers (EntityTable).
+"""
 from __future__ import annotations
 
 from functools import wraps
@@ -13,7 +19,6 @@ from typing import (
     Union,
     Optional,
     ClassVar,
-    Union,
 )
 from pathlib import Path
 from pydantic import (
@@ -142,12 +147,18 @@ class GigaEntity(BaseGigaEntity):
     @field_validator("admin1", "admin2", mode="before")
     @classmethod
     def normalize_admin(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Normalize administrative division names.
+
+        Converts "unknown", "n/a" variations to None, and title-cases valid names.
+        """
         if v is None or str(v).strip().lower() in ("unknown", "n/a", "none", ""):
             return None
         return str(v).strip().title()
 
     @model_validator(mode="after")
     def check_null_island(self) -> "GigaEntity":
+        """Validate that coordinates are not (0.0, 0.0)."""
         if self.latitude == 0.0 and self.longitude == 0.0:
             raise ValueError("Null island coordinates (0.0, 0.0) are not valid.")
         return self
@@ -176,7 +187,15 @@ class GigaGeoEntity(BaseGigaEntity):
     def parse_geometry(cls, v: Any) -> GeometryType:
         """
         Accept Shapely geometries, WKT strings, or WKB bytes.
-        Ensures geometry is always a Polygon or MultiPolygon.
+
+        Args:
+            v: Raw geometry data.
+
+        Returns:
+            Parsed Polygon or MultiPolygon.
+
+        Raises:
+            ValueError: If parsing fails or geometry type is invalid.
         """
         if isinstance(v, (Polygon, MultiPolygon)):
             return v
@@ -203,15 +222,24 @@ class GigaGeoEntity(BaseGigaEntity):
 
     @property
     def centroid(self) -> tuple[float, float]:
-        """Return (latitude, longitude) of the geometry centroid."""
+        """
+        Return (latitude, longitude) of the geometry centroid.
+
+        Returns:
+            Tuple of (lat, lon).
+        """
         c = self.geometry.centroid
         return c.y, c.x
 
     @property
     def area_sq_km(self) -> float:
         """
-        Approximate area in square kilometres using the centroid UTM projection.
-        For precise area calculations use to_geodataframe() with a projected CRS.
+        Approximate area in square kilometres.
+
+        Calculated using the centroid UTM projection.
+
+        Returns:
+            Area in square km.
         """
         from gigaspatial.processing.geo import estimate_utm_crs_with_fallback
         import geopandas as gpd
@@ -242,14 +270,24 @@ class EntityTable(BaseModel, Generic[E]):
 
     @model_validator(mode="after")
     def _infer_entity_class(self) -> "EntityTable":
-        """Infer entity_class from entities list if not explicitly provided."""
+        """
+        Infer entity_class from entities list if not explicitly provided.
+
+        Returns:
+            Table with potentially updated entity_class.
+        """
         if self.entity_class is None and self.entities:
             self.entity_class = type(self.entities[0])
         return self
 
     @property
     def is_point_entity(self) -> bool:
-        """Whether entities carry lat/lon point location (GigaEntity subclass)."""
+        """
+        Whether entities carry lat/lon point location.
+
+        Returns:
+            True if entities are GigaEntity but not GigaGeoEntity.
+        """
         if self.entity_class is None:
             return False
         return issubclass(self.entity_class, GigaEntity) and not issubclass(
@@ -258,7 +296,12 @@ class EntityTable(BaseModel, Generic[E]):
 
     @property
     def is_geo_entity(self) -> bool:
-        """Whether entities carry polygon/multipolygon geometry (GigaGeoEntity subclass)."""
+        """
+        Whether entities carry complex polygon/multipolygon geometry.
+
+        Returns:
+            True if entities are GigaGeoEntity.
+        """
         if self.entity_class is None:
             return False
         return issubclass(self.entity_class, GigaGeoEntity)
@@ -290,9 +333,7 @@ class EntityTable(BaseModel, Generic[E]):
             ValueError: If the file cannot be read or parsed.
         """
 
-        data_store = data_store or LocalDataStore()
-
-        df = read_dataset(data_store, file_path, **kwargs)
+        df = read_dataset(file_path, data_store=data_store, **kwargs)
         logger.debug("Loaded %d rows from %s", len(df), file_path)
 
         if processor is not None:
@@ -455,11 +496,24 @@ class EntityTable(BaseModel, Generic[E]):
         return cls(entities=all_entities, entity_class=entity_class)
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Convert the entity table to a pandas DataFrame."""
+        """
+        Convert the entity table to a pandas DataFrame.
+
+        Returns:
+            A DataFrame where each row corresponds to an entity model dump.
+        """
         return pd.DataFrame([e.model_dump() for e in self.entities])
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
-        """Convert the entity table to a GeoDataFrame."""
+        """
+        Convert the entity table to a GeoDataFrame.
+
+        Returns:
+            GeoDataFrame with point or polygon geometry.
+
+        Raises:
+            ValueError: If entities have no associated geometry fields.
+        """
         if not self.is_point_entity and not self.is_geo_entity:
             raise ValueError("Cannot create GeoDataFrame: entities have no geometry.")
 
@@ -505,37 +559,76 @@ class EntityTable(BaseModel, Generic[E]):
         return []
 
     def to_coordinate_vector(self) -> np.ndarray:
-        """Transform the entity table into a numpy array of (lat, lon) coordinates."""
+        """
+        Transform the entity table into a numpy array of (lat, lon) coordinates.
+
+        Returns:
+            Numpy array of shape (N, 2). Empty array if not a point entity.
+        """
         if not self.is_point_entity or not self.entities:
             return np.zeros((0, 2))
         return np.array([[e.latitude, e.longitude] for e in self.entities])
 
     def get_lat_array(self) -> np.ndarray:
-        """Get an array of latitude values."""
+        """
+        Get an array of latitude values.
+
+        Returns:
+            Numpy array of floats.
+        """
         if not self.is_point_entity:
             return np.array([])
         return np.array([e.latitude for e in self.entities])
 
     def get_lon_array(self) -> np.ndarray:
-        """Get an array of longitude values."""
+        """
+        Get an array of longitude values.
+
+        Returns:
+            Numpy array of floats.
+        """
         if not self.is_point_entity:
             return np.array([])
         return np.array([e.longitude for e in self.entities])
 
     def filter_by_admin1(self, admin1_id: str) -> "EntityTable[E]":
-        """Filter entities by primary administrative division ID (admin1_id)."""
+        """
+        Filter entities by primary administrative division ID.
+
+        Args:
+            admin1_id: Identifier for the division.
+
+        Returns:
+            New EntityTable with filtered entities.
+        """
         return self.__class__(
             entities=[e for e in self.entities if e.admin1_id == admin1_id]
         )
 
     def filter_by_admin2(self, admin2_id: str) -> "EntityTable[E]":
-        """Filter entities by secondary administrative division."""
+        """
+        Filter entities by secondary administrative division ID.
+
+        Args:
+            admin2_id: Identifier for the division.
+
+        Returns:
+            New EntityTable with filtered entities.
+        """
         return self.__class__(
             entities=[e for e in self.entities if e.admin2_id == admin2_id]
         )
 
     def filter_by_polygon(self, polygon: Polygon) -> "EntityTable[E]":
-        """Filter entities whose location falls within a polygon."""
+        """
+        Filter entities whose location falls within a polygon.
+
+        Args:
+            polygon: Shapely Polygon to filter by.
+
+        Returns:
+            New EntityTable with entities inside the polygon.
+        """
         if not self.is_point_entity:
             return self.__class__(entities=[])
         return self.__class__(
@@ -549,7 +642,18 @@ class EntityTable(BaseModel, Generic[E]):
     def filter_by_bounds(
         self, min_lat: float, max_lat: float, min_lon: float, max_lon: float
     ) -> "EntityTable[E]":
-        """Filter entities whose coordinates fall within the given bounding box."""
+        """
+        Filter entities whose coordinates fall within a bounding box.
+
+        Args:
+            min_lat: Minimum latitude.
+            max_lat: Maximum latitude.
+            min_lon: Minimum longitude.
+            max_lon: Maximum longitude.
+
+        Returns:
+            New EntityTable with entities within bounds.
+        """
         if not self.is_point_entity:
             return self.__class__(entities=[])
         return self.__class__(
@@ -564,7 +668,19 @@ class EntityTable(BaseModel, Generic[E]):
     def get_nearest_neighbors(
         self, lat: float, lon: float, k: int = 5
     ) -> "EntityTable[E]":
-        """Find k nearest neighbors to a point using a cached KDTree."""
+        """
+        Find k nearest neighbors to a given set of coordinates.
+
+        Uses an internal KDTree cache to accelerate repeated lookups.
+
+        Args:
+            lat: Query latitude.
+            lon: Query longitude.
+            k: Number of neighbors to return. Defaults to 5.
+
+        Returns:
+            New EntityTable containing the k nearest entities.
+        """
         if not self.is_point_entity:
             return self.__class__(entities=[])
 
@@ -664,7 +780,7 @@ class EntityTable(BaseModel, Generic[E]):
         )
 
     def _build_kdtree(self):
-        """Build and cache the KDTree from entity coordinates."""
+        """Build and cache the KDTree from entity point coordinates."""
         if not self.is_point_entity:
             self._cached_kdtree = None
             return
@@ -676,7 +792,7 @@ class EntityTable(BaseModel, Generic[E]):
             logger.warning("EntityTable is empty, skipping KDTree build.")
 
     def clear_cache(self):
-        """Clears the KDTree cache."""
+        """Clear the internal KDTree spatial index cache."""
         self._cached_kdtree = None
 
     def to_file(
@@ -686,7 +802,18 @@ class EntityTable(BaseModel, Generic[E]):
         as_geodataframe: bool = False,
         **kwargs,
     ) -> None:
-        """Save entity data to a file. Use as_geodataframe=True for spatial formats."""
+        """
+        Save the entity table to a file.
+
+        Args:
+            file_path: Destination file path.
+            data_store: DataStore to use for writing. Defaults to LocalDataStore.
+            as_geodataframe: If True, uses GeoDataFrame for spatial formats (e.g. GeoJSON).
+            **kwargs: Additional arguments for writers.write_dataset.
+
+        Raises:
+            ValueError: If the table is empty.
+        """
         if not self.entities:
             raise ValueError("Cannot write to file: no entities available.")
         data_store = data_store or LocalDataStore()

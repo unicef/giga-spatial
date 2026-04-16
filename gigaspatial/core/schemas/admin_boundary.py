@@ -1,3 +1,8 @@
+"""
+Module for administrative boundary schema and processing.
+Defines the AdminBoundary entity, representing hierarchical divisions like
+countries, states, and districts with polygon geometries.
+"""
 from __future__ import annotations
 
 from enum import Enum
@@ -108,13 +113,31 @@ class AdminBoundaryProcessor(EntityProcessor):
     verbose: bool = False
 
     def process(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        """
+        Execute the full processing pipeline for admin boundaries.
+
+        Args:
+            df: Raw admin boundary DataFrame.
+            **kwargs: Additional processing arguments.
+
+        Returns:
+            Processed and normalized DataFrame.
+        """
         df = super().process(df, **kwargs)
         df = self._normalize_country_iso(df)
         df = self._parse_geometry(df)
         return df
 
     def _normalize_country_iso(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Uppercase country ISO codes for consistency."""
+        """
+        Uppercase country ISO codes for consistency.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized country_iso column.
+        """
         if "country_iso" in df.columns:
             df["country_iso"] = df["country_iso"].str.upper()
         return df
@@ -249,9 +272,19 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
     # ------------------------------------------------------------------
 
     def get_countries(self) -> Set[str]:
-        """Return all unique country ISO codes present in the table."""
+        """
+        Return the set of all unique country ISO codes present in the table.
+
+        Returns:
+            Set of unique country ISO-3 strings.
+        """
         return {e.country_iso for e in self.entities if e.country_iso is not None}
 
     def get_admin_levels(self) -> Set[int]:
-        """Return all unique admin levels present in the table."""
+        """
+        Return the set of all unique admin levels present in the table.
+
+        Returns:
+            Set of unique administrative level integers.
+        """
         return {e.admin_level for e in self.entities}

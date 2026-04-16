@@ -18,7 +18,7 @@
 - [About GigaSpatial](#about-gigaspatial)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Key workflows](#key-workflows)
+- [Key features](#key-features)
 - [Core concepts](#core-concepts)
 - [Supported datasets](#supported-datasets)
 - [Why use GigaSpatial?](#why-use-gigaspatial)
@@ -30,14 +30,14 @@
 
 ## About Giga
 
-[Giga](https://giga.global/) is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice. 
-Giga maps schools' Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity. 
+[Giga](https://giga.global/) is a UNICEF-ITU initiative to connect every school to the Internet and every young person to information, opportunity and choice.
+Giga maps schools' Internet access in real time, creates models for innovative financing, and supports governments contracting for connectivity.
 
 ## About GigaSpatial
 
 **GigaSpatial** is a Python toolkit for scalable geospatial data download, processing, and enrichment, designed for use across diverse domains such as infrastructure mapping, accessibility analysis, and environmental studies.
 
-> Originally developed within UNICEF’s Giga initiative, GigaSpatial now provides a general‑purpose geospatial toolkit that can be applied to many contexts, including but not limited to school connectivity analysis.
+> Originally developed within UNICEF's Giga initiative, GigaSpatial now provides a general‑purpose geospatial toolkit that can be applied to many contexts, including but not limited to school connectivity analysis.
 
 ### Who is this for?
 
@@ -56,96 +56,89 @@ pip install giga-spatial
 
 The package depends on:
 
-- geopandas
-- pandas
-- shapely
-- rasterio
-- earthengine-api (optional, for Google Earth Engine features)
+- `geopandas`
+- `pandas`
+- `shapely`
+- `rasterio`
+- `pydantic`
 
-For detailed setup instructions (including recommended environments and system dependencies), see the [installation docs](https://unicef.github.io/giga-spatial/getting-started/installation/).
+Optional dependencies for cloud and API integrations:
 
-We recommend using a virtual environment for installation.
+- `azure-storage-blob` — Azure Data Lake Storage (ADLS) backend
+- `snowflake-connector-python` — Snowflake stage backend
+- `earthengine-api` + `geemap` — Google Earth Engine features
 
-## Quick start
+For detailed setup instructions, storage backend configuration, and API key management, see the [Configuration Guide](https://unicef.github.io/giga-spatial/getting-started/configuration/).
+
+We recommend using a virtual environment or conda environment for installation.
+
+## Quick Start
+
+The core pattern in GigaSpatial is: **Handler** → **PoiViewGenerator** (or **ZonalViewGenerator**) → enriched dataset.
 
 ```python
-import geopandas as gpd
-from gigaspatial.handlers import GoogleOpenBuildingsHandler, GHSLDataHandler
-from gigaspatial.generators import POIViewGenerator
+from gigaspatial import GigaSchoolLocationFetcher, PoiViewGenerator
 
-# 1. Load school locations
-schools = gpd.read_file("schools.geojson")
+# 1. Fetch school locations via the Giga API
+schools = GigaSchoolLocationFetcher("BEN").fetch_locations(process_geospatial=True)
 
-# 2. Prepare data sources (downloads / caching handled by handlers)
-buildings = GoogleOpenBuildingsHandler().load_data(source=schools, data_type="points")
-ghsl = GHSLDataHandler(product="GHS_SMOD").load_data(source=schools, merge_rasters=True)
+# 2. Wrap schools in a POI view — this is the analytic "canvas"
+view = PoiViewGenerator(schools)
 
-# 3. Generate school mappings with buildings + settlement model
-view = POIViewGenerator(points=points)
-ghsl_mapping = view.map_zonal_stats(data=ghsl, stat="median", output_column="smod_median")
+# 3. Enrich with nearest building footprints (auto-managed by the handler)
+view_with_buildings = view.find_nearest_buildings(country="BEN", search_radius=1000)
 
-print(ghsl_mapping.head())
+# 4. Enrich with settlement classification from the Global Human Settlement Layer
+view_with_smod = view.map_smod(stat="median")
 
-buildings_mapping = view.map_zonal_stats(data=ghsl, stat="median", output_column="smod_median")
-buildings_mapping = view.map_nearest_points(
-    points_df=buildings,
-    id_column="full_plus_code",
-    output_prefix="nearest_google_building",
-)
+# 5. Enrich with population catchment (WorldPop, summed within 1km radius)
+view_with_pop = view.map_wp_pop(country="BEN", map_radius_meters=1000)
 
-print(buildings_mapping.head())
-
+print(view_with_pop.head())
 ```
+
+For grid-based (zonal) analysis:
+
+```python
+from gigaspatial import H3ViewGenerator, WPPopulationHandler
+
+# 1. Tessellate the country into H3 hexagons at ~1km resolution
+generator = H3ViewGenerator(source="BEN", resolution=7)
+
+# 2. Aggregate WorldPop population estimates to each hexagon
+view = generator.map_wp_pop(country="BEN")
+
+print(view.head())
+```
+
+For more detailed examples, see the [User Guide](https://unicef.github.io/giga-spatial/user-guide/).
 
 ## Key Features
 
-- **Data Downloading**
-  Download geospatial data from various sources including GHSL, Microsoft Global Buildings, Google Open Buildings, OpenCellID, and HDX datasets.
+- **Handlers**: Unified interface for downloading, caching, and reading from 15+ geospatial data sources including GHSL, Google Open Buildings, Microsoft Global Buildings, WorldPop, OpenCellID, OSM, HDX, and Ookla Speedtest.
 
-- **Data Processing** 
-  Process and transform geospatial data, such as GeoTIFF files and vector data, with support for compression and efficient handling.
+- **POI View Generator**: Enrich any set of points of interest (schools, cell towers, health sites) with contextual layers — building footprints, population, settlement class, speedtest data — in a few lines of code.
 
-- **View Generators** 
-  - Enrich spatial context with POI (Point of Interest) data
-  - Support for raster point sampling and zonal statistics
-  - Area-weighted aggregation for polygon-based statistics
-  - Temporal aggregation for time-series Earth observation data
+- **Zonal View Generators**: Aggregate multi-source indicators onto H3, S2, or Mercator tile grids for scalable national or sub-national analysis.
 
-- **Grid System**
-  Create and manipulate grid-based geospatial data for analysis and modeling using H3, S2, or Mercator tile systems.
+- **Grid System**: Create and manage H3 hexagonal grids, Google S2 cells, or slippy map Mercator tiles over any geometry or country boundary.
 
-- **Data Storage**
-  Flexible storage options with local, cloud (ADLS), and Snowflake stage support.
+- **TIF Processor**: Memory-efficient raster processing engine for merging, reprojecting, clipping, and sampling GeoTIFFs at scale.
 
-- **Configuration Management**
-  - Centralized configuration via environment variables or `.env` file
-  - Easy setup of API keys and paths
+- **Flexible Storage Backends**: Run the same pipelines against local files, Azure Data Lake Storage (ADLS), or Snowflake internal stages without changing core logic.
 
-## Key Workflows
+- **Configuration Management**: All paths and credentials managed via a single Pydantic-based config object. Set environment variables or a `.env` file — the library handles the rest.
 
-- **Fetch POI data**
-  Retrieve points of interest from OpenStreetMap, Healthsites.io, and Giga-maintained sources for any area of interest.
+## Core Concepts
 
-- **Enrich POI locations**
-  Join POIs with Google/Microsoft building footprints, GHSL population and settlement layers, Earth Engine satellite data, and other contextual datasets.
-
-- **Analyze Earth observation time series**
-  Extract and analyze multi-temporal satellite data (vegetation indices, land surface temperature, precipitation, etc.) for any location using Google Earth Engine
-
-- **Build and analyze grids**
-  Generate national or sub‑national grids and aggregate multi‑source indicators (e.g. coverage, population, infrastructure) into each cell.
-
-- **End‑to‑end pipelines**
-  Use handlers, readers, and view generators together to go from raw data download to analysis‑ready tables in local storage, ADLS, or Snowflake.
-
-
-## Core concepts
-
-- **Handlers**: Orchestrate dataset lifecycle (download, cache, read) for sources like GHSL, Google/Microsoft buildings, OSM, and HDX.
-- **Readers**: Low‑level utilities that parse and standardize raster and vector formats.
-- **View generators**: High‑level components that enrich points or grids with contextual variables (POIs, buildings, population, etc.).
-- **Grid system**: Utilities to build and manage grid cells for large‑scale analysis.
-- **Storage backends**: Pluggable interfaces for local disk, Azure Data Lake Storage, and Snowflake stages.
+| Concept | Description |
+| :--- | :--- |
+| **Handlers** | Orchestrate the full dataset lifecycle (discover → download → cache → read) for a specific data source (e.g. `GHSLDataHandler`, `WPPopulationHandler`). |
+| **PoiViewGenerator** | Enriches a set of point locations (POIs) with contextual spatial variables via buffer-based proximity and zonal statistics. |
+| **ZonalViewGenerators** | Maps data onto spatial zones (H3, S2, Mercator tiles, admin boundaries) via `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`. |
+| **Grid System** | `H3Hexagons`, `S2Cells`, `MercatorTiles` — utilities to build, filter, and export grid cells for a country, bounding box, or geometry. |
+| **Storage Backends** | `LocalDataStore`, `ADLSDataStore`, `SnowflakeDataStore` — pluggable backends passed to Handlers for cloud-native pipelines. |
+| **TifProcessor** | High-performance raster engine for merging, reprojecting, and sampling GeoTIFFs. Used internally by generators and exposed for custom workflows. |
 
 ## Supported Datasets
 
@@ -155,37 +148,17 @@ The `gigaspatial` package supports data from the following providers:
     <img src="https://raw.githubusercontent.com/unicef/giga-spatial/main/docs/assets/datasets.png" alt="Dataset Providers" style="width: 75%; height: auto;"/>
 </div>
 
-**Google Earth Engine Catalog**
-
-GigaSpatial now provides access to Google Earth Engine’s comprehensive data catalog, including:
-
-- **Satellite imagery**: Landsat (30+ years), Sentinel-1/2, MODIS, Planet
-- **Climate & weather**: ERA5, CHIRPS precipitation, NOAA temperature
-- **Land cover**: Dynamic World, ESA WorldCover, MODIS land cover
-- **Terrain**: SRTM, ASTER DEM, ALOS elevation data
-- **Population & infrastructure**: GHSL, WorldPop, nighttime lights
-- **Environmental**: Soil properties, vegetation indices, surface water
-
-For a complete list of available datasets, visit the [Earth Engine Data Catalog](https://developers.google.com/earth-engine/datasets).
-
----
-
-## View Generators
-
-The **view generators** in GigaSpatial are designed to enrich the spatial context of school locations and map data into grid or POI locations. This enables users to analyze and visualize geospatial data in meaningful ways.
-
-### Key Capabilities
-1. **Spatial Context Enrichment**:
-   - Automatic attribution of geospatial variables to school locations
-   - Contextual layers for environmental, infrastructural, and socioeconomic factors
-   - Multi-resolution data availability for different analytical needs
-   - Support for both point and polygon-based enrichment
-
-2. **Mapping to Grid or POI Locations**:
-   - Map geospatial data to grid cells for scalable analysis
-   - Map data to POI locations for detailed, location-specific insights
-   - Support for chained enrichment using multiple datasets
-   - Built-in support for administrative boundary annotations
+| Category | Sources |
+| :--- | :--- |
+| **Buildings** | Google Open Buildings, Microsoft Global Buildings |
+| **Population & Settlements** | WorldPop, GHSL (GHS_POP, GHS_SMOD, GHS_BUILT_S) |
+| **Network & Connectivity** | OpenCellID, Ookla Speedtest, MLab |
+| **Points of Interest** | OpenStreetMap (Overpass API), Healthsites.io, Overture Maps |
+| **Humanitarian** | HDX datasets |
+| **Earth Observation** | Full Google Earth Engine catalog (Landsat, Sentinel, MODIS, ERA5, SRTM, and more) |
+| **Giga** | School locations, connectivity measurements, school profiles |
+| **Admin Boundaries** | GeoRepo (UNICEF), GADM |
+| **Relative Wealth** | Meta Relative Wealth Index (RWI) |
 
 ---
 
@@ -193,11 +166,11 @@ The **view generators** in GigaSpatial are designed to enrich the spatial contex
 
 - **End-to-end geospatial pipelines**: Go from raw open datasets (OSM, GHSL, global buildings, HDX, etc.) to analysis-ready tables with a consistent set of handlers, readers, and view generators.
 
-- **Planetary-scale analysis**: Leverage Google Earth Engine’s cloud infrastructure to process petabytes of satellite imagery without downloading data or managing compute resources.
+- **Planetary-scale analysis**: Leverage Google Earth Engine's cloud infrastructure to process petabytes of satellite imagery without downloading data or managing compute resources.
 
 - **Scalable analysis**: Work seamlessly with both point and grid representations, making it easy to aggregate indicators at national scale or zoom into local POIs.
 
-- **Batteries included for enrichment**: Fetch POIs, buildings, and population layers and join them onto schools or other locations with a few lines of code.
+- **Batteries included for enrichment**: Fetch buildings, population layers, and settlement classes and join them onto schools or other locations with a few lines of code.
 
 - **Flexible storage**: Run the same workflows against local files, Azure Data Lake Storage (ADLS), or Snowflake stages without changing core logic.
 
@@ -205,29 +178,29 @@ The **view generators** in GigaSpatial are designed to enrich the spatial contex
 
 - **Open and collaborative**: Developed in the open under an AGPL-3.0 license, with contributions and reviews from the wider geospatial and data-for-development community.
 
-## Why Open Source?  
+## Why Open Source?
 
-At Giga, we believe in the power of open-source technologies to accelerate progress and innovation. By keeping our tools and systems open, we:  
-- Encourage collaboration and contributions from a global community.  
-- Ensure transparency and trust in our methodologies.  
-- Empower others to adopt, adapt, and extend our tools to meet their needs.  
+At Giga, we believe in the power of open-source technologies to accelerate progress and innovation. By keeping our tools and systems open, we:
+- Encourage collaboration and contributions from a global community.
+- Ensure transparency and trust in our methodologies.
+- Empower others to adopt, adapt, and extend our tools to meet their needs.
 
-## How to Contribute  
+## How to Contribute
 
-We welcome contributions to our repositories! Whether it's fixing a bug, adding a feature, or improving documentation, your input helps us move closer to our goal of universal school connectivity.  
+We welcome contributions to our repositories! Whether it's fixing a bug, adding a feature, or improving documentation, your input helps us move closer to our goal of universal school connectivity.
 
-### Steps to Contribute  
-1. Fork the repository you'd like to contribute to.  
-2. Create a new branch for your changes.  
-3. Submit a pull request with a clear explanation of your contribution. 
+### Steps to Contribute
+1. Fork the repository you'd like to contribute to.
+2. Create a new branch for your changes.
+3. Submit a pull request with a clear explanation of your contribution.
 
-To go through the “contribution” guidelines in detail you can visit the following link. 
+To go through the contribution guidelines in detail, visit the following link.
 
 [Click here for the detailed Contribution guidelines](https://github.com/unicef/giga-spatial/blob/main/CONTRIBUTING.md)
 
 ---
 
-## Code of Conduct  
+## Code of Conduct
 
 At Giga, we're committed to maintaining an environment that's respectful, inclusive, and harassment-free for everyone involved in our project and community. We welcome contributors and participants from diverse backgrounds and pledge to uphold the standards.
 
@@ -235,10 +208,10 @@ At Giga, we're committed to maintaining an environment that's respectful, inclus
 
 ---
 
-## Stay Connected  
+## Stay Connected
 
 To learn more about Giga and our mission, visit our official website: [Giga.Global](https://giga.global)
 
 ## Join Us
 
-Join us in creating an open-source future for education! 🌍  
+Join us in creating an open-source future for education! 🌍

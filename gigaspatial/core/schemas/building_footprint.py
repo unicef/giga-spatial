@@ -1,3 +1,8 @@
+"""
+Module for building footprint schema and processing.
+Defines the BuildingFootprint entity, representing physical building structures
+with polygon geometries.
+"""
 from enum import Enum
 from typing import Optional, ClassVar, Union
 from pathlib import Path
@@ -236,13 +241,31 @@ class BuildingFootprintProcessor(EntityProcessor):
     BUILDING_TYPE_ALIAS_MAP: ClassVar[dict[str, str]] = BUILDING_TYPE_ALIAS_MAP
 
     def process(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        """
+        Execute the full processing pipeline for building footprints.
+
+        Args:
+            df: Raw building footprint DataFrame.
+            **kwargs: Additional processing arguments.
+
+        Returns:
+            Processed and normalized DataFrame.
+        """
         df = super().process(df, **kwargs)
         df = self._normalize_building_type(df)
         df = self._parse_geometry(df)
         return df
 
     def _normalize_building_type(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize building_type values to canonical BuildingType enum values."""
+        """
+        Normalize building_type values to canonical BuildingType enums.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized building_type column.
+        """
         return self._normalize_enum_column(
             df,
             column="building_type",
@@ -381,11 +404,21 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
     # ------------------------------------------------------------------
 
     def get_building_types(self) -> set[str]:
-        """Return all unique building types present in the table."""
+        """
+        Return the set of all unique building types present in the table.
+
+        Returns:
+            Set of building type strings.
+        """
         return {e.building_type for e in self.entities if e.building_type is not None}
 
     def get_sources(self) -> set[str]:
-        """Return all unique data sources present in the table."""
+        """
+        Return the set of all unique data sources present in the table.
+
+        Returns:
+            Set of source name strings.
+        """
         return {e.source for e in self.entities if e.source is not None}
 
     def total_footprint_area_sq_m(self) -> float:

@@ -1,10 +1,4 @@
-try:
-    import ee
-    import geemap
-
-    _HAS_GEE = True
-except ImportError:
-    _HAS_GEE = False
+from __future__ import annotations
 
 import pandas as pd
 import geopandas as gpd
@@ -15,7 +9,7 @@ import os
 from gigaspatial.config import config as globalconfig
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from .config import GEEConfig, get_default_registry
+from .config import GEEConfig, get_default_registry, _HAS_GEE, ee, geemap
 
 LOGGER = globalconfig.get_logger("GEEProfiler")
 

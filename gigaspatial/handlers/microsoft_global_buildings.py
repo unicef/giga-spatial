@@ -1,3 +1,11 @@
+"""
+Microsoft Global ML Building Footprints dataset handler.
+
+This module provides specialized handlers for the Microsoft Global Buildings dataset.
+It manages location mapping between dataset identifiers and ISO country codes,
+resolves Bing Maps Quadkeys for spatial querying, and handles multi-threaded
+downloads of building footprints in compressed CSV format.
+"""
 from dataclasses import field
 from pydantic.dataclasses import dataclass
 from pydantic import ConfigDict
@@ -32,7 +40,18 @@ from gigaspatial.config import config as global_config
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class MSBuildingsConfig(BaseHandlerConfig):
-    """Configuration for Microsoft Global Buildings dataset files."""
+    """
+    Configuration for Microsoft Global Buildings dataset.
+
+    Manages dataset URLs, Bing Maps Quadkey zoom levels, and country-to-location
+    mapping logic.
+
+    Attributes:
+        TILE_URLS: URL to the dataset links CSV.
+        MERCATOR_ZOOM_LEVEL: Bing Maps zoom level for quadkey resolution.
+        base_path: Root directory for storing building data.
+        LOCATION_MAPPING_FILE: Path to the cached location mapping JSON.
+    """
 
     TILE_URLS: str = (
         "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
@@ -81,7 +100,11 @@ class MSBuildingsConfig(BaseHandlerConfig):
         self._setup_location_mapping()
 
     def _load_tile_urls(self):
-        """Load dataset links from csv file."""
+        """Loads dataset links from the remote CSV file.
+
+        Raises:
+            requests.exceptions.RequestException: If the remote file cannot be fetched.
+        """
         self.df_tiles = pd.read_csv(
             self.TILE_URLS,
             names=["location", "quadkey", "url", "size", "upload_date"],
@@ -117,19 +140,16 @@ class MSBuildingsConfig(BaseHandlerConfig):
 
     def create_location_mapping(self, similarity_score_threshold: float = 0.8):
         """
-        Create a mapping between the dataset's location names and ISO 3166-1 alpha-3 country codes.
+        Map dataset location names to ISO 3166-1 alpha-3 country codes.
 
-        This function iterates through known countries and attempts to find matching
-        locations in the dataset based on string similarity.
+        Uses string similarity and spatial overlaps with Bing Maps tiles to
+        automatically resolve which countries the dataset locations belong to.
 
         Args:
-            similarity_score_threshold: The minimum similarity score (between 0 and 1)
-                                        for a dataset location to be considered a match
-                                        for a country. Defaults to 0.8.
+            similarity_score_threshold: Minimum string similarity ratio for matches.
 
         Returns:
-            A dictionary where keys are dataset location names and values are
-            the corresponding ISO 3166-1 alpha-3 country codes.
+            Dictionary mapping location names to ISO-3 country codes.
         """
 
         def similar(a, b):
@@ -184,14 +204,19 @@ class MSBuildingsConfig(BaseHandlerConfig):
 
     def get_relevant_data_units_by_geometry(
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> pd.DataFrame:
+    ) -> List[dict]:
         """
-        Get the DataFrame of Microsoft Buildings tiles that intersect with a given source spatial geometry.
+        Find Microsoft Building tiles intersecting a geographic area.
 
-        In case country given, this method first tries to find tiles directly mapped to the given country.
-        If no directly mapped tiles are found and the country is not in the location
-        mapping, it attempts to find overlapping tiles by creating Mercator tiles
-        for the country and filtering the dataset's tiles.
+        If the source is a country code, it first attempts to look up tiles
+        via the location mapping. Otherwise, it uses Mercator quadkey overlaps.
+
+        Args:
+            geometry: Spatial area of interest (geometry, GDF, or country code).
+            **kwargs: Additional filtering parameters.
+
+        Returns:
+            List of tile records containing quadkey, URL, and country metadata.
         """
         source = geometry
 
@@ -253,7 +278,12 @@ class MSBuildingsConfig(BaseHandlerConfig):
 
 
 class MSBuildingsDownloader(BaseHandlerDownloader):
-    """A class to handle downloads of Microsoft's Global ML Building Footprints dataset."""
+    """
+    Downloader for Microsoft's Global ML Building Footprints dataset.
+
+    Handles the parallel acquisition of gzipped building footprint CSVs
+    from Azure Open Datasets.
+    """
 
     def __init__(
         self,
@@ -281,7 +311,16 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
         tile_info: Union[pd.Series, dict],
         **kwargs,
     ) -> Optional[str]:
-        """Download data file for a single tile."""
+        """
+        Download a single building footprint tile.
+
+        Args:
+            tile_info: Metropolitan or quadkey-specific metadata including 'url' and 'quadkey'.
+            **kwargs: Additional parameters.
+
+        Returns:
+            The path to the local gzipped CSV file on success, or None on failure.
+        """
 
         tile_url = tile_info["url"]
 
@@ -317,24 +356,15 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
         country_geom_path: Optional[Union[str, Path]] = None,
     ) -> List[str]:
         """
-        Download Microsoft Global ML Building Footprints data for a specific country.
-
-        This is a convenience method to download data for an entire country
-        using its code or name.
+        Download Microsoft buildings data for an entire country.
 
         Args:
-            country: The country code (e.g., 'USA', 'GBR') or name.
-            data_store: Optional instance of a `DataStore` to be used by
-                `AdminBoundaries` for loading country boundaries. If None,
-                `AdminBoundaries` will use its default data loading.
-            country_geom_path: Optional path to a GeoJSON file containing the
-                country boundary. If provided, this boundary is used
-                instead of the default from `AdminBoundaries`.
+            country: ISO country code or name.
+            data_store: Optional DataStore for boundary lookups.
+            country_geom_path: Path to a specific country boundary file.
 
         Returns:
-            A list of local file paths for the successfully downloaded tiles.
-            Returns an empty list if no data is found for the country or if
-            all downloads fail.
+            A list of local paths to the successfully downloaded tiles.
         """
         return self.download(
             source=country, data_store=data_store, path=country_geom_path
@@ -343,7 +373,10 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
 
 class MSBuildingsReader(BaseHandlerReader):
     """
-    Reader for Microsoft Global Buildings data, supporting country, points, and geometry-based resolution.
+    Reader for Microsoft Global Buildings data.
+
+    Manages the ingestion of gzipped footprint CSVs into GeoDataFrames,
+    handling the conversion of string-based geometry into Shapely objects.
     """
 
     def __init__(
@@ -359,11 +392,14 @@ class MSBuildingsReader(BaseHandlerReader):
         self, source_data_path: List[Union[str, Path]], **kwargs
     ) -> gpd.GeoDataFrame:
         """
-        Load building data from Microsoft Buildings dataset.
+        Load building data from specific file paths.
+
         Args:
-            source_data_path: List of file paths to load
+            source_data_path: List of local paths to building data files.
+            **kwargs: Additional parameters for `read_ms_dataset`.
+
         Returns:
-            GeoDataFrame containing building data
+            A GeoDataFrame containing the aggregated building data.
         """
         from gigaspatial.core.io.readers import read_gzipped_json_or_csv
         from shapely.geometry import shape
@@ -381,25 +417,25 @@ class MSBuildingsReader(BaseHandlerReader):
 
 class MSBuildingsHandler(BaseHandler):
     """
-    Handler for Microsoft Global Buildings dataset.
+    Unified handler for the Microsoft Global Buildings dataset.
 
-    This class provides a unified interface for downloading and loading Microsoft Global Buildings data.
-    It manages the lifecycle of configuration, downloading, and reading components.
+    Provides a top-level API for acquiring and accessing Microsoft building
+    footprints for any geographic region.
     """
 
     def create_config(
         self, data_store: DataStore, logger: logging.Logger, **kwargs
     ) -> MSBuildingsConfig:
         """
-        Create and return a MSBuildingsConfig instance.
+        Create a configuration instance for Microsoft Buildings.
 
         Args:
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional configuration parameters
+            data_store: DataStore for location mapping logic.
+            logger: Component logger.
+            **kwargs: Configuration overrides.
 
         Returns:
-            Configured MSBuildingsConfig instance
+            A configured MSBuildingsConfig.
         """
         return MSBuildingsConfig(data_store=data_store, logger=logger, **kwargs)
 
@@ -411,16 +447,16 @@ class MSBuildingsHandler(BaseHandler):
         **kwargs,
     ) -> MSBuildingsDownloader:
         """
-        Create and return a MSBuildingsDownloader instance.
+        Create a downloader instance for Microsoft Buildings.
 
         Args:
-            config: The configuration object
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional downloader parameters
+            config: Handler configuration.
+            data_store: DataStore for saving footprints.
+            logger: Component logger.
+            **kwargs: Downloader parameters.
 
         Returns:
-            Configured MSBuildingsDownloader instance
+            A configured MSBuildingsDownloader.
         """
         return MSBuildingsDownloader(
             config=config, data_store=data_store, logger=logger, **kwargs
@@ -434,16 +470,16 @@ class MSBuildingsHandler(BaseHandler):
         **kwargs,
     ) -> MSBuildingsReader:
         """
-        Create and return a MSBuildingsReader instance.
+        Create a reader instance for Microsoft Buildings.
 
         Args:
-            config: The configuration object
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional reader parameters
+            config: Handler configuration.
+            data_store: DataStore for reading footprints.
+            logger: Component logger.
+            **kwargs: Reader parameters.
 
         Returns:
-            Configured MSBuildingsReader instance
+            A configured MSBuildingsReader.
         """
         return MSBuildingsReader(
             config=config, data_store=data_store, logger=logger, **kwargs

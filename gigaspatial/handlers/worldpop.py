@@ -1,3 +1,12 @@
+"""
+WorldPop data handler for population and demographic datasets.
+
+This module provides handlers for interacting with the WorldPop repository. It supports:
+- Population counts and densities (constrained and unconstrained).
+- Age and sex structures (school age, under-18, and detailed cohorts).
+- Degree of Urbanisation (DUG) classification grids.
+- REST API integration for automated dataset discovery and metadata retrieval.
+"""
 from pydantic.dataclasses import dataclass
 from pydantic import (
     Field,
@@ -51,11 +60,11 @@ class WorldPopRestClient:
         Initialize the WorldPop REST API client.
 
         Args:
-            base_url: Base URL for the WorldPop REST API
-            stats_url: URL for the WorldPop statistics API
-            api_key: Optional API key for higher rate limits
-            timeout: Request timeout in seconds
-            logger: Optional logger instance
+            base_url: Base endpoint for the WorldPop REST API.
+            stats_url: Endpoint for the WorldPop statistics service.
+            api_key: Optional API key for authentication and higher rate limits.
+            timeout: Request timeout duration in seconds.
+            logger: Component logger instance.
         """
         self.base_url = base_url.rstrip("/")
         self.stats_url = stats_url.rstrip("/")
@@ -74,10 +83,10 @@ class WorldPopRestClient:
 
     def get_available_projects(self) -> List[Dict[str, Any]]:
         """
-        Get list of all available projects (e.g., population, births, pregnancies, etc.).
+        Retrieve a list of all available WorldPop projects.
 
         Returns:
-            List of project dictionaries with alias, name, title, and description
+            A list of project metadata dictionaries (alias, title, description).
         """
         try:
             response = self.session.get(self.base_url, timeout=self.timeout)
@@ -90,13 +99,13 @@ class WorldPopRestClient:
 
     def get_project_sources(self, dataset_type: str) -> List[Dict[str, Any]]:
         """
-        Get available sources for a specific project type.
+        Retrieve available data sources for a specific project type.
 
         Args:
-            dataset_type: Project type alias (e.g., 'pop', 'births', 'pregnancies')
+            dataset_type: Project alias (e.g., 'pop', 'births').
 
         Returns:
-            List of source dictionaries with alias and name
+            A list of source metadata dictionaries.
         """
         try:
             url = f"{self.base_url}/{dataset_type}"
@@ -114,14 +123,14 @@ class WorldPopRestClient:
         self, dataset_type: str, category: str
     ) -> List[Dict[str, Any]]:
         """
-        Get list of entities (countries, global, continental) available for a specific project type and source.
+        Retrieve entities (countries, regions) available for a source and project.
 
         Args:
-            dataset_type: Project type alias (e.g., 'pop', 'births')
-            category: Source alias (e.g., 'wpgp', 'pic')
+            dataset_type: Project alias.
+            category: Source alias (e.g., 'wpgp').
 
         Returns:
-            List of entity dictionaries with id and iso3 codes (if applicable)
+            A list of entity metadata dictionaries (including ISO3 codes).
         """
         try:
             url = f"{self.base_url}/{dataset_type}/{category}"
@@ -137,15 +146,15 @@ class WorldPopRestClient:
 
     def get_datasets(self, dataset_type: str, category: str, params: dict):
         """
-        Get all datasets available for the params.
+        Retrieve datasets matching specific query parameters.
 
         Args:
-            dataset_type: Dataset type alias (e.g., 'pop', 'births')
-            category: Category alias (e.g., 'wpgp', 'pic')
-            params: Query parameters (e.g., {'iso3`:'RWA'})
+            dataset_type: Dataset type alias.
+            category: Source category alias.
+            params: Dictionary of query parameters (e.g., {'iso3': 'RWA'}).
 
         Returns:
-            List of dataset dictionaries with metadata and file information
+            A list of dataset metadata dictionaries.
         """
         try:
             url = f"{self.base_url}/{dataset_type}/{category}"
@@ -161,15 +170,15 @@ class WorldPopRestClient:
         self, dataset_type: str, category: str, iso3: str
     ) -> List[Dict[str, Any]]:
         """
-        Get all datasets available for a specific country.
+        Retrieve all datasets available for a specific country.
 
         Args:
-            dataset_type: Dataset type alias (e.g., 'pop', 'births')
-            category: Category alias (e.g., 'wpgp', 'pic')
-            iso3: ISO3 country code (e.g., 'USA', 'BRA')
+            dataset_type: Dataset type alias.
+            category: Source category alias.
+            iso3: ISO 3166-1 alpha-3 country code.
 
         Returns:
-            List of dataset dictionaries with metadata and file information
+            A list of country-specific dataset metadata.
         """
         params = {"iso3": iso3}
         return self.get_datasets(dataset_type, category, params)
@@ -200,17 +209,17 @@ class WorldPopRestClient:
         **filters,
     ) -> Optional[Dict[str, Any]]:
         """
-        Find a specific dataset by year and optional filters.
+        Locate a specific dataset by year and optional metadata filters.
 
         Args:
-            dataset_type: Dataset type alias
-            category: Category alias
-            iso3: ISO3 country code
-            year: Year to search for
-            **filters: Additional filters (e.g., gender='F', resolution='1km')
+            dataset_type: Dataset type alias.
+            category: Source category alias.
+            iso3: ISO 3166-1 alpha-3 code.
+            year: Population year to match.
+            **filters: Additional metadata filters (e.g., resolution='1km').
 
         Returns:
-            Dataset dictionary or None if not found
+            The matching dataset dictionary, or None if not found.
         """
         datasets = self.get_country_datasets(dataset_type, category, iso3)
         year_str = str(year)
@@ -360,6 +369,24 @@ class WorldPopRestClient:
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class WPPopulationConfig(BaseHandlerConfig):
+    """
+    Configuration for WorldPop dataset retrieval.
+
+    This class defines the parameters for selecting specific WorldPop datasets,
+    including release versions (GR1/GR2), projects (pop/age/urban), and
+    constraints (unconstrained/constrained).
+
+    Attributes:
+        release: Dataset release generation ('GR1' or 'GR2').
+        project: Category of data (population, age structures, or urbanization).
+        year: Reference year for the dataset.
+        resolution: Spatial resolution in meters (100 or 1000).
+        un_adjusted: If True, uses UN-adjusted population totals.
+        constrained: If True, uses building-constrained datasets.
+        school_age: If True, filters for school-age demographic cohorts.
+        under_18: If True, filters for under-18 demographic cohorts.
+        dug_level: Urbanization classification level ('L1' or 'L2').
+    """
 
     client = WorldPopRestClient()
 
@@ -402,16 +429,14 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     def _filter_age_sex_paths(self, paths: List[Path], filters: Dict) -> List[Path]:
         """
-        Helper to filter a list of WorldPop age_structures paths based on sex, age,
-        and education level filters.
+        Filter demographic file paths based on sex, age, and education criteria.
 
-        Supported filename patterns:
-        - School age:  DJI_M_SECONDARY_2020_1km.tif       (ISO3_SEX_LEVEL_YEAR_RES.tif)
-                    DJI_F_M_SECONDARY_2020_1km.tif
-        - Under-18:    rwa_T_Under_18_2020_CN_100m.tif     (ISO3_SEX_Under_18_YEAR_...tif)
-                    rwa_F_Under_18_2020_CN_100m.tif
-                    rwa_M_Under_18_2020_CN_100m.tif
-        - Non-school:  RWA_F_25_2020.tif                  (ISO3_SEX_AGE_YEAR.tif)
+        Args:
+            paths: List of local paths to WorldPop demographic TIFs.
+            filters: Dictionary of filters (sex_filters, level_filters, etc.).
+
+        Returns:
+            A list of paths matching all specified filters.
         """
         sex_filters = filters.get("sex_filters")
         level_filters = filters.get("level_filters")
@@ -750,6 +775,16 @@ class WPPopulationConfig(BaseHandlerConfig):
     def get_relevant_data_units_by_geometry(
         self, geometry: str, **kwargs
     ) -> List[Dict[str, Any]]:
+        """
+        Identify relevant WorldPop datasets for a given geographic area.
+
+        Args:
+            geometry: ISO 3166-1 alpha-3 country code.
+            **kwargs: Additional filtering context.
+
+        Returns:
+            A list of dictionary metadata for relevant datasets.
+        """
         api_dataset_type = (
             "dug" if self.project == "degree_of_urbanization" else self.project
         )
@@ -784,19 +819,27 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     def get_data_unit_path(self, unit: str, **kwargs) -> Path:
         """
-        Given a WP file url, return the corresponding path.
+        Resolve a WorldPop file URL to its local storage path.
+
+        Args:
+            unit: The remote file URL.
+            **kwargs: Additional resolution context.
+
+        Returns:
+            Absolute local path for the data file.
         """
         return self.base_path / unit.split("GIS/")[1]
 
     def get_data_unit_paths(self, units: Union[List[str], str], **kwargs) -> list:
         """
-        Given WP file url(s), return the corresponding local file paths.
+        Resolve one or more WorldPop URLs to their local file paths, applying filters.
 
-        - For school_age age_structures (zip resources), if extracted .tif files are present
-        in the target directory, return those; otherwise, return the zip path(s) to allow
-        the downloader to fetch and extract them.
-        - For non-school_age age_structures (individual .tif URLs), you can filter by sex and age
-        using kwargs: sex, ages, min_age, max_age.
+        Args:
+            units: Single URL or list of URLs for WorldPop resources.
+            **kwargs: Filtering criteria (sex, education_level, ages, min_age, max_age).
+
+        Returns:
+            A list of Path objects for the resolved local files.
         """
         if not isinstance(units, list):
             units = [units]
@@ -867,8 +910,14 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     def extract_search_geometry(self, source, **kwargs):
         """
-        Override the method since geometry extraction does not apply.
-        Returns country iso3 for dataset search
+        Identify the country code from a geographic source for dataset search.
+
+        Args:
+            source: Country name or ISO code.
+            **kwargs: Additional context.
+
+        Returns:
+            The ISO 3166-1 alpha-3 country code.
         """
         if not isinstance(source, str):
             raise ValueError(
@@ -899,6 +948,12 @@ class WPPopulationConfig(BaseHandlerConfig):
 
 
 class WPPopulationDownloader(BaseHandlerDownloader):
+    """
+    Downloader for WorldPop datasets.
+
+    Handles the acquisition of demographic rasters from the WorldPop repository,
+    including specialized logic for extracting zipped age structures.
+    """
 
     def __init__(
         self,
@@ -907,12 +962,12 @@ class WPPopulationDownloader(BaseHandlerDownloader):
         logger: Optional[logging.Logger] = None,
     ):
         """
-        Initialize the downloader.
+        Initialize the WorldPop downloader.
 
         Args:
-            config: Configuration for the WorldPop dataset, either as a WPPopulationConfig object or a dictionary of parameters
-            data_store: Optional data storage interface. If not provided, uses LocalDataStore.
-            logger: Optional custom logger. If not provided, uses default logger.
+            config: WorldPop configuration object or parameter dictionary.
+            data_store: Storage interface for local persistence.
+            logger: Component logger instance.
         """
         config = (
             config
@@ -921,8 +976,17 @@ class WPPopulationDownloader(BaseHandlerDownloader):
         )
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, url, **kwargs):
-        """Download data file for a url. If a zip, extract contained .tif files."""
+    def download_data_unit(self, url: str, **kwargs):
+        """
+        Download a WorldPop data resource (TIF or ZIP).
+
+        Args:
+            url: Remote URL of the resource.
+            **kwargs: Acquisition parameters.
+
+        Returns:
+            The local path(s) to the downloaded resource(s).
+        """
         # If the resource is a zip (e.g., school age datasets), download to temp and extract .tif files
         if url.lower().endswith(".zip"):
             temp_downloaded_path: Optional[Path] = None
@@ -1020,6 +1084,12 @@ class WPPopulationDownloader(BaseHandlerDownloader):
 
 
 class WPPopulationReader(BaseHandlerReader):
+    """
+    Reader for WorldPop datasets.
+
+    Interfaces with local demographic rasters to facilitate data loading,
+    cohort filtering, and spatial aggregation.
+    """
 
     def __init__(
         self,
@@ -1028,12 +1098,12 @@ class WPPopulationReader(BaseHandlerReader):
         logger: Optional[logging.Logger] = None,
     ):
         """
-        Initialize the reader.
+        Initialize the WorldPop reader.
 
         Args:
-            config: Configuration for the WorldPop dataset, either as a WPPopulationConfig object or a dictionary of parameters
-            data_store: Optional data storage interface. If not provided, uses LocalDataStore.
-            logger: Optional custom logger. If not provided, uses default logger.
+            config: WorldPop configuration object or parameter dictionary.
+            data_store: Storage interface for local persistence.
+            logger: Component logger instance.
         """
         config = (
             config
@@ -1049,14 +1119,15 @@ class WPPopulationReader(BaseHandlerReader):
         **kwargs,
     ) -> Union[List[TifProcessor], TifProcessor]:
         """
-        Load TifProcessors of WP datasets.
+        Load WorldPop rasters from local storage.
+
         Args:
-            source_data_path: List of file paths to load
-            merge_rasters: If True, all rasters will be merged into a single TifProcessor.
-                           Defaults to False.
+            source_data_path: List of absolute paths to demographic TIFs.
+            merge_rasters: If True, aggregates all rasters into a single processor.
+            **kwargs: Additional parameters passed to the internal raster loader.
+
         Returns:
-            Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects for accessing the raster data or a single
-                                                    TifProcessor if merge_rasters is True.
+            A TifProcessor or list of TifProcessors for the requested data.
         """
         # Apply deferred age/sex filters if present and applicable
         if (
@@ -1114,6 +1185,26 @@ class WPPopulationHandler(BaseHandler):
         logger: Optional[logging.Logger] = None,
         **kwargs,
     ):
+        """
+        Initialize the WorldPop demographic handler.
+
+        Args:
+            release: Generation of datasets to target.
+            project: Specific data project (population, age, urbanization).
+            year: Dataset reference year.
+            resolution: Grid resolution (100m or 1km).
+            un_adjusted: If True, uses UN-adjusted variants.
+            constrained: If True, target building-constrained rasters.
+            school_age: If True, targets school-age cohorts.
+            under_18: If True, targets under-18 cohorts.
+            dug_level: Urbanization classification granularity.
+            config: Optional configuration override.
+            downloader: Optional downloader instance.
+            reader: Optional reader instance.
+            data_store: Storage interface for persistence.
+            logger: Component logger instance.
+            **kwargs: Additional configuration overrides.
+        """
         self._release = release
         self._project = project
         self._year = year
@@ -1135,15 +1226,15 @@ class WPPopulationHandler(BaseHandler):
         self, data_store: DataStore, logger: logging.Logger, **kwargs
     ) -> WPPopulationConfig:
         """
-        Create and return a WPPopulationConfig instance.
+        Develop a WorldPop configuration instance.
 
         Args:
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional configuration parameters
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Configuration overrides.
 
         Returns:
-            Configured WPPopulationConfig instance
+            A configured WPPopulationConfig instance.
         """
         return WPPopulationConfig(
             release=self._release,
@@ -1168,16 +1259,16 @@ class WPPopulationHandler(BaseHandler):
         **kwargs,
     ) -> WPPopulationDownloader:
         """
-        Create and return a WPPopulationDownloader instance.
+        Develop a WorldPop downloader instance.
 
         Args:
-            config: The configuration object
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional downloader parameters
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Downloader parameters.
 
         Returns:
-            Configured WPPopulationDownloader instance
+            A configured WPPopulationDownloader instance.
         """
         return WPPopulationDownloader(
             config=config, data_store=data_store, logger=logger, **kwargs
@@ -1191,16 +1282,16 @@ class WPPopulationHandler(BaseHandler):
         **kwargs,
     ) -> WPPopulationReader:
         """
-        Create and return a WPPopulationReader instance.
+        Develop a WorldPop reader instance.
 
         Args:
-            config: The configuration object
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional reader parameters
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Reader parameters.
 
         Returns:
-            Configured WPPopulationReader instance
+            A configured WPPopulationReader instance.
         """
         return WPPopulationReader(
             config=config, data_store=data_store, logger=logger, **kwargs
@@ -1213,15 +1304,15 @@ class WPPopulationHandler(BaseHandler):
         **kwargs,
     ) -> pd.DataFrame:
         """
-        Load GHSL data into a pandas DataFrame.
+        Acquire WorldPop data and load it into a tabular DataFrame.
 
         Args:
-            source: The data source specification
-            ensure_available: If True, ensure data is downloaded before loading
-            **kwargs: Additional parameters passed to load methods
+            source: Geographic area (country ISO3).
+            ensure_available: If True, executes download if data is missing locally.
+            **kwargs: Parameters passed to the data loading pipeline.
 
         Returns:
-            DataFrame containing the GHSL data
+            A pandas DataFrame containing demographic data.
         """
         tif_processors = self.load_data(
             source=source, ensure_available=ensure_available, **kwargs
@@ -1240,15 +1331,15 @@ class WPPopulationHandler(BaseHandler):
         **kwargs,
     ) -> gpd.GeoDataFrame:
         """
-        Load GHSL data into a geopandas GeoDataFrame.
+        Acquire WorldPop data and load it into a geospatial GeoDataFrame.
 
         Args:
-            source: The data source specification
-            ensure_available: If True, ensure data is downloaded before loading
-            **kwargs: Additional parameters passed to load methods
+            source: Geographic area (country ISO3).
+            ensure_available: If True, executes download if data is missing locally.
+            **kwargs: Parameters passed to the data loading pipeline.
 
         Returns:
-            GeoDataFrame containing the GHSL data
+            A GeoDataFrame containing demographic data with geometries.
         """
         tif_processors = self.load_data(
             source=source, ensure_available=ensure_available, **kwargs

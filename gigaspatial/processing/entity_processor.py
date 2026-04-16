@@ -563,12 +563,15 @@ class EntityProcessor:
     @track_changes
     def _drop_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Deduplicate rows, excluding geometry columns from the comparison key.
+        Deduplicate rows, excluding geometry and other unhashable columns.
 
-        Shapely geometry objects are unhashable and raise ``TypeError`` when
-        passed to ``drop_duplicates``.  The comparison subset is therefore
-        all non-geometry columns; if none exist the DataFrame is returned
-        unchanged.
+        Shapely geometry objects and collections (sets, lists, dicts) are
+        unhashable and raise ``TypeError`` when passed to ``drop_duplicates``.
+        The comparison subset is therefore all non-geometry columns whose
+        values are hashable.
+
+        If no hashable columns are found, the DataFrame is returned unchanged
+        to avoid calling ``drop_duplicates`` with unhashable columns.
 
         Args:
             df: DataFrame after empty-row removal.
@@ -578,7 +581,32 @@ class EntityProcessor:
         """
         self._log("info", "Dropping duplicate rows.")
         geometry_cols = self._get_geometry_cols(df)
-        subset = [c for c in df.columns if c not in geometry_cols] or None
+
+        subset = []
+        for col in df.columns:
+            if col in geometry_cols:
+                continue
+
+            # Check for unhashable types in object columns
+            if df[col].dtype == object:
+                first_valid = df[col].dropna().iloc[:1]
+                if not first_valid.empty:
+                    try:
+                        hash(first_valid.iloc[0])
+                    except TypeError:
+                        logger.debug(
+                            "Excluding unhashable column '%s' from deduplication.", col
+                        )
+                        continue
+
+            subset.append(col)
+
+        if not subset:
+            logger.debug(
+                "No comparable columns found for deduplication; returning unchanged."
+            )
+            return df
+
         return df.drop_duplicates(subset=subset)
 
     def _normalize_enum_column(

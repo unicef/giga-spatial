@@ -1,3 +1,8 @@
+"""
+Module for defining the abstract DataStore interface.
+This interface provides a consistent API for reading and writing files across different
+storage backends like local disk, ADLS, or Snowflake.
+"""
 from abc import ABC, abstractmethod
 from typing import Any, List, Generator, Union
 

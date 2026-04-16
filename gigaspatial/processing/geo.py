@@ -1,3 +1,8 @@
+"""
+Geospatial processing utilities.
+Provides robust helpers for Coordinate Reference System (CRS) management,
+coordinate detection, spatial joins, buffering, and geometry simplification.
+"""
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -22,21 +27,14 @@ def estimate_utm_crs_with_fallback(
 
     This helper wraps ``GeoDataFrame.estimate_utm_crs`` and falls back to a
     configurable CRS (default: Web Mercator) when estimation fails or returns
-    ``None``. It centralises the common pattern used across the codebase.
+    ``None``.
 
-    Parameters
-    ----------
-    gdf : geopandas.GeoDataFrame
-        Input GeoDataFrame used to estimate a suitable UTM CRS.
-    logger :
-        Optional logger used to emit warnings when falling back. If ``None``,
-        no warnings are logged.
-    fallback_crs : str, optional
-        CRS to use when UTM estimation fails or returns ``None``.
+    Args:
+        gdf: Input GeoDataFrame used to estimate a suitable UTM CRS.
+        logger: Optional logger used to emit warnings when falling back.
+        fallback_crs: CRS to use when UTM estimation fails. Defaults to "EPSG:3857".
 
-    Returns
-    -------
-    Any
+    Returns:
         A CRS object or string suitable for ``GeoDataFrame.to_crs``.
     """
     if gdf is None or gdf.empty:
@@ -71,30 +69,20 @@ def detect_coordinate_columns(
     data, lat_keywords=None, lon_keywords=None, case_sensitive=False
 ) -> Tuple[str, str]:
     """
-    Detect latitude and longitude columns in a DataFrame using keyword matching.
+    Detect latitude and longitude columns using keyword matching.
 
-    Parameters:
-    ----------
-    data : pandas.DataFrame
-        DataFrame to search for coordinate columns.
-    lat_keywords : list of str, optional
-        Keywords for identifying latitude columns. If None, uses default keywords.
-    lon_keywords : list of str, optional
-        Keywords for identifying longitude columns. If None, uses default keywords.
-    case_sensitive : bool, optional
-        Whether to perform case-sensitive matching. Default is False.
+    Args:
+        data: DataFrame to search for coordinate columns.
+        lat_keywords: Keywords for identifying latitude columns.
+        lon_keywords: Keywords for identifying longitude columns.
+        case_sensitive: Whether to perform case-sensitive matching.
 
     Returns:
-    -------
-    tuple[str, str]
-        Names of detected (latitude, longitude) columns.
+        Tuple of (latitude_column_name, longitude_column_name).
 
     Raises:
-    ------
-    ValueError
-        If no unique pair of latitude/longitude columns can be found.
-    TypeError
-        If input data is not a pandas DataFrame.
+        ValueError: If no unique pair of latitude/longitude columns can be found.
+        TypeError: If input data is not a pandas DataFrame.
     """
 
     # Default keywords if none provided
@@ -195,31 +183,22 @@ def convert_to_geodataframe(
     data: pd.DataFrame, lat_col: str = None, lon_col: str = None, crs="EPSG:4326"
 ) -> gpd.GeoDataFrame:
     """
-    Convert a pandas DataFrame to a GeoDataFrame, either from latitude/longitude columns
-    or from a WKT geometry column.
+    Convert a pandas DataFrame to a GeoDataFrame.
 
-    Parameters:
-    ----------
-    data : pandas.DataFrame
-        Input DataFrame containing either lat/lon columns or a geometry column.
-    lat_col : str, optional
-        Name of the latitude column. Default is 'lat'.
-    lon_col : str, optional
-        Name of the longitude column. Default is 'lon'.
-    crs : str or pyproj.CRS, optional
-        Coordinate Reference System of the geometry data. Default is 'EPSG:4326'.
+    Supports conversion from latitude/longitude columns or WKT/geometry columns.
+
+    Args:
+        data: Input DataFrame.
+        lat_col: Name of the latitude column.
+        lon_col: Name of the longitude column.
+        crs: Coordinate Reference System. Defaults to 'EPSG:4326'.
 
     Returns:
-    -------
-    geopandas.GeoDataFrame
         A GeoDataFrame containing the input data with a geometry column.
 
     Raises:
-    ------
-    TypeError
-        If input is not a pandas DataFrame.
-    ValueError
-        If required columns are missing or contain invalid data.
+        TypeError: If input is not a pandas DataFrame.
+        ValueError: If required columns are missing or invalid.
     """
 
     # Input validation
@@ -292,19 +271,18 @@ def buffer_geodataframe(
     copy=True,
 ) -> gpd.GeoDataFrame:
     """
-    Buffers a GeoDataFrame with a given buffer distance in meters.
+    Buffer a GeoDataFrame with a distance in meters.
 
-    Parameters:
-    - gdf : geopandas.GeoDataFrame
-        The GeoDataFrame to be buffered.
-    - buffer_distance_meters : float
-        The buffer distance in meters.
-    - cap_style : str, optional
-        The style of caps. round, flat, square. Default is round.
+    Automatically handles UTM transformation for accurate buffering.
+
+    Args:
+        gdf: The GeoDataFrame to be buffered.
+        buffer_distance_meters: The buffer distance.
+        cap_style: Style of caps ('round', 'square', 'flat').
+        copy: Whether to create a copy of the input.
 
     Returns:
-    - geopandas.GeoDataFrame
-        The buffered GeoDataFrame.
+        The buffered GeoDataFrame in the original CRS.
     """
 
     # Input validation
@@ -353,35 +331,21 @@ def add_spatial_jitter(
     copy=True,
 ) -> pd.DataFrame:
     """
-    Add random jitter to duplicated geographic coordinates to create slight separation
-    between overlapping points.
+    Add random jitter to duplicated coordinates to separate overlapping points.
 
-    Parameters:
-    ----------
-    df : pandas.DataFrame
-        DataFrame containing geographic coordinates.
-    columns : list of str, optional
-        Column names containing coordinates to jitter. Default is ['latitude', 'longitude'].
-    amount : float or dict, optional
-        Amount of jitter to add. If float, same amount used for all columns.
-        If dict, specify amount per column, e.g., {'lat': 0.0001, 'lon': 0.0002}.
-        Default is 0.0001 (approximately 11 meters at the equator).
-    seed : int, optional
-        Random seed for reproducibility. Default is None.
-    copy : bool, optional
-        Whether to create a copy of the input DataFrame. Default is True.
+    Args:
+        df: DataFrame containing coordinates.
+        columns: Column names to jitter.
+        amount: Amount of jitter to add.
+        seed: Random seed for reproducibility.
+        copy: Whether to create a copy of the input DataFrame.
 
     Returns:
-    -------
-    pandas.DataFrame
-        DataFrame with jittered coordinates for previously duplicated points.
+        DataFrame with jittered coordinates.
 
     Raises:
-    ------
-    ValueError
-        If columns don't exist or jitter amount is invalid.
-    TypeError
-        If input types are incorrect.
+        ValueError: If columns don't exist or amount is invalid.
+        TypeError: If input types are incorrect.
     """
 
     # Input validation
@@ -448,20 +412,14 @@ def get_centroids(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     Calculate the centroids of a (Multi)Polygon GeoDataFrame.
 
-    Parameters:
-    ----------
-    gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing (Multi)Polygon geometries.
+    Args:
+        gdf: GeoDataFrame containing (Multi)Polygon geometries.
 
     Returns:
-    -------
-    geopandas.GeoDataFrame
         A new GeoDataFrame with Point geometries representing the centroids.
 
     Raises:
-    ------
-    ValueError
-        If the input GeoDataFrame does not contain (Multi)Polygon geometries.
+        ValueError: If the input GeoDataFrame contains non-polygon geometries.
     """
     # Validate input geometries
     if not all(gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])):
@@ -480,24 +438,19 @@ def add_area_in_meters(
     gdf: gpd.GeoDataFrame, area_column_name: str = "area_in_meters"
 ) -> gpd.GeoDataFrame:
     """
-    Calculate the area of (Multi)Polygon geometries in square meters and add it as a new column.
+    Calculate the area of geometries in square meters and add it as a new column.
 
-    Parameters:
-    ----------
-    gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing (Multi)Polygon geometries.
-    area_column_name : str, optional
-        Name of the new column to store the area values. Default is "area_m2".
+    Automatically handles UTM transformation for accurate area calculation.
+
+    Args:
+        gdf: GeoDataFrame containing (Multi)Polygon geometries.
+        area_column_name: Name of the new column.
 
     Returns:
-    -------
-    geopandas.GeoDataFrame
-        The input GeoDataFrame with an additional column for the area in square meters.
+        The input GeoDataFrame with an additional area column.
 
     Raises:
-    ------
-    ValueError
-        If the input GeoDataFrame does not contain (Multi)Polygon geometries.
+        ValueError: If the input GeoDataFrame contains non-polygon geometries.
     """
     # Validate input geometries
     if not all(gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])):
@@ -530,35 +483,19 @@ def simplify_geometries(
     geometry_column: str = "geometry",
 ) -> gpd.GeoDataFrame:
     """
-    Simplify geometries in a GeoDataFrame to reduce file size and improve visualization performance.
+    Simplify geometries to reduce file size and improve performance.
 
-    Parameters
-    ----------
-    gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing geometries to simplify.
-    tolerance : float, optional
-        Tolerance for simplification. Larger values simplify more but reduce detail (default is 0.01).
-    preserve_topology : bool, optional
-        Whether to preserve topology while simplifying. Preserving topology prevents invalid geometries (default is True).
-    geometry_column : str, optional
-        Name of the column containing geometries (default is "geometry").
+    Args:
+        gdf: GeoDataFrame containing geometries to simplify.
+        tolerance: Tolerance for simplification.
+        preserve_topology: Whether to preserve topology.
+        geometry_column: Name of the geometry column.
 
-    Returns
-    -------
-    geopandas.GeoDataFrame
+    Returns:
         A new GeoDataFrame with simplified geometries.
 
-    Raises
-    ------
-    ValueError
-        If the specified geometry column does not exist or contains invalid geometries.
-    TypeError
-        If the geometry column does not contain valid geometries.
-
-    Examples
-    --------
-    Simplify geometries in a GeoDataFrame:
-    >>> simplified_gdf = simplify_geometries(gdf, tolerance=0.05)
+    Raises:
+        ValueError: If geometry column is missing or invalid.
     """
 
     # Check if the specified geometry column exists
@@ -584,24 +521,17 @@ def simplify_geometries(
 
 def map_points_within_polygons(base_points_gdf, polygon_gdf):
     """
-    Maps whether each point in `base_points_gdf` is within any polygon in `polygon_gdf`.
+    Map whether each point is within any polygon.
 
-    Parameters:
-    ----------
-    base_points_gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing point geometries to check.
-    polygon_gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing polygon geometries.
+    Args:
+        base_points_gdf: GeoDataFrame containing points.
+        polygon_gdf: GeoDataFrame containing polygons.
 
     Returns:
-    -------
-    geopandas.GeoDataFrame
-        The `base_points_gdf` with an additional column `is_within` (True/False).
+        The `base_points_gdf` with an additional `is_within` boolean column.
 
     Raises:
-    ------
-    ValueError
-        If the geometries in either GeoDataFrame are invalid or not of the expected type.
+        ValueError: If geometries are invalid or match is impossible (CRS mismatch).
     """
     # Validate input GeoDataFrames
     if not all(base_points_gdf.geometry.geom_type == "Point"):
@@ -628,6 +558,19 @@ def map_points_within_polygons(base_points_gdf, polygon_gdf):
 
 
 def calculate_distance(lat1, lon1, lat2, lon2, R=6371e3):
+    """
+    Calculate the Haversine distance between two points.
+
+    Args:
+        lat1: Latitude of point 1.
+        lon1: Longitude of point 1.
+        lat2: Latitude of point 2.
+        lon2: Longitude of point 2.
+        R: Earth radius in meters.
+
+    Returns:
+        Distance in meters.
+    """
     lat1, lon1, lat2, lon2 = np.radians([lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
@@ -652,44 +595,24 @@ def aggregate_points_to_zones(
 
     For zones with no overlapping points:
     - ``"count"`` aggregation fills missing values with ``0``.
-    - All other aggregations (``"mean"``, ``"sum"``, ``"min"``, ``"max"``, etc.)
-      fill missing values with ``np.nan`` to distinguish "no data" from a
-      true zero value.
+    - All other aggregations fill missing values with ``np.nan``.
 
     Args:
-        points (Union[pd.DataFrame, gpd.GeoDataFrame]): Point data to aggregate.
-        zones (gpd.GeoDataFrame): Zones to aggregate points to.
-        value_columns (Optional[Union[str, List[str]]]): Column(s) containing
-            values to aggregate. If None, only counts will be performed.
-        aggregation (Union[str, Dict[str, str]]): Aggregation method(s) to use:
-            - Single string: Same method for all columns
-              (``"count"``, ``"mean"``, ``"sum"``, ``"min"``, ``"max"``).
-            - Dict: Map column names to aggregation methods.
-        point_zone_predicate (str): Spatial predicate for point-to-zone
-            relationship. Options: ``"within"``, ``"intersects"``.
-        zone_id_column (str): Column in zones containing zone identifiers.
-        output_suffix (str): Suffix to add to output column names.
-        drop_geometry (bool): Whether to drop the geometry column from output.
+        points: Point data to aggregate.
+        zones: Zones to aggregate points to.
+        value_columns: Column(s) containing values to aggregate.
+        aggregation: Aggregation method(s) to use.
+        point_zone_predicate: Spatial predicate (e.g., 'within', 'intersects').
+        zone_id_column: Column in zones containing zone identifiers.
+        output_suffix: Suffix to add to output column names.
+        drop_geometry: Whether to drop the geometry column from output.
 
     Returns:
-        gpd.GeoDataFrame: Zones with aggregated point values.
+        Zones with aggregated point values.
 
     Raises:
-        TypeError: If ``zones`` is not a GeoDataFrame or ``aggregation`` is
-            not a str or dict.
-        ValueError: If ``zone_id_column`` is missing, ``value_columns`` are
-            not found, or aggregation dict keys are inconsistent.
-
-    Example:
-        >>> poi_counts = aggregate_points_to_zones(pois, zones, aggregation="count")
-        >>> poi_value_mean = aggregate_points_to_zones(
-        ...     pois, zones, value_columns="score", aggregation="mean"
-        ... )
-        >>> poi_multiple = aggregate_points_to_zones(
-        ...     pois, zones,
-        ...     value_columns=["score", "visits"],
-        ...     aggregation={"score": "mean", "visits": "sum"},
-        ... )
+        TypeError: If zones is not a GeoDataFrame or aggregation is invalid.
+        ValueError: If columns are missing or metadata is inconsistent.
     """
     # --- Input validation ---
     if not isinstance(zones, gpd.GeoDataFrame):
@@ -829,15 +752,19 @@ def annotate_with_admin_regions(
     Annotate a GeoDataFrame with administrative region information.
 
     Performs a spatial join between the input points and administrative boundaries
-    at levels 1 and 2, resolving conflicts when points intersect multiple admin regions.
+    at levels 1 and 2, resolving conflicts when points intersect multiple regions.
 
     Args:
-        gdf: GeoDataFrame containing points to annotate
-        country_code: Country code for administrative boundaries
-        data_store: Optional DataStore for loading admin boundary data
+        gdf: GeoDataFrame containing points to annotate.
+        country_code: ISO country code for administrative boundaries.
+        data_store: Optional DataStore for loading boundary data.
+        admin_id_column_suffix: Optional suffix for admin ID columns.
 
     Returns:
-        GeoDataFrame with added administrative region columns
+        GeoDataFrame with added administrative region columns (admin1, admin2, etc.).
+
+    Raises:
+        TypeError: If gdf is not a GeoDataFrame.
     """
     from gigaspatial.handlers.boundaries import AdminBoundaries
 
@@ -953,75 +880,24 @@ def aggregate_polygons_to_zones(
     drop_geometry: bool = False,
 ) -> gpd.GeoDataFrame:
     """
-    Aggregates polygon data to zones based on a specified spatial relationship.
-
-    This function performs a spatial join between polygons and zones and then
-    aggregates values from the polygons to their corresponding zones.
-
-    For zones with no overlapping/contained polygons:
-    - ``"count"`` aggregation fills missing values with ``0``.
-    - All other aggregations (``"sum"``, ``"mean"``, ``"min"``, ``"max"``, etc.)
-      fill missing values with ``np.nan`` to distinguish "no data" from a
-      true zero value.
+    Aggregates polygon data to zones based on a spatial relationship.
 
     Args:
-        polygons (Union[pd.DataFrame, gpd.GeoDataFrame]):
-            Polygon data to aggregate. Must be a GeoDataFrame or convertible to one.
-        zones (gpd.GeoDataFrame):
-            The target zones to which the polygon data will be aggregated.
-        value_columns (Union[str, List[str]]):
-            The column(s) in ``polygons`` containing the numeric values to aggregate.
-        aggregation (Union[str, Dict[str, str]], optional):
-            The aggregation method(s) to use. Can be a single string (e.g., ``"sum"``,
-            ``"mean"``, ``"max"``) or a dict mapping column names to methods.
-            Defaults to ``"sum"``.
-        predicate (Literal["intersects", "within", "fractional"], optional):
-            Spatial relationship to use for aggregation:
-            - ``"intersects"``: Any polygon that intersects the zone.
-            - ``"within"``: Polygons entirely contained within the zone.
-            - ``"fractional"``: Area-weighted aggregation distributed proportionally
-              to overlap area. Requires computing a UTM CRS for accuracy.
-            Defaults to ``"intersects"``.
-        zone_id_column (str, optional):
-            Column in ``zones`` containing unique zone identifiers.
-            Defaults to ``"zone_id"``.
-        output_suffix (str, optional):
-            Suffix appended to aggregated output column names. Defaults to ``""``.
-        drop_geometry (bool, optional):
-            If True, drops the geometry column from the output. Defaults to False.
+        polygons: Polygon data to aggregate.
+        zones: Target zones.
+        value_columns: Column(s) in polygons with numeric values.
+        aggregation: Aggregation method(s) to use (str or dict).
+        predicate: Spatial relationship ('intersects', 'within', 'fractional').
+        zone_id_column: Unique identifier column in zones.
+        output_suffix: Suffix for output columns.
+        drop_geometry: Whether to drop the geometry column.
 
     Returns:
-        gpd.GeoDataFrame:
-            The ``zones`` GeoDataFrame with new columns containing aggregated values.
-            Zones with no intersecting or contained polygons will have ``np.nan``
-            for non-count aggregations and ``0`` for count aggregations.
+        The zones GeoDataFrame with aggregated values.
 
     Raises:
-        TypeError: If ``zones`` is not a GeoDataFrame or ``polygons`` cannot be
-            converted to one.
-        ValueError: If ``zone_id_column`` or any ``value_columns`` are not found,
-            if the ``polygons`` geometry types are not polygonal, if ``zones`` is
-            empty, or if there is a column name conflict with ``zone_id_column``.
-        RuntimeError: If an error occurs during area-weighted aggregation.
-
-    Example:
-        >>> # Area-weighted population aggregation
-        >>> pop_by_zone = aggregate_polygons_to_zones(
-        ...     landuse_polygons,
-        ...     grid_zones,
-        ...     value_columns="population",
-        ...     predicate="fractional",
-        ...     aggregation="sum",
-        ...     output_suffix="_pop",
-        ... )
-        >>> # Count of parcels intersecting each zone
-        >>> count_by_zone = aggregate_polygons_to_zones(
-        ...     landuse_polygons,
-        ...     grid_zones,
-        ...     value_columns="parcel_id",
-        ...     predicate="intersects",
-        ...     aggregation="count",
-        ... )
+        TypeError: If polygons/zones are not GeoDataFrames.
+        ValueError: If columns or predicates are invalid.
     """
     # --- Input validation ---
     if not isinstance(zones, gpd.GeoDataFrame):
@@ -1142,7 +1018,16 @@ def aggregate_polygons_to_zones(
 
 
 def _process_aggregation_methods(aggregation, value_columns):
-    """Process and validate aggregation methods"""
+    """
+    Process and validate aggregation methods.
+
+    Args:
+        aggregation: Aggregation method string or dictionary.
+        value_columns: Columns to apply aggregations to.
+
+    Returns:
+        Aggregation mapping dictionary.
+    """
     if isinstance(aggregation, str):
         return {col: aggregation for col in value_columns}
     elif isinstance(aggregation, dict):
@@ -1165,7 +1050,19 @@ def _process_aggregation_methods(aggregation, value_columns):
 def _fractional_aggregation(
     polygons_gdf, zones, value_columns, agg_funcs, zone_id_column
 ):
-    """Perform area-weighted (fractional) aggregation"""
+    """
+    Perform area-weighted (fractional) aggregation.
+
+    Args:
+        polygons_gdf: Polygon data.
+        zones: Target zones.
+        value_columns: Columns to aggregate.
+        agg_funcs: Aggregation functions.
+        zone_id_column: ID column.
+
+    Returns:
+        Aggregated results.
+    """
     try:
         # Compute UTM CRS for accurate area calculations
         try:
@@ -1221,7 +1118,20 @@ def _fractional_aggregation(
 def _simple_aggregation(
     polygons_gdf, zones, value_columns, agg_funcs, zone_id_column, predicate
 ):
-    """Perform simple (non-weighted) aggregation"""
+    """
+    Perform simple (non-weighted) spatial aggregation.
+
+    Args:
+        polygons_gdf: Polygon data.
+        zones: Target zones.
+        value_columns: Columns to aggregate.
+        agg_funcs: Aggregation functions.
+        zone_id_column: ID column.
+        predicate: Spatial predicate.
+
+    Returns:
+        Aggregated results.
+    """
     # Perform spatial join
     joined = gpd.sjoin(polygons_gdf, zones, how="inner", predicate=predicate)
 
@@ -1247,7 +1157,15 @@ def _simple_aggregation(
 
 
 def _handle_multiindex_columns(aggregated):
-    """Handle multi-level column index from groupby aggregation"""
+    """
+    Flatten multi-level column index from groupby aggregation.
+
+    Args:
+        aggregated: Aggregated DataFrame.
+
+    Returns:
+        DataFrame with flattened columns.
+    """
     if isinstance(aggregated.columns, pd.MultiIndex):
         # Flatten multi-level columns: combine column name with aggregation method
         aggregated.columns = [f"{col[0]}_{col[1]}" for col in aggregated.columns]

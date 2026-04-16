@@ -1,3 +1,7 @@
+"""
+Module for cellular cell schema and processing.
+Defines the Cell entity, representing individual sectors or cells on a cell tower.
+"""
 import pandas as pd
 from pydantic import Field
 from typing import Optional, List, Union, Dict, Set, ClassVar
@@ -157,12 +161,30 @@ class CellProcessor(EntityProcessor):
     RADIO_ALIAS_MAP: ClassVar[Dict[str, str]] = RADIO_ALIAS_MAP
 
     def process(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        """
+        Execute the full processing pipeline for cell data.
+
+        Args:
+            df: Raw cell DataFrame.
+            **kwargs: Additional processing arguments.
+
+        Returns:
+            Processed and normalized DataFrame.
+        """
         df = super().process(df, **kwargs)
         df = self._normalize_radio_type(df)
         return df
 
     def _normalize_radio_type(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize radio_type values to canonical RadioType enum values."""
+        """
+        Normalize radio_type values to canonical RadioType enums.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized radio_type column.
+        """
         return self._normalize_enum_column(
             df,
             column="radio_type",
@@ -212,6 +234,16 @@ class CellTable(EntityTable[Cell]):
 
     @classmethod
     def from_dataframe(cls, df: pd.DataFrame, entity_class=Cell) -> "CellTable":
+        """
+        Create a CellTable from an existing DataFrame.
+
+        Args:
+            df: DataFrame containing cell data.
+            entity_class: Entity class to validate against. Defaults to Cell.
+
+        Returns:
+            CellTable instance with validated Cell entities.
+        """
         return super().from_dataframe(df=df, entity_class=entity_class)
 
     # ------------------------------------------------------------------
@@ -256,7 +288,12 @@ class CellTable(EntityTable[Cell]):
     # ------------------------------------------------------------------
 
     def get_radio_types(self) -> Set[RadioType]:
-        """Return the set of all unique radio types present in the table."""
+        """
+        Return the set of all unique radio types present in the table.
+
+        Returns:
+            Set of RadioType enum values.
+        """
         return {e.radio_type for e in self.entities if e.radio_type is not None}
 
     def get_cells_for_tower(self, cell_tower_id_giga: str) -> "CellTable":

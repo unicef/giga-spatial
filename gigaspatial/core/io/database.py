@@ -1,3 +1,7 @@
+"""
+Module for database connectivity and operations.
+Provides a unified interface (DBConnection) for interacting with PostgreSQL and Trino databases.
+"""
 from typing import List, Dict, Optional, Union, Literal
 
 import pandas as pd
@@ -51,27 +55,31 @@ class DBConnection:
         sslmode: str = DB_CONFIG.get("sslmode", "require"),  # For PostgreSQL
         **kwargs,
     ):
+        """
+        Initialize a database connection.
+
+        Args:
+            db_type: Database type ("trino" or "postgresql").
+            host: Server hostname or IP address.
+            port: Database port number.
+            user: Username for authentication.
+            password: Password for authentication.
+            catalog: Catalog name (Trino only).
+            database: Database name (PostgreSQL only).
+            schema: Default schema to use.
+            http_scheme: HTTP scheme for Trino ("http" or "https").
+            sslmode: SSL mode for PostgreSQL (e.g., "require").
+            **kwargs: Additional connection parameters for SQLAlchemy.
+
+        Raises:
+            ImportError: If 'sqlalchemy' is not installed.
+            ValueError: If db_type is unsupported.
+        """
         if not _HAS_SQLALCHEMY:
             raise ImportError(
                 "DBConnection requires 'sqlalchemy'. "
                 "Install it with: pip install 'giga-spatial[db]'"
             )
-        """
-        Initialize a database connection for either Trino or PostgreSQL.
-
-        Args:
-            db_type: Either "trino" or "postgresql"
-            host: Database server host
-            port: Database server port
-            user: Username
-            password: Password
-            catalog: Trino catalog name
-            database: PostgreSQL database name
-            schema: Default schema name
-            http_scheme: For Trino ("http" or "https")
-            sslmode: For PostgreSQL (e.g., "require", "verify-full")
-            **kwargs: Additional connection parameters
-        """
         self.db_type = db_type.lower()
         self.host = host
         self.port = str(port) if port else None
@@ -93,7 +101,18 @@ class DBConnection:
         self._add_event_listener()
 
     def _create_trino_engine(self, **kwargs) -> "Engine":
-        """Create a Trino SQLAlchemy engine."""
+        """
+        Create a Trino SQLAlchemy engine.
+
+        Args:
+            **kwargs: Additional arguments for create_engine.
+
+        Returns:
+            SQLAlchemy Engine.
+
+        Raises:
+            ImportError: If 'sqlalchemy-trino' is not installed.
+        """
         try:
             import trino
         except ImportError:
@@ -112,7 +131,15 @@ class DBConnection:
         )
 
     def _create_postgresql_engine(self, **kwargs) -> "Engine":
-        """Create a PostgreSQL SQLAlchemy engine."""
+        """
+        Create a PostgreSQL SQLAlchemy engine.
+
+        Args:
+            **kwargs: Additional arguments for create_engine.
+
+        Returns:
+            SQLAlchemy Engine.
+        """
         self._connection_string = (
             f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/"
             f"{self.database}?sslmode={self.sslmode}"
@@ -138,23 +165,44 @@ class DBConnection:
         Returns the connection string used to create the engine.
 
         Returns:
-            str: The connection string.
+            The raw connection string.
         """
         return self._connection_string
 
     def get_schema_names(self) -> List[str]:
-        """Get list of all schema names."""
+        """
+        Get list of all schema names in the database.
+
+        Returns:
+            List of schema names.
+        """
         inspector = inspect(self.engine)
         return inspector.get_schema_names()
 
     def get_table_names(self, schema: Optional[str] = None) -> List[str]:
-        """Get list of table names in a schema."""
+        """
+        Get list of table names in a schema.
+
+        Args:
+            schema: Schema name. Defaults to default_schema.
+
+        Returns:
+            List of table names.
+        """
         schema = schema or self.default_schema
         inspector = inspect(self.engine)
         return inspector.get_table_names(schema=schema)
 
     def get_view_names(self, schema: Optional[str] = None) -> List[str]:
-        """Get list of view names in a schema."""
+        """
+        Get list of view names in a schema.
+
+        Args:
+            schema: Schema name. Defaults to default_schema.
+
+        Returns:
+            List of view names.
+        """
         schema = schema or self.default_schema
         inspector = inspect(self.engine)
         return inspector.get_view_names(schema=schema)
@@ -162,7 +210,16 @@ class DBConnection:
     def get_column_names(
         self, table_name: str, schema: Optional[str] = None
     ) -> List[str]:
-        """Get column names for a specific table."""
+        """
+        Get column names for a specific table.
+
+        Args:
+            table_name: Name of the table.
+            schema: Schema name.
+
+        Returns:
+            List of column names.
+        """
         if "." in table_name:
             schema, table_name = table_name.split(".")
         else:
@@ -175,7 +232,16 @@ class DBConnection:
     def get_table_info(
         self, table_name: str, schema: Optional[str] = None
     ) -> List[Dict]:
-        """Get detailed column information for a table."""
+        """
+        Get detailed column information for a table.
+
+        Args:
+            table_name: Name of the table.
+            schema: Schema name.
+
+        Returns:
+            List of column metadata dictionaries.
+        """
         if "." in table_name:
             schema, table_name = table_name.split(".")
         else:
@@ -187,7 +253,16 @@ class DBConnection:
     def get_primary_keys(
         self, table_name: str, schema: Optional[str] = None
     ) -> List[str]:
-        """Get primary key columns for a table."""
+        """
+        Get primary key columns for a table.
+
+        Args:
+            table_name: Name of the table.
+            schema: Schema name.
+
+        Returns:
+            List of primary key column names.
+        """
         if "." in table_name:
             schema, table_name = table_name.split(".")
         else:
@@ -202,7 +277,16 @@ class DBConnection:
             return []  # Some databases may not support PK constraints
 
     def table_exists(self, table_name: str, schema: Optional[str] = None) -> bool:
-        """Check if a table exists."""
+        """
+        Check if a table exists in the database.
+
+        Args:
+            table_name: Name of the table.
+            schema: Schema name.
+
+        Returns:
+            True if table exists, False otherwise.
+        """
         if "." in table_name:
             schema, table_name = table_name.split(".")
         else:
@@ -212,7 +296,15 @@ class DBConnection:
 
     # PostgreSQL-specific methods
     def get_extensions(self) -> List[str]:
-        """Get list of installed PostgreSQL extensions (PostgreSQL only)."""
+        """
+        Get list of installed PostgreSQL extensions.
+
+        Returns:
+            List of extension names.
+
+        Raises:
+            NotImplementedError: If database type is not PostgreSQL.
+        """
         if self.db_type != "postgresql":
             raise NotImplementedError(
                 "This method is only available for PostgreSQL connections"
@@ -226,15 +318,18 @@ class DBConnection:
         self, query: str, fetch_results: bool = True, params: Optional[Dict] = None
     ) -> Union[List[tuple], None]:
         """
-        Executes a SQL query (works for both PostgreSQL and Trino).
+        Executes a SQL query.
 
         Args:
-            query: SQL query to execute
-            fetch_results: Whether to fetch results
-            params: Parameters for parameterized queries
+            query: SQL query string to execute.
+            fetch_results: Whether to fetch and return results.
+            params: Optional dictionary of parameters for the query.
 
         Returns:
-            Results as list of tuples or None
+            List of result tuples if fetch_results is True, else None.
+
+        Raises:
+            SQLAlchemyError: If query execution fails.
         """
         try:
             with self.engine.connect() as connection:
@@ -254,10 +349,10 @@ class DBConnection:
 
     def test_connection(self) -> bool:
         """
-        Tests the database connection (works for both PostgreSQL and Trino).
+        Tests the database connection.
 
         Returns:
-            True if connection successful, False otherwise
+            True if connection successful, False otherwise.
         """
         test_query = (
             "SELECT 1"
@@ -281,14 +376,17 @@ class DBConnection:
         self, query: str, params: Optional[Dict] = None
     ) -> pd.DataFrame:
         """
-        Executes query and returns results as pandas DataFrame (works for both).
+        Executes query and returns results as pandas DataFrame.
 
         Args:
-            query: SQL query to execute
-            params: Parameters for parameterized queries
+            query: SQL query string to execute.
+            params: Optional parameters for the query.
 
         Returns:
-            pandas DataFrame with results
+            pandas DataFrame containing the query results.
+
+        Raises:
+            SQLAlchemyError: If query execution fails.
         """
         try:
             with self.engine.connect() as connection:
@@ -305,23 +403,28 @@ class DBConnection:
         limit: Optional[int] = None,
         **kwargs,
     ) -> "dd.DataFrame":
+        """
+        Reads data into a Dask DataFrame.
+
+        Args:
+            table_name: Table name (schema.table or just table).
+            index_col: Column to use as index for partitioning.
+            columns: List of columns to select.
+            limit: Maximum rows to return.
+            **kwargs: Additional arguments for dd.read_sql_query.
+
+        Returns:
+            Dask DataFrame with results.
+
+        Raises:
+            ImportError: If 'dask' is not installed.
+            ValueError: If reading fails.
+        """
         if not _HAS_DASK:
             raise ImportError(
                 "read_sql_to_dask_dataframe requires 'dask'. "
                 "Install it with: pip install 'giga-spatial[db]'"
             )
-        """
-        Reads data to Dask DataFrame (works for both, but connection string differs).
-
-        Args:
-            table_name: Table name (schema.table or just table)
-            columns: List of columns to select
-            limit: Maximum rows to return
-            **kwargs: Additional arguments
-
-        Returns:
-            Dask DataFrame with results
-        """
         try:
             connection_string = self.get_connection_string()
 

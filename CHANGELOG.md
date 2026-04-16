@@ -2,6 +2,81 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.3] - 2026-04-16
+
+### Changed
+
+-   **DataStore-Aware Reading API (`gigaspatial/core/io/readers.py`)**
+    -   Refactored `read_json`, `read_dataset`, and `read_datasets` to prioritize the file path as the first argument, making `data_store` an optional second argument that defaults to `LocalDataStore()` if not provided. This simplifies usage for local file operations: `df = read_dataset("data.shp")`.
+    -   Updated `read_gzipped_json_or_csv` to also support an optional `data_store`.
+    -   Systematically updated all downstream callers in `BaseHandler`, `AdminBoundaries`, `EntityTable`, `OpenCellIDReader`, and `HDXReader` to conform to the new argument order.
+
+-   **`map_wp_pop`: Automatic Project-Specific Statistics (`gigaspatial/generators/`)**
+    -   Implemented automatic statistic selection for the WorldPop population mapping method in both `PoiViewGenerator` and `ZonalViewGenerator`:
+        -   **`degree_of_urbanization`**: Automatically uses `"median"` (for categorical class mapping).
+        -   **`pop` / `age_structures`**: Automatically uses `"sum"` (for population count mapping).
+    -   This ensures consistent and mathematically correct aggregation defaults across different WorldPop datasets.
+
+-   **`TransmissionNode` Schema Update (`gigaspatial/core/schemas/transmission_node.py`)**
+    -   Added `is_logical_node` (Optional[bool]) field to track whether a site hosts active transmission equipment.
+    -   Implemented `_normalize_transmission_medium` in `TransmissionNodeProcessor` to standardize physical medium values (e.g., mapping "fibre" to "fiber").
+    -   Integrated `BACKHAUL_ALIAS_MAP` from the `CellTower` schema to ensure consistent normalization of shared media types (Fiber, Microwave, Satellite) across infrastructure entities.
+
+### Fixed
+
+-   **`EntityProcessor._drop_duplicates`: Robust handling of unhashable columns (`gigaspatial/processing/entity_processor.py`)**
+    -   Resolved a `TypeError` that occurred when deduplicating DataFrames containing unhashable types (e.g., `set`, `list`, `dict`) in non-geometry columns.
+    -   Updated the deduplication pipeline to dynamically inspect `object` dtype columns and exclude those containing unhashable values from the comparison subset.
+    -   Added defensive handling to return the DataFrame unchanged if no comparable (hashable) columns are identified, preventing crashes in `pd.DataFrame.drop_duplicates`.
+
+-   **Centralized GEE Dependency Management (`gigaspatial/handlers/gee/`)**
+    -   Refactored `GEEConfig` and `GEEProfiler` to utilize a single shared Earth Engine availability check, centralizing the handling of `earthengine-api` and `geemap` optional dependencies.
+    -   Implemented robust `ImportError` protection for GEE-specific methods and improved type hint safety across the module, ensuring the core library remains functional without GEE installed.
+
+-   **HDX Resource Matching: Prevent false positives for country codes**
+    -   Modified `HDXConfig._match_pattern` in `gigaspatial/handlers/hdx.py` to support regex-based token matching, ensuring that country identifiers (e.g., ISO-2/ISO-3 codes) are matched as distinct components delimited by `_`, `-`, `/`, or `.` rather than arbitrary substrings. This prevents incorrect matching where a short code exists within a longer string or dataset identifier.
+    -   Added `token_match` parameter to `HDXConfig.get_dataset_resources` to toggle this behavior.
+    -   Enabled `token_match=True` by default in `RWIConfig.get_relevant_data_units` (`gigaspatial/handlers/rwi.py`) to resolve ambiguous resource matching across multi-country datasets.
+
+### Documentation
+
+-   **README overhaul (`README.md`)**
+    -   Rewrote the **Quick Start** section to use correct, runnable code. The prior example referenced a non-existent `POIViewGenerator` class (correct name is `PoiViewGenerator`), used an undefined `points` variable, and duplicated the GHSL mapping call. Updated to use `GigaSchoolLocationFetcher` → `PoiViewGenerator` → enrichment chain, matching the actual v0.9.x API. Added a second grid-based example using `H3ViewGenerator`.
+    -   Added optional dependency table covering `azure-storage-blob`, `snowflake-connector-python`, and `earthengine-api`/`geemap` with links to the new Configuration Guide.
+    -   Replaced the vague **Key Features** prose with a concise, class-name-anchored bullet list (`TifProcessor`, `H3ViewGenerator`, `WPPopulationHandler`, etc.).
+    -   Replaced the **Core Concepts** freeform list with a structured Markdown table mapping concept names to their concrete Python classes.
+    -   Added a **Supported Datasets** table covering all nine source categories (Buildings, Population & Settlements, Network & Connectivity, POI, Humanitarian, Earth Observation, Giga, Admin Boundaries, Relative Wealth).
+    -   Removed the redundant **View Generators** section (content consolidated into Core Concepts table).
+    -   Updated installation link to point to the new [Configuration Guide](https://unicef.github.io/giga-spatial/getting-started/configuration/).
+
+-   **New Configuration Guide (`docs/getting-started/configuration.md`)**
+    -   Created a comprehensive guide serving as the master reference for all library settings.
+    -   **Path Management**: Documents the medallion architecture (`bronze` / `silver` / `gold` tiers) and how `ROOT_DATA_DIR` drives the tier hierarchy. Explains the `config.set_path()` and `config.get_path()` API and environment variable override precedence.
+    -   **Storage Backends**: Dedicated setup sections for Local filesystem, Azure Data Lake Storage (ADLS, including connection string vs. SAS token authentication), and Snowflake internal stages (including SPCS mode).
+    -   **API Integrations**: Covers Google Earth Engine (service account and Application Default Credentials), OpenStreetMap (Overpass endpoint config), and Ookla (tile cache configuration).
+    -   **Environment Variable Master Table**: Single reference table for all 30+ supported environment variables, grouped by subsystem with descriptions and example values.
+    -   Cross-referenced from the updated Installation Guide.
+
+-   **Updated Installation Guide (`docs/getting-started/installation.md`)**
+    -   Modernized "Next Steps" section to explicitly direct users to the new Configuration Guide before the Quick Start guide, reflecting the prerequisite relationship.
+    -   Fixed a missing `---` separator that left the section header floating.
+
+-   **New User Guide How-to Articles (`docs/user-guide/`)**
+    -   Extracted the five core workflows from production Jupyter notebooks in the repository root and converted them into structured narrative guides. Each guide explains the architectural "Why" (handler vs. generator responsibilities) before the "How" (code).
+    -   **`school-proximity.md`**: `GigaSchoolLocationFetcher` + `PoiViewGenerator.find_nearest_buildings()` — building proximity analysis at national scale. Derived from `optimize_building_mapping.ipynb`.
+    -   **`infrastructure-normalization.md`**: `read_dataset` + `TransmissionNodeTable` + `EntityProcessor` — normalizing partner KMZ/GPKG fiber data into the Giga schema. Derived from `process_infra_ken.ipynb`.
+    -   **`settlement-characterization.md`**: `GHSLDataHandler(product="GHS_SMOD")` + `PoiViewGenerator.map_smod()` — automated urban/rural stratification using the GHSL Settlement Model. Derived from GHSL mapping notebooks.
+    -   **`population-accessibility.md`**: `WPPopulationHandler` + `PoiViewGenerator.map_wp_pop()` — population catchment estimation within a configurable buffer radius. Derived from `test_worldpop.ipynb`.
+    -   **`zonal-statistics-grids.md`**: `TifProcessor` + `H3ViewGenerator.map_rasters()` — aggregating raster data (elevation, nightlights) onto H3 hexagonal grids for global comparative analysis. Corrects the non-existent `H3Hexagons.agg_raster()` pattern in favor of the actual `H3ViewGenerator.map_rasters()` API. Derived from `test_tifprocessor.ipynb`.
+
+-   **`mkdocs.yml`: Navigation updated**
+    -   Added `Configuration: getting-started/configuration.md` to the Getting Started section.
+    -   Added all five new User Guide articles to the User Guide navigation section, replacing the previously commented-out placeholder entries.
+
+### Dependencies
+
+-   Added `pyarrow>=17.0.0` to core dependencies to support optimized tabular data processing and standard Parquet I/O.
+
 ## [v0.9.2] - 2026-03-30
 
 ### Added

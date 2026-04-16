@@ -1,3 +1,13 @@
+"""
+Ookla Speedtest Open Data handler.
+
+This module provides handlers for interacting with Ookla's open datasets, which
+are hosted on AWS S3 in Parquet format. It supports:
+- Automatic dataset discovery by year and quarter.
+- Filtering by network type (fixed vs mobile).
+- Spatial filtering using Bing Maps Quadkeys (Zoom 16).
+- Efficient Parquet loading into tabular or geospatial formats.
+"""
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -26,10 +36,16 @@ from tqdm import tqdm
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class OoklaSpeedtestConfig(BaseHandlerConfig):
     """
-    Configuration class for Ookla Speedtest data.
+    Configuration for Ookla Speedtest dataset access.
 
-    This class defines the parameters for accessing and filtering Ookla Speedtest datasets,
-    including available years, quarters, and how dataset URLs are constructed.
+    Manages dataset identification (type, year, quarter) and resolves remote
+    S3 URLs to local storage paths.
+
+    Attributes:
+        type: Network connection type ('fixed' or 'mobile').
+        year: Targeted data year (defaults to latest available).
+        quarter: Targeted data quarter (1-4, defaults to latest available).
+        base_path: Root directory for local parquet storage.
     """
 
     MIN_YEAR = 2019
@@ -65,13 +81,29 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
         super().__post_init__()
         self.DATASET_URL = self._get_dataset_url(self.type, self.year, self.quarter)
 
-    def _get_dataset_url(self, type, year, quarter):
+    def _get_dataset_url(self, type: str, year: int, quarter: int) -> str:
+        """Constructs the remote S3 URL for a specific Ookla dataset.
+
+        Args:
+            type: Network type ('fixed' or 'mobile').
+            year: Data year.
+            quarter: Data quarter (1-4).
+
+        Returns:
+            The full remote S3 URL to the Parquet file.
+        """
         month = [1, 4, 7, 10]
         quarter_start = datetime(year, month[self.quarter - 1], 1)
         return f"{self.BASE_URL}/type={type}/year={quarter_start:%Y}/quarter={quarter}/{quarter_start:%Y-%m-%d}_performance_{type}_tiles.parquet"
 
     @staticmethod
     def get_available_datasets():
+        """
+        Enumerate all potentially available Ookla Speedtest datasets on S3.
+
+        Returns:
+            A list of dictionaries containing 'service_type', 'year', and 'quarter'.
+        """
         start_year = 2019  # first data year
         max_year = datetime.today().year
         max_quarter = np.floor((datetime.today().month - 1) / 3)
@@ -92,26 +124,51 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
         return ookla_tiles
 
     def get_relevant_data_units(self, source=None, **kwargs):
+        """
+        Identify the Parquet URL for the configured year and quarter.
+
+        Args:
+            source: Geographic source (ignored as Ookla data is global).
+            **kwargs: Additional parameters.
+
+        Returns:
+            A list containing the single dataset URL.
+        """
         return [self.DATASET_URL]
 
     def get_relevant_data_units_by_geometry(
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame] = None, **kwargs
     ) -> List[str]:
-        return
+        """
+        Identify relevant data units by geometry.
+
+        Args:
+            geometry: Boundary to filter by.
+            **kwargs: Additional parameters.
+
+        Returns:
+            A list of dataset URLs.
+        """
+        return [self.DATASET_URL]
 
     def get_data_unit_path(self, unit: str, **kwargs) -> Path:
-        """
-        Given a Ookla Speedtest file url, return the corresponding path.
+        """Resolves a remote Ookla dataset URL to its local storage path.
+
+        Args:
+            unit: The remote Parquet URL.
+            **kwargs: Additional context.
+
+        Returns:
+            Absolute path to the local data file.
         """
         return self.base_path / unit.split("/")[-1]
 
 
 class OoklaSpeedtestDownloader(BaseHandlerDownloader):
     """
-    A class to handle the downloading of Ookla Speedtest data.
+    Downloader for Ookla Speedtest Parquet files.
 
-    This downloader focuses on fetching parquet files based on the provided configuration
-    and data unit URLs.
+    Acquires performance tiles from AWS S3 and persists them to local storage.
     """
 
     def __init__(
@@ -128,6 +185,16 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def download_data_unit(self, url: str, **kwargs) -> Optional[Path]:
+        """
+        Download a single Ookla Parquet file.
+
+        Args:
+            url: Remote S3 URL.
+            **kwargs: Downloading parameters.
+
+        Returns:
+            Local path to the downloaded file, or None on failure.
+        """
         output_path = self.config.get_data_unit_path(url)
 
         try:
@@ -164,9 +231,9 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
 
 class OoklaSpeedtestReader(BaseHandlerReader):
     """
-    A class to handle reading Ookla Speedtest data.
+    Reader for Ookla Speedtest Parquet files.
 
-    It loads parquet files into a DataFrame.
+    Loads and processes performance tiles into tabular formats.
     """
 
     def __init__(
@@ -185,6 +252,16 @@ class OoklaSpeedtestReader(BaseHandlerReader):
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], **kwargs
     ) -> pd.DataFrame:
+        """
+        Load Ookla data from local Parquet files.
+
+        Args:
+            source_data_path: List of local file paths.
+            **kwargs: Loading parameters.
+
+        Returns:
+            A pandas DataFrame of speedtest results.
+        """
         result = self._load_tabular_data(file_paths=source_data_path)
         return result
 
@@ -208,10 +285,10 @@ class OoklaSpeedtestReader(BaseHandlerReader):
 
 class OoklaSpeedtestHandler(BaseHandler):
     """
-    Handler for Ookla Speedtest data.
+    Unified handler for Ookla Speedtest data.
 
-    This class orchestrates the configuration, downloading, and reading of Ookla Speedtest
-    data, allowing for filtering by geographical sources using Mercator tiles.
+    Coordinates configuration, downloading, and spatial filtering of Ookla
+    performance tiles using Mercator tile indices.
     """
 
     def __init__(
@@ -226,6 +303,20 @@ class OoklaSpeedtestHandler(BaseHandler):
         logger: Optional[logging.Logger] = None,
         **kwargs,
     ):
+        """
+        Initialize the Ookla Speedtest handler.
+
+        Args:
+            type: Network type ('fixed' or 'mobile').
+            year: Data year.
+            quarter: Data quarter (1-4).
+            config: Optional configuration override.
+            downloader: Optional downloader instance.
+            reader: Optional reader instance.
+            data_store: Storage interface for persistence.
+            logger: Component logger instance.
+            **kwargs: Additional configuration parameters.
+        """
         self._type = type
         self._year = year
         self._quarter = quarter
@@ -287,6 +378,18 @@ class OoklaSpeedtestHandler(BaseHandler):
         ensure_available: bool = True,
         **kwargs,
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
+        """
+        Acquire and filter Ookla Speedtest data.
+
+        Args:
+            source: Geographic filter (country, geometry) or direct file paths.
+            process_geospatial: If True, returns a GeoDataFrame with tile geometries.
+            ensure_available: If True, executes download if data is missing locally.
+            **kwargs: Filtering and processing parameters.
+
+        Returns:
+            Tabular or geospatial data for the requested area.
+        """
 
         if source is None or (
             isinstance(source, (str, Path))

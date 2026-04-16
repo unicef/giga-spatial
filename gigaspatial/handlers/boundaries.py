@@ -1,3 +1,11 @@
+"""
+Administrative boundary resolution and ingestion engine.
+
+Provides the `AdminBoundaries` class, a specialized entity table for handling
+spatial data from various administrative boundary providers (GADM, GeoRepo,
+Natural Earth, etc.). Supports automated resolution based on ISO codes and
+admin levels.
+"""
 from __future__ import annotations
 
 import tempfile
@@ -14,26 +22,16 @@ from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.handlers.hdx import HDXConfig
 
-from gigaspatial.core.schemas.admin_boundary import (
-    AdminBoundary,
-    AdminBoundaryTable
-)
+from gigaspatial.core.schemas.admin_boundary import AdminBoundary, AdminBoundaryTable
 
 
 class AdminBoundaries(AdminBoundaryTable):
     """
-    Handler for loading administrative boundary data from multiple external sources.
+    Handler for administrative boundary data from multiple external sources.
 
-    Extends AdminBoundaryTable with factory class-methods that resolve and ingest
+    Extends `AdminBoundaryTable` with factory methods that resolve and ingest
     boundaries from GADM, GeoRepo (UNICEF), geoBoundaries (HDX), Natural Earth,
     and internal data stores.
-
-    Data Sources:
-        - GADM 4.1 (geodata.ucdavis.edu)
-        - UNICEF GeoRepo API
-        - geoBoundaries via HDX
-        - Natural Earth (naciscdn.org)
-        - Internal DataStore (local / ADLS / Snowflake)
 
     Examples:
         >>> boundaries = AdminBoundaries.create("BRA", admin_level=1)
@@ -164,15 +162,12 @@ class AdminBoundaries(AdminBoundaryTable):
         Load boundaries from the GADM 4.1 dataset.
 
         Args:
-            country_code: ISO 3166-1 alpha-3 country code (e.g. ``"BRA"``).
-            admin_level: Administrative level (0–4).
-            **kwargs: Ignored; kept for API consistency.
+            country_code: ISO 3166-1 alpha-3 country code (e.g., "BRA").
+            admin_level: Administrative level (0-4).
+            **kwargs: Additional parameters.
 
         Returns:
-            AdminBoundaries populated from GADM GeoJSON.
-
-        Raises:
-            N/A — falls back to an empty instance on any network or parse error.
+            An AdminBoundaries instance populated from GADM.
         """
         url = (
             f"https://geodata.ucdavis.edu/gadm/gadm4.1/json/"
@@ -211,11 +206,11 @@ class AdminBoundaries(AdminBoundaryTable):
 
         Args:
             country_code: ISO 3166-1 alpha-3 country code.
-            admin_level: Administrative level (0–4).
-            **kwargs: Ignored; kept for API consistency.
+            admin_level: Administrative level (0-4).
+            **kwargs: Additional parameters.
 
         Returns:
-            AdminBoundaries populated from GeoRepo GeoJSON features.
+            An AdminBoundaries instance populated from GeoRepo.
         """
         cls.logger.info(
             f"Loading GeoRepo data for {country_code} admin_level={admin_level}"
@@ -263,10 +258,10 @@ class AdminBoundaries(AdminBoundaryTable):
 
         Args:
             country_code: ISO 3166-1 alpha-3 country code.
-            admin_level: Administrative level (0–4).
+            admin_level: Administrative level (0-4).
 
         Returns:
-            AdminBoundaries populated from the geoBoundaries GeoJSON.
+            An AdminBoundaries instance populated from geoBoundaries.
 
         Raises:
             ValueError: If no matching dataset or resource is found on HDX.
@@ -313,28 +308,28 @@ class AdminBoundaries(AdminBoundaryTable):
     @classmethod
     def from_data_store(
         cls,
-        data_store: DataStore,
         path: Union[str, Path],
+        data_store: DataStore = None,
         admin_level: int = 0,
         **kwargs,
     ) -> "AdminBoundaries":
         """
-        Load boundaries from an internal DataStore (local / ADLS / Snowflake).
+        Load boundaries from an internal data store.
 
         Args:
-            data_store: DataStore instance providing file access.
             path: Path to the dataset file within the store.
-            admin_level: Administrative level (0–4).
-            **kwargs: Additional arguments forwarded to ``read_dataset``.
+            data_store: DataStore instance providing file access.
+            admin_level: Administrative level (0-4).
+            **kwargs: Additional arguments for `read_dataset`.
 
         Returns:
-            AdminBoundaries instance, or empty if no data is found.
+            An AdminBoundaries instance.
         """
         from gigaspatial.core.io.readers import read_dataset
 
         cls.logger.info(f"Loading from data store at {path}, level={admin_level}")
         try:
-            gdf = read_dataset(data_store, str(path), **kwargs)
+            gdf = read_dataset(str(path), data_store=data_store, **kwargs)
             if gdf.empty:
                 cls.logger.warning(f"Empty dataset at {path}.")
                 return cls._create_empty()
@@ -359,14 +354,13 @@ class AdminBoundaries(AdminBoundaryTable):
         Load global country boundaries (admin level 0) from Natural Earth.
 
         Args:
-            scale: Resolution — ``"large"`` (10m), ``"medium"`` (50m), ``"small"`` (110m).
+            scale: Resolution ('large' -> 10m, 'medium' -> 50m, 'small' -> 110m).
 
         Returns:
-            AdminBoundaries with all Natural Earth country polygons at admin_level=0.
+            An AdminBoundaries instance with global country polygons.
 
         Raises:
             ValueError: If an invalid scale is provided.
-            Exception: Re-raised if the Natural Earth download fails.
         """
         scale_map = {"large": "10m", "medium": "50m", "small": "110m"}
         if scale not in scale_map:
@@ -424,28 +418,27 @@ class AdminBoundaries(AdminBoundaryTable):
         **kwargs,
     ) -> "AdminBoundaries":
         """
-        Unified factory method — resolves the best available data source automatically.
+        Unified factory method to resolve administrative boundaries.
 
-        Resolution order:
-            1. **DataStore** — if ``data_store`` is provided and either ``path``
-               or ``global_config.ADMIN_BOUNDARIES_DATA_DIR`` is set.
-            2. **GeoRepo** — tested first for country-code based lookups.
-            3. **GADM** — fallback if GeoRepo is unavailable or fails.
-            4. **geoBoundaries** — final fallback.
+        Automatically selects the best available source in the following order:
+        1. Internal DataStore (if provided).
+        2. UNICEF GeoRepo API.
+        3. GADM 4.1.
+        4. geoBoundaries (HDX).
 
         Args:
-            country_code: ISO country code (2-letter, 3-letter, or full name).
-            admin_level: Administrative level (0=country, 1=state, …).
-            data_store: Optional DataStore for loading from internal storage.
-            path: Optional file path within the DataStore.
-            **kwargs: Forwarded to the underlying source method.
+            country_code: ISO country code or name.
+            admin_level: Administrative level (0=country, 1=state, etc.).
+            data_store: Optional DataStore for internal lookups.
+            path: Optional specific file path in the DataStore.
+            **kwargs: Forwarded to specific source loaders.
 
         Returns:
-            AdminBoundaries instance.
+            An AdminBoundaries instance.
 
         Raises:
-            ValueError: If input parameters are invalid or country lookup fails.
-            RuntimeError: If all external sources fail.
+            ValueError: If essential parameters are missing or invalid.
+            RuntimeError: If all data sources fail to resolve.
         """
         cls.logger.info(
             f"AdminBoundaries.create country={country_code} level={admin_level} "
@@ -471,7 +464,9 @@ class AdminBoundaries(AdminBoundaryTable):
                 path = global_config.get_admin_path(
                     country_code=iso3, admin_level=admin_level
                 )
-            return cls.from_data_store(data_store, path, admin_level, **kwargs)
+            return cls.from_data_store(
+                path, data_store=data_store, admin_level=admin_level, **kwargs
+            )
 
         # ── 2-4. Remote sources ────────────────────────────────────────
         iso3 = cls._resolve_iso3(country_code)  # raises ValueError on bad code

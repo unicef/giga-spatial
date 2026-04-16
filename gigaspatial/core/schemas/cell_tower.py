@@ -1,3 +1,7 @@
+"""
+Module for cell tower schema and processing.
+Defines the CellTower entity, representing physical cellular tower infrastructure.
+"""
 import pandas as pd
 from pydantic import Field
 from typing import Optional, List, Union, Dict, Set, ClassVar
@@ -150,13 +154,31 @@ class CellTowerProcessor(EntityProcessor):
     BACKHAUL_ALIAS_MAP: ClassVar[Dict[str, str]] = BACKHAUL_ALIAS_MAP
 
     def process(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        """
+        Execute the full processing pipeline for cell towers.
+
+        Args:
+            df: Raw cell tower DataFrame.
+            **kwargs: Additional processing arguments.
+
+        Returns:
+            Processed and normalized DataFrame.
+        """
         df = super().process(df, **kwargs)
         df = self._normalize_backhaul(df)
         df = self._normalize_tower_height(df)
         return df
 
     def _normalize_backhaul(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize backhaul_type values to canonical BackhaulType enum values."""
+        """
+        Normalize backhaul_type values to canonical BackhaulType enums.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized backhaul_type column.
+        """
         return self._normalize_enum_column(
             df,
             column="backhaul_type",
@@ -220,6 +242,16 @@ class CellTowerTable(EntityTable[CellTower]):
     def from_dataframe(
         cls, df: pd.DataFrame, entity_class=CellTower
     ) -> "CellTowerTable":
+        """
+        Create a CellTowerTable from an existing DataFrame.
+
+        Args:
+            df: DataFrame containing cell tower data.
+            entity_class: Entity class to validate against. Defaults to CellTower.
+
+        Returns:
+            CellTowerTable instance with validated CellTower entities.
+        """
         return super().from_dataframe(df=df, entity_class=entity_class)
 
     @classmethod
@@ -262,8 +294,13 @@ class CellTowerTable(EntityTable[CellTower]):
 
     def enrich_from_cells(self, cell_table: "CellTable") -> "CellTowerTable":
         """
-        Populate denormalized cell summary fields on each tower
-        using available cell-level data.
+        Populate denormalized cell summary fields on each tower.
+
+        Args:
+            cell_table: Table containing cell-level data to aggregate.
+
+        Returns:
+            New CellTowerTable with enriched towers.
         """
 
         cell_by_tower = {}

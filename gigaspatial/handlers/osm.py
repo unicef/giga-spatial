@@ -1,3 +1,13 @@
+"""
+OpenStreetMap (OSM) data fetcher via Overpass API.
+
+This module provides the `OSMLocationFetcher` class for retrieving points of interest
+(POIs) and administrative boundaries from OSM. It supports:
+- Keyword-based POI search (amenities, shops, etc.)
+- ISO country or admin level area selection
+- Historical change tracking (newer/changed filters)
+- Metadata extraction (timestamp, version, user)
+"""
 import requests
 import pandas as pd
 from typing import List, Dict, Union, Optional, Literal
@@ -16,10 +26,20 @@ from gigaspatial.config import config
 @dataclass
 class OSMLocationFetcher:
     """
-    A class to fetch and process location data from OpenStreetMap using the Overpass API.
+    Fetcher for OpenStreetMap POIs and boundaries using the Overpass API.
 
-    This class supports fetching various OSM location types including amenities, buildings,
-    shops, and other POI categories.
+    Handles high-level queries for diverse OSM categories (amenities, buildings,
+    shops, etc.) within specific administrative regions or countries.
+
+    Attributes:
+        country: ISO country code or name.
+        admin_level: OSM administrative level for the search area.
+        admin_value: Name of the administrative area.
+        location_types: Mapping of category keys (e.g., 'amenity') to values.
+        base_url: Overpass API endpoint URL.
+        timeout: API request timeout in seconds.
+        max_retries: Number of retry attempts for failed requests.
+        retry_delay: Delay between retries in seconds.
     """
 
     country: Optional[str] = None
@@ -32,7 +52,13 @@ class OSMLocationFetcher:
     retry_delay: int = 5
 
     def __post_init__(self):
-        """Validate inputs, normalize location_types, and set up logging."""
+        """Validates inputs, normalizes location_types, and initializes the logger.
+
+        Raises:
+            TypeError: If `location_types` is not a list or dictionary.
+            ValueError: If neither `country` nor `admin_level/admin_value` are provided,
+                or if the country code is invalid.
+        """
 
         # Normalize location_types to always be a dictionary
         if isinstance(self.location_types, list):
@@ -67,15 +93,15 @@ class OSMLocationFetcher:
         admin_level: int, country: Optional[str] = None, timeout: int = 120
     ) -> List[str]:
         """
-        Fetch all admin area names for a given admin_level (optionally within a country).
+        Fetch administrative area names for a specific OSM level.
 
         Args:
-            admin_level (int): The OSM admin_level to search for (e.g., 4 for states, 6 for counties).
-            country (str, optional): Country name or ISO code to filter within.
-            timeout (int): Timeout for the Overpass API request.
+            admin_level: The OSM level to search (e.g., 2 for country, 4 for state).
+            country: Optional country name/code to limit the search.
+            timeout: API request timeout in seconds.
 
         Returns:
-            List[str]: List of admin area names.
+            Sorted list of unique administrative area names.
         """
 
         # Build area filter for country if provided
@@ -118,30 +144,15 @@ class OSMLocationFetcher:
         iso3_code: Optional[str] = None, include_names: bool = True, timeout: int = 2000
     ) -> Union[str, Dict[str, str], List[str], List[Dict[str, str]]]:
         """
-        Fetch countries from OpenStreetMap database.
-
-        This queries the actual OSM database for country boundaries and returns
-        country names as they appear in OSM, including various name translations.
+        Fetch country definitions and name variants directly from OSM.
 
         Args:
-            iso3_code (str, optional): ISO 3166-1 alpha-3 code to fetch a specific country.
-                                      If provided, returns single country data.
-                                      If None, returns all countries.
-            include_names (bool): If True, return dict with multiple name variants.
-                                 If False, return only the primary name.
-            timeout (int): Timeout for the Overpass API request (default: 1000).
+            iso3_code: Optional ISO 3166-1 alpha-3 code to fetch a specific country.
+            include_names: If True, returns full name dictionaries with translations.
+            timeout: API request timeout in seconds.
 
         Returns:
-            When iso3_code is provided:
-                - If include_names=False: Single country name (str)
-                - If include_names=True: Dict with name variants
-            When iso3_code is None:
-                - If include_names=False: List of country names
-                - If include_names=True: List of dicts with name variants including:
-                  name, name:en, ISO3166-1 codes, and other name translations
-
-        Raises:
-            ValueError: If iso3_code is provided but country not found in OSM.
+            A single name/dict if `iso3_code` is provided, otherwise a sorted list.
         """
         if iso3_code:
             # Filter for the specific ISO3 code provided
@@ -209,7 +220,18 @@ class OSMLocationFetcher:
         )
 
     def _make_request(self, query: str) -> Dict:
-        """Make HTTP request to Overpass API with retry mechanism."""
+        """
+        Execute an Overpass API request with a retry mechanism.
+
+        Args:
+            query: The Overpass QL query string.
+
+        Returns:
+            The JSON response from the API.
+
+        Raises:
+            RuntimeError: If all retry attempts fail.
+        """
         for attempt in range(self.max_retries):
             try:
                 self.logger.debug(f"Executing query:\n{query}")
@@ -229,9 +251,13 @@ class OSMLocationFetcher:
 
     def _extract_matching_categories(self, tags: Dict[str, str]) -> Dict[str, str]:
         """
-        Extract all matching categories and their values from the tags.
+        Identify OSM tags that match the requested location types.
+
+        Args:
+            tags: Raw tags from an OSM element.
+
         Returns:
-            Dict mapping each matching category to its value
+            A dictionary of matching category keys and values.
         """
         matches = {}
         for category, types in self.location_types.items():
@@ -241,8 +267,13 @@ class OSMLocationFetcher:
 
     def _process_node_relation(self, element: Dict) -> List[Dict[str, any]]:
         """
-        Process a node or relation element.
-        May return multiple processed elements if the element matches multiple categories.
+        Convert an OSM node or relation element into a standardized POI record.
+
+        Args:
+            element: Raw JSON element from Overpass.
+
+        Returns:
+            A list of processed POI dictionaries.
         """
         try:
             tags = element.get("tags", {})
@@ -294,8 +325,13 @@ class OSMLocationFetcher:
 
     def _process_way(self, element: Dict) -> List[Dict[str, any]]:
         """
-        Process a way element with geometry.
-        May return multiple processed elements if the element matches multiple categories.
+        Convert an OSM way element into a standardized POI record with geometry.
+
+        Args:
+            element: Raw JSON element from Overpass.
+
+        Returns:
+            A list of processed POI dictionaries.
         """
         try:
             tags = element.get("tags", {})
@@ -422,22 +458,22 @@ class OSMLocationFetcher:
         handle_duplicates: Literal["separate", "combine", "primary"] = "separate",
         include_metadata: bool = False,
     ) -> pd.DataFrame:
-        """
-        Fetch OSM locations, optionally filtered by 'since' date.
-
-        Use this for incremental updates or getting all current locations.
+        """Fetches OSM locations matching the configured categories.
 
         Args:
-            since_year (int, optional): Filter for locations added/modified since this year.
-            handle_duplicates (str): How to handle objects matching multiple categories:
-                - 'separate': Create separate entries for each category (default)
-                - 'combine': Use a single entry with a list of matching categories
-                - 'primary': Keep only the first matching category
-            include_metadata: If True, include change tracking metadata
-                (timestamp, version, changeset, user, uid)
+            since_date: Optional date filter (addition or modification date).
+                Supports ISO 8601 strings or datetime objects.
+            handle_duplicates: Strategy for elements matching multiple types.
+                - 'separate': Duplicate records (default).
+                - 'combine': Single record with list of categories.
+                - 'primary': Keep only the first matching category.
+            include_metadata: If True, includes timestamp and user metadata.
 
         Returns:
-            pd.DataFrame: Processed OSM locations
+            A pandas DataFrame containing processed OSM locations.
+
+        Raises:
+            ValueError: If an invalid duplicate handling strategy is provided.
         """
         if handle_duplicates not in ("separate", "combine", "primary"):
             raise ValueError(
@@ -489,10 +525,7 @@ class OSMLocationFetcher:
                 Defaults to True since change tracking is the main use case.
 
         Returns:
-            pd.DataFrame: Processed OSM locations that changed within the date range
-
-        Raises:
-            ValueError: If dates are invalid or start_date is after end_date
+            A pandas DataFrame of historical changes.
         """
         start_str = self._normalize_date(start_date)
         end_str = self._normalize_date(end_date)
@@ -518,38 +551,15 @@ class OSMLocationFetcher:
         include_metadata: bool = False,
     ) -> Optional[Dict]:
         """
-        Fetch a single OSM element by its OSM ID and element type.
-
-        Uses the Overpass API `<type>(id:<osmid>)` filter to retrieve
-        the element and returns it as a processed dictionary matching
-        the structure produced by ``fetch_locations``.
+        Retrieve and process a single OSM element by its unique identifier.
 
         Args:
-            osmid (int): The OSM element ID to fetch (e.g., 123456789).
-            element_type (str): The OSM element type — one of ``"node"``,
-                ``"way"``, or ``"relation"``. Defaults to ``"node"``.
-            include_metadata (bool): If ``True``, include change-tracking
-                metadata (timestamp, version, changeset, user, uid) in the
-                result. Defaults to ``False``.
+            osmid: The OpenStreetMap ID.
+            element_type: The type of element ('node', 'way', or 'relation').
+            include_metadata: If True, includes object-level metadata.
 
         Returns:
-            Optional[Dict]: A dictionary with the processed element fields
-            (``source_id``, ``name``, ``type``, ``geometry``, ``latitude``,
-            ``longitude``, and all matching OSM tag fields), or ``None`` if
-            the element was not found or could not be processed.
-
-        Raises:
-            ValueError: If ``element_type`` is not one of the accepted values.
-            RuntimeError: If the Overpass API request fails after all retries.
-
-        Example:
-            >>> fetcher = OSMLocationFetcher(
-            ...     country="TR",
-            ...     location_types={"amenity": ["school"]},
-            ... )
-            >>> element = fetcher.fetch_by_osmid(123456789, element_type="way")
-            >>> if element:
-            ...     print(element["name"], element["latitude"], element["longitude"])
+            A processed dictionary of the element, or None if not found.
         """
         valid_types = ("node", "way", "relation")
         if element_type not in valid_types:
@@ -628,16 +638,17 @@ class OSMLocationFetcher:
 
     def _normalize_date(self, date_input: Union[str, datetime]) -> str:
         """
-        Convert date input to ISO 8601 format string.
+        Standardize date input into an ISO 8601 string for Overpass.
 
         Args:
-            date_input: Either a string in ISO 8601 format or a datetime object
+            date_input: String in ISO format or datetime object.
 
         Returns:
-            str: Date in format "YYYY-MM-DDThh:mm:ssZ"
+            An ISO 8601 formatted string.
 
         Raises:
-            ValueError: If string format is invalid
+            ValueError: If the string format is unrecognized.
+            TypeError: If the input type is unsupported.
         """
         from datetime import datetime
 
@@ -665,14 +676,14 @@ class OSMLocationFetcher:
         self, queries: List[str], handle_duplicates: str
     ) -> pd.DataFrame:
         """
-        Execute queries and process results (extracted from fetch_locations).
+        Execute API queries and aggregate results into a DataFrame.
 
         Args:
-            queries: List of [nodes_relations_query, ways_query]
-            handle_duplicates: Strategy for handling duplicate categories
+            queries: List of [nodes/relations query, ways query].
+            handle_duplicates: Duplicate handling strategy ('separate', 'combine', 'primary').
 
         Returns:
-            pd.DataFrame: Processed locations
+            A pandas DataFrame of processed locations.
         """
         nodes_relations_query, ways_query = queries
 

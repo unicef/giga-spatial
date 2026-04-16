@@ -1,9 +1,14 @@
+"""
+Spatial algorithms and graph-based matching.
+Provides optimized tools for distance-based graph construction using KD-Trees,
+useful for entity resolution and network analysis.
+"""
 import sys, os
 
 import numpy as np
-from typing import Literal, List, Tuple, Union, Optional
-import geopandas as gpd
 import pandas as pd
+import geopandas as gpd
+from typing import Literal, List, Tuple, Union, Optional
 from scipy.spatial import cKDTree
 import networkx as nx
 
@@ -58,7 +63,15 @@ def build_distance_graph(
         return (G, pd.DataFrame()) if return_dataframe else G
 
     def get_utm_coordinates(df: Union[pd.DataFrame, gpd.GeoDataFrame]) -> np.ndarray:
-        """Extract coordinates as numpy array in UTM projection."""
+        """
+        Extract coordinates as numpy array in UTM projection.
+
+        Args:
+            df: Input DataFrame with spatial data.
+
+        Returns:
+            Numpy array of (x, y) coordinates in UTM.
+        """
         if isinstance(df, pd.DataFrame) and not isinstance(df, gpd.GeoDataFrame):
             gdf = convert_to_geodataframe(df)
         else:

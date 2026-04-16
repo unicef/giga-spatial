@@ -1,3 +1,8 @@
+"""
+Module for reading geospatial and tabular datasets from a DataStore.
+Supports various formats including CSV, Excel, KML, KMZ, GeoJSON, Parquet, and Shapefiles,
+with automatic compression detection (gzip, bz2, xz).
+"""
 import gzip
 import io
 import json
@@ -12,6 +17,7 @@ import geopandas as gpd
 import pandas as pd
 
 from .data_store import DataStore
+from .local_data_store import LocalDataStore
 from gigaspatial.config import config
 
 logger = config.get_logger(__name__)
@@ -22,24 +28,19 @@ logger = config.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def read_json(data_store: DataStore, path: str) -> dict:
+def read_json(path: str, data_store: DataStore = None) -> dict:
     """
     Read a JSON file from a DataStore.
 
-    Parameters
-    ----------
-    data_store : DataStore
-        Instance of DataStore for accessing data storage.
-    path : str
-        Path to the JSON file.
+    Args:
+        path: Path to the JSON file.
+        data_store: DataStore instance for accessing storage. If None, local storage is used.
 
-    Returns
-    -------
-    dict
-        Parsed JSON content.
+    Returns:
+        Parsed JSON content as a dictionary.
     """
-    # FIX: removed **kwargs forwarding - json.load only accepts cls/object_hook,
-    # passing arbitrary kwargs (e.g. compression=...) raises TypeError.
+    data_store = data_store or LocalDataStore()
+
     with data_store.open(path, "r") as f:
         return json.load(f)
 
@@ -48,23 +49,16 @@ def read_kmz(file_obj, **kwargs) -> gpd.GeoDataFrame:
     """
     Read a KMZ file and return a GeoDataFrame.
 
-    Parameters
-    ----------
-    file_obj : file-like object
-        A file-like object pointing to a KMZ archive.
-    **kwargs
-        Additional keyword arguments passed to ``geopandas.read_file``.
+    Args:
+        file_obj: A file-like object pointing to a KMZ archive.
+        **kwargs: Additional keyword arguments passed to `geopandas.read_file`.
 
-    Returns
-    -------
-    geopandas.GeoDataFrame
+    Returns:
+        The geospatial data extracted from the KMZ.
 
-    Raises
-    ------
-    ValueError
-        If the file is not a valid KMZ or contains no KML data.
-    RuntimeError
-        For unexpected errors during reading.
+    Raises:
+        ValueError: If no KML file is found in the archive or if content is empty.
+        RuntimeError: For unexpected errors during KMZ processing.
     """
     try:
         with zipfile.ZipFile(file_obj) as kmz:
@@ -92,23 +86,20 @@ def read_kmz(file_obj, **kwargs) -> gpd.GeoDataFrame:
 
 
 def read_gzipped_json_or_csv(
-    file_path: str, data_store: DataStore
+    file_path: str, data_store: DataStore = None
 ) -> Union[pd.DataFrame, None]:
     """
     Read a gzipped file, attempting JSON (lines=True) first, then CSV.
 
-    Parameters
-    ----------
-    file_path : str
-        Path to the .gz file in the DataStore.
-    data_store : DataStore
-        Instance of DataStore for accessing data storage.
+    Args:
+        file_path: Path to the .gz file in the DataStore.
+        data_store: DataStore instance. If None, local storage is used.
 
-    Returns
-    -------
-    pandas.DataFrame or None
-        Parsed DataFrame, or None if parsing fails.
+    Returns:
+        Parsed DataFrame, or None if parsing fails for both formats.
     """
+    data_store = data_store or LocalDataStore()
+
     with data_store.open(file_path, "rb") as f:
         text = gzip.GzipFile(fileobj=f).read().decode("utf-8")
 
@@ -190,7 +181,15 @@ SHAPEFILE_SIDECAR_EXTENSIONS = [
 
 
 def _storage_display_name(data_store: DataStore) -> str:
-    """Return a human-readable storage backend name for error messages."""
+    """
+    Return a human-readable storage backend name for error messages.
+
+    Args:
+        data_store: The DataStore instance to inspect.
+
+    Returns:
+        A friendly name for the storage backend (e.g., 'Azure Blob Storage').
+    """
     class_name = data_store.__class__.__name__.lower()
     if "adls" in class_name:
         return "Azure Blob Storage"
@@ -207,8 +206,8 @@ def _storage_display_name(data_store: DataStore) -> str:
 
 
 def read_dataset(
-    data_store: DataStore,
     path: str,
+    data_store: DataStore = None,
     compression: str = None,
     validate_crs: bool = True,
     **kwargs,
@@ -218,40 +217,32 @@ def read_dataset(
 
     Supports plain and compressed formats. For compound extensions such as
     ``.csv.gz`` or ``.geojson.gz``, the inner format is detected automatically.
-    Compression can also be specified explicitly via the ``compression``
-    parameter.
 
-    Parameters
-    ----------
-    data_store : DataStore
-        Instance of DataStore for accessing data storage.
-    path : str
-        Path to the file in data storage.
-    compression : str, optional
-        Explicit compression type (``"gzip"``, ``"bz2"``, ``"xz"``).
-        When ``None``, compression is inferred from the file extension.
-    validate_crs : bool, default True
-        If ``True``, emit a ``UserWarning`` when a GeoDataFrame has no CRS.
-    **kwargs
-        Additional arguments forwarded to the underlying reader function.
+    Args:
+        path: Path to the file in data storage.
+        data_store: DataStore instance for accessing storage. If None, local storage is used.
+        compression: Explicit compression type ("gzip", "bz2", "xz").
+            If None, inferred from the file extension.
+        validate_crs: If True, emit a UserWarning when a GeoDataFrame has no CRS.
+        **kwargs: Additional arguments forwarded to the underlying reader function
+            (e.g., `sep`, `encoding`, `driver`).
 
-    Returns
-    -------
-    pandas.DataFrame or geopandas.GeoDataFrame
-        The data read from the file.
+    Returns:
+        The data read from the file as a DataFrame or GeoDataFrame.
 
-    Raises
-    ------
-    FileNotFoundError
-        If the file does not exist in the storage backend.
-    ValueError
-        If the file type is unsupported or the file cannot be parsed.
-    RuntimeError
-        For unexpected errors not covered by the above.
+    Raises:
+        FileNotFoundError: If the file does not exist in the storage backend.
+        ValueError: If the file type is unsupported or the file cannot be parsed.
+        RuntimeError: For unexpected errors during the read process.
     """
     try:
         # ------------------------------------------------------------------ #
-        # 1. Existence check
+        # 1. Store check
+        # ------------------------------------------------------------------ #
+        data_store = data_store or LocalDataStore()
+
+        # ------------------------------------------------------------------ #
+        # 2. Existence check
         # ------------------------------------------------------------------ #
         if not data_store.file_exists(path):
             storage_name = _storage_display_name(data_store)
@@ -426,7 +417,17 @@ def _maybe_warn_crs(
     path: str,
     validate_crs: bool,
 ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-    """Emit a warning if a GeoDataFrame has no CRS defined."""
+    """
+    Emit a warning if a GeoDataFrame has no CRS defined.
+
+    Args:
+        result: The dataset that was read.
+        path: Original path of the file.
+        validate_crs: Whether to perform the CRS check and warning.
+
+    Returns:
+        The original dataset.
+    """
     if validate_crs and isinstance(result, gpd.GeoDataFrame) and result.crs is None:
         warnings.warn(
             f"File '{path}' was read as a GeoDataFrame but has no CRS defined. "
@@ -437,30 +438,29 @@ def _maybe_warn_crs(
     return result
 
 
-def read_datasets(data_store: DataStore, paths, **kwargs):
+def read_datasets(paths, data_store: DataStore = None, **kwargs):
     """
     Read multiple datasets from data storage at once.
 
-    Parameters:
-    ----------
-    data_store : DataStore
-        Instance of DataStore for accessing data storage.
-    paths : list of str
-        Paths to files in data storage.
-    **kwargs : dict
-        Additional arguments passed to read_dataset.
+    Args:
+        paths: List of file paths to read.
+        data_store: DataStore instance. If None, local storage is used.
+        **kwargs: Additional arguments passed to `read_dataset` for each file.
 
     Returns:
-    -------
-    dict
         Dictionary mapping paths to their corresponding DataFrames/GeoDataFrames.
     """
     results = {}
     errors = {}
 
+    data_store = data_store or LocalDataStore()
+
+    if data_store is None:
+        data_store = LocalDataStore()
+
     for path in paths:
         try:
-            results[path] = read_dataset(data_store, path, **kwargs)
+            results[path] = read_dataset(path, data_store, **kwargs)
         except Exception as e:
             errors[path] = str(e)
 

@@ -65,9 +65,12 @@ class GHSLDataConfig(BaseHandlerConfig):
         "GHS_BUILT_V",
         "GHS_POP",
         "GHS_SMOD",
-    ] = Field(...)
-    year: int = 2020
-    resolution: int = 100
+    ] = Field(..., description="GHSL product identifier")
+    year: int = Field(default=2020, description="Year of the data")
+    resolution: int = Field(
+        default=100, description="Resolution in meters (10, 100, or 1000)"
+    )
+    tiles_gdf: Optional[gpd.GeoDataFrame] = Field(default=None, init=False)
 
     def __post_init__(self):
         super().__post_init__()
@@ -226,6 +229,11 @@ class GHSLDataConfig(BaseHandlerConfig):
 
     @property
     def crs(self) -> str:
+        """Return the coordinate reference system for this configuration.
+
+        Returns:
+            The EPSG or ESRI string for the target CRS.
+        """
         return "EPSG:4326" if self.coord_system == CoordSystem.WGS84 else "ESRI:54009"
 
     def get_relevant_data_units_by_geometry(
@@ -491,7 +499,6 @@ class GHSLDataDownloader(BaseHandlerDownloader):
                         f"Could not delete temporary file {temp_downloaded_path}: {e}"
                     )
 
-
     def download(
         self,
         source: Union[
@@ -682,6 +689,9 @@ class GHSLDataHandler(BaseHandler):
     It manages the lifecycle of configuration, downloading, and reading components.
     """
 
+    AVAILABLE_YEARS = GHSLDataConfig.AVAILABLE_YEARS
+    AVAILABLE_RESOLUTIONS = GHSLDataConfig.AVAILABLE_RESOLUTIONS
+
     def __init__(
         self,
         product: Literal[
@@ -731,6 +741,41 @@ class GHSLDataHandler(BaseHandler):
             data_store=data_store,
             logger=logger,
         )
+
+    @property
+    def product(self) -> str:
+        """Return the GHSL product identifier."""
+        return self._product
+
+    @property
+    def year(self) -> int:
+        """Return the year of the data."""
+        return self._year
+
+    @property
+    def resolution(self) -> int:
+        """Return the resolution in meters."""
+        return self._resolution
+
+    @property
+    def GHSL_DB_BASE_URL(self) -> str:
+        """Return the base URL for GHSL data."""
+        return self.config.GHSL_DB_BASE_URL
+
+    @property
+    def TILES_URL(self) -> str:
+        """Return the URL for GHSL tile shapefiles."""
+        return self.config.TILES_URL
+
+    @property
+    def release(self) -> str:
+        """Return the GHSL release version."""
+        return self.config.release
+
+    @property
+    def coord_system(self) -> "CoordSystem":
+        """Return the coordinate system."""
+        return self.config.coord_system
 
     def create_config(
         self, data_store: DataStore, logger: logging.Logger, **kwargs

@@ -1,3 +1,7 @@
+"""
+Module for Snowflake internal stage DataStore implementation.
+Provides access to files stored in Snowflake stages using the DataStore interface.
+"""
 try:
     import snowflake.connector
     from snowflake.connector import DictCursor
@@ -39,28 +43,31 @@ class SnowflakeDataStore(DataStore):
         schema: str = config.SNOWFLAKE_SCHEMA,
         stage_name: str = config.SNOWFLAKE_STAGE_NAME,
     ):
+        """
+        Initialize the Snowflake data store.
+
+        Args:
+            account: Snowflake account identifier.
+            user: Snowflake username.
+            password: Snowflake password.
+            warehouse: Snowflake warehouse name.
+            database: Snowflake database name.
+            schema: Snowflake schema name.
+            stage_name: Name of the Snowflake stage to use for storage.
+
+        Note:
+            Connection is created lazily to support multiprocessing. This allows
+            the DataStore to be pickled and sent to worker processes.
+
+        Raises:
+            ImportError: If 'snowflake-connector-python' is not installed.
+            ValueError: If connection parameters are missing.
+        """
         if not _HAS_SNOWFLAKE:
             raise ImportError(
                 "SnowflakeDataStore requires 'snowflake-connector-python'. "
                 "Install it with: pip install 'giga-spatial[snowflake]'"
             )
-
-        """
-        Create a new instance of SnowflakeDataStore.
-
-        :param account: Snowflake account identifier
-        :param user: Snowflake username
-        :param password: Snowflake password
-        :param warehouse: Snowflake warehouse name
-        :param database: Snowflake database name
-        :param schema: Snowflake schema name
-        :param stage_name: Name of the Snowflake stage to use for file storage
-
-        Note: Connection is created lazily to support multiprocessing. The connection
-        parameters are stored (all picklable), and the actual connection is created
-        on first use. This allows the DataStore to be pickled and sent to worker
-        processes, where each process creates its own connection.
-        """
         # Check if running in SPCS mode (user/password not required)
         import os
 
@@ -233,11 +240,18 @@ class SnowflakeDataStore(DataStore):
 
     def read_file(self, path: str, encoding: Optional[str] = None) -> Union[str, bytes]:
         """
-        Read file from Snowflake stage.
+        Read file contents from Snowflake stage.
 
-        :param path: Path to the file in the stage
-        :param encoding: File encoding (optional)
-        :return: File contents as string or bytes
+        Args:
+            path: Path to the file in the stage.
+            encoding: Optional string encoding. If None, returns bytes.
+
+        Returns:
+            File contents as a string if encoding is provided, otherwise bytes.
+
+        Raises:
+            FileNotFoundError: If file is not found in the stage.
+            IOError: If there's an error during download or read.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor(DictCursor)
@@ -301,10 +315,15 @@ class SnowflakeDataStore(DataStore):
 
     def write_file(self, path: str, data: Union[bytes, str]) -> None:
         """
-        Write file to Snowflake stage.
+        Write data (string or bytes) to a Snowflake stage.
 
-        :param path: Destination path in the stage
-        :param data: File contents
+        Args:
+            path: Destination path in the stage.
+            data: Data to write (str or bytes).
+
+        Raises:
+            ValueError: If data type is unsupported.
+            IOError: If there's an error during the upload process.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor()
@@ -367,8 +386,12 @@ class SnowflakeDataStore(DataStore):
         """
         Uploads a single file from local filesystem to Snowflake stage.
 
-        :param file_path: Local file path
-        :param stage_path: Destination path in the stage
+        Args:
+            file_path: Local file path.
+            stage_path: Destination path in the stage.
+
+        Raises:
+            FileNotFoundError: If local file is missing.
         """
         try:
             if not os.path.exists(file_path):
@@ -389,8 +412,12 @@ class SnowflakeDataStore(DataStore):
         """
         Uploads all files from a local directory to Snowflake stage.
 
-        :param dir_path: Local directory path
-        :param stage_dir_path: Destination directory path in the stage
+        Args:
+            dir_path: Local directory path.
+            stage_dir_path: Destination directory path in the stage.
+
+        Raises:
+            NotADirectoryError: If dir_path is not a directory.
         """
         if not os.path.isdir(dir_path):
             raise NotADirectoryError(f"Local directory not found: {dir_path}")
@@ -410,8 +437,9 @@ class SnowflakeDataStore(DataStore):
         """
         Downloads all files from a Snowflake stage directory to a local directory.
 
-        :param stage_dir_path: Source directory path in the stage
-        :param local_dir_path: Destination local directory path
+        Args:
+            stage_dir_path: Source directory path in the stage.
+            local_dir_path: Destination local directory path.
         """
         try:
             # Ensure the local directory exists
@@ -453,10 +481,11 @@ class SnowflakeDataStore(DataStore):
 
     def copy_directory(self, source_dir: str, destination_dir: str):
         """
-        Copies all files from a source directory to a destination directory within the stage.
+        Copies all files from source to destination directory within the stage.
 
-        :param source_dir: Source directory path in the stage
-        :param destination_dir: Destination directory path in the stage
+        Args:
+            source_dir: Source directory path in the stage.
+            destination_dir: Destination directory path in the stage.
         """
         try:
             # Normalize directory paths
@@ -498,9 +527,14 @@ class SnowflakeDataStore(DataStore):
         """
         Copies a single file within the Snowflake stage.
 
-        :param source_path: Source file path in the stage
-        :param destination_path: Destination file path in the stage
-        :param overwrite: If True, overwrite the destination file if it already exists
+        Args:
+            source_path: Source file path in the stage.
+            destination_path: Destination file path in the stage.
+            overwrite: If True, overwrite the destination file if it already exists.
+
+        Raises:
+            FileNotFoundError: If source file is missing.
+            FileExistsError: If destination exists and overwrite=False.
         """
         try:
             if not self.file_exists(source_path):
@@ -528,8 +562,11 @@ class SnowflakeDataStore(DataStore):
         """
         Check if a file exists in the Snowflake stage.
 
-        :param path: Path to check
-        :return: True if file exists, False otherwise
+        Args:
+            path: Path to check in the stage.
+
+        Returns:
+            True if file exists, False otherwise.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor(DictCursor)
@@ -563,8 +600,14 @@ class SnowflakeDataStore(DataStore):
         """
         Get the size of a file in kilobytes.
 
-        :param path: File path in the stage
-        :return: File size in kilobytes
+        Args:
+            path: File path in the stage.
+
+        Returns:
+            File size in kilobytes.
+
+        Raises:
+            FileNotFoundError: If file is not found.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor(DictCursor)
@@ -600,8 +643,11 @@ class SnowflakeDataStore(DataStore):
         """
         List all files in a directory within the Snowflake stage.
 
-        :param path: Directory path to list
-        :return: List of file paths
+        Args:
+            path: Directory path to list.
+
+        Returns:
+            List of relative file paths from the stage root.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor(DictCursor)
@@ -659,10 +705,13 @@ class SnowflakeDataStore(DataStore):
 
     def walk(self, top: str) -> Generator[Tuple[str, List[str], List[str]], None, None]:
         """
-        Walk through directory tree in Snowflake stage, similar to os.walk().
+        Walk through directory tree in Snowflake stage.
 
-        :param top: Starting directory for the walk
-        :return: Generator yielding tuples of (dirpath, dirnames, filenames)
+        Args:
+            top: Starting directory for the walk.
+
+        Yields:
+            Tuples of (dirpath, dirnames, filenames).
         """
         try:
             normalized_top = self._normalize_path(top)
@@ -714,10 +763,13 @@ class SnowflakeDataStore(DataStore):
 
     def list_directories(self, path: str) -> List[str]:
         """
-        List only directory names (not files) from a given path in the stage.
+        List immediate directory names from a given path in the stage.
 
-        :param path: Directory path to list
-        :return: List of directory names
+        Args:
+            path: Directory path to list.
+
+        Returns:
+            List of subdirectory names.
         """
         normalized_path = self._normalize_path(path)
         files = self.list_files(normalized_path)
@@ -749,10 +801,17 @@ class SnowflakeDataStore(DataStore):
     @contextlib.contextmanager
     def open(self, path: str, mode: str = "r"):
         """
-        Context manager for file operations.
+        Context manager for opening files in Snowflake stage.
 
-        :param path: File path in Snowflake stage
-        :param mode: File open mode (r, rb, w, wb)
+        Args:
+            path: File path in stage.
+            mode: File mode ('r', 'rb', 'w', 'wb').
+
+        Returns:
+            Context manager yielding a file-like object.
+
+        Raises:
+            ValueError: If mode is unsupported.
         """
         if mode == "w":
             file = io.StringIO()
@@ -781,8 +840,14 @@ class SnowflakeDataStore(DataStore):
         """
         Retrieve comprehensive file metadata from Snowflake stage.
 
-        :param path: File path in the stage
-        :return: File metadata dictionary
+        Args:
+            path: File path in the stage.
+
+        Returns:
+            Dictionary with keys: 'name', 'size_bytes', 'last_modified', 'md5'.
+
+        Raises:
+            FileNotFoundError: If file is not found.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor(DictCursor)
@@ -842,7 +907,11 @@ class SnowflakeDataStore(DataStore):
         """
         Remove a directory and all its contents from the Snowflake stage.
 
-        :param dir: Path to the directory to remove
+        Args:
+            dir: Path to the directory to remove in stage.
+
+        Raises:
+            IOError: If removal fails.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor()
@@ -863,12 +932,14 @@ class SnowflakeDataStore(DataStore):
     def mkdir(self, path: str, exist_ok: bool = False) -> None:
         """
         Create a directory in Snowflake stage.
+        Directories are created implicitly on upload; this creates a placeholder.
 
-        In Snowflake stages, directories are created implicitly when files are uploaded.
-        This method creates a placeholder file if the directory doesn't exist.
+        Args:
+            path: Path of the directory to create.
+            exist_ok: If False, raise error if directory exists.
 
-        :param path: Path of the directory to create
-        :param exist_ok: If False, raise an error if the directory already exists
+        Raises:
+            FileExistsError: If directory exists and exist_ok=False.
         """
         # Check if directory already exists
         if self.is_dir(path) and not exist_ok:
@@ -883,7 +954,11 @@ class SnowflakeDataStore(DataStore):
         """
         Remove a file from the Snowflake stage.
 
-        :param path: Path to the file to remove
+        Args:
+            path: Path to the file to remove in stage.
+
+        Raises:
+            IOError: If removal fails.
         """
         self._ensure_connection()
         cursor = self._get_connection().cursor()
@@ -908,12 +983,17 @@ class SnowflakeDataStore(DataStore):
         delete_source: bool = True,
     ) -> None:
         """
-        Rename (move) a single file by copying to the new path and deleting the source.
+        Rename (move) a single file by copying to the new path and deleting source.
 
-        :param source_path: Existing file path in the stage
-        :param destination_path: Target file path in the stage
-        :param overwrite: Overwrite destination if it already exists
-        :param delete_source: Delete original after successful copy
+        Args:
+            source_path: Existing file path in the stage.
+            destination_path: Target file path in the stage.
+            overwrite: Overwrite destination if it exists.
+            delete_source: Delete original after successful copy.
+
+        Raises:
+            FileNotFoundError: If source is missing.
+            FileExistsError: If destination exists and overwrite=False.
         """
         if not self.file_exists(source_path):
             raise FileNotFoundError(f"Source file not found: {source_path}")

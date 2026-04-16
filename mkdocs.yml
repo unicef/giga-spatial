@@ -52,11 +52,14 @@ nav:
   - Getting Started:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
   - User Guide:
     - Overview: user-guide/index.md
-    #- Basic Usage: user-guide/basic-usage.md
-    #- Advanced Features: user-guide/advanced-features.md
-    #- Best Practices: user-guide/best-practices.md
+    - School Proximity: user-guide/school-proximity.md
+    - Infrastructure Normalization: user-guide/infrastructure-normalization.md
+    - Settlement Characterization: user-guide/settlement-characterization.md
+    - Population Accessibility: user-guide/population-accessibility.md
+    - Zonal Statistics on Grids: user-guide/zonal-statistics-grids.md
   - API Reference:
     - Overview: api/index.md
     - Handlers: api/handlers.md

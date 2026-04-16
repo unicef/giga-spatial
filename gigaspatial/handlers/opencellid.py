@@ -1,3 +1,13 @@
+"""
+OpenCellID data handler for cell tower locations.
+
+This module provides handlers for interacting with OpenCellID's crowd-sourced 
+database of cell tower locations. It supports:
+- Automated discovery of country-specific download links.
+- Parallelized acquisition of MCC-grouped CSV files.
+- Filtering by creation date, provider, and network type.
+- Spatial deduplication and GeoPandas integration.
+"""
 import pandas as pd
 import geopandas as gpd
 import requests
@@ -24,7 +34,12 @@ from gigaspatial.config import config as global_config
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class OpenCellIDConfig(BaseHandlerConfig):
     """
-    Configuration for OpenCellID data access.
+    Configuration for OpenCellID dataset access.
+
+    Attributes:
+        base_path: Root directory for local CSV storage.
+        api_token: OpenCellID access token (required for downloads).
+        download_url: Base endpoint for the OpenCellID download page.
     """
 
     base_path: Path = Field(default=global_config.get_path("opencellid", "bronze"))
@@ -33,7 +48,14 @@ class OpenCellIDConfig(BaseHandlerConfig):
 
     def extract_search_geometry(self, source, **kwargs) -> str:
         """
-        Extract country alpha_2 code from source.
+        Identify the country alpha-2 code from a geographic source.
+
+        Args:
+            source: Country name or ISO code.
+            **kwargs: Additional context.
+
+        Returns:
+            The ISO 3166-1 alpha-2 country code.
         """
         if not isinstance(source, str):
             raise ValueError(
@@ -50,8 +72,14 @@ class OpenCellIDConfig(BaseHandlerConfig):
         self, geometry: str, **kwargs
     ) -> List[dict]:
         """
-        Get download links for the country (alpha_2 code).
-        Returns a list of dictionaries with 'url' and 'country'.
+        Discover download links for a specific country by screen-scraping.
+
+        Args:
+            geometry: ISO 3166-1 alpha-2 country code.
+            **kwargs: Additional parameters.
+
+        Returns:
+            A list of dictionaries containing 'url' and 'country'.
         """
         url = f"{self.download_url}{self.api_token}"
         country_alpha2 = geometry.upper()
@@ -109,8 +137,14 @@ class OpenCellIDConfig(BaseHandlerConfig):
 
     def get_data_unit_path(self, unit: dict, **kwargs) -> Path:
         """
-        Get local path for a data unit.
-        Pattern: base_path / country_code / filename
+        Determine the local storage path for an OpenCellID data unit.
+
+        Args:
+            unit: Dictionary containing 'url' and 'country' metadata.
+            **kwargs: Additional resolution context.
+
+        Returns:
+            Absolute local path for the CSV file.
         """
         url = unit["url"]
         country = unit["country"].lower()
@@ -134,12 +168,22 @@ class OpenCellIDConfig(BaseHandlerConfig):
 
 class OpenCellIDDownloader(BaseHandlerDownloader):
     """
-    Downloader for OpenCellID data.
+    Downloader for OpenCellID CSV exports.
+
+    Handles authenticated requests to the OpenCellID website and persists
+    streaming responses to local storage.
     """
 
     def download_data_unit(self, unit: dict, **kwargs) -> Path:
         """
-        Download a single data unit.
+        Acquire a single OpenCellID data unit.
+
+        Args:
+            unit: Dictionary containing 'url' and 'country' metadata.
+            **kwargs: Download parameters.
+
+        Returns:
+            Path to the downloaded local file.
         """
         url = unit["url"]
         save_path = self.config.get_data_unit_path(unit)
@@ -170,7 +214,10 @@ class OpenCellIDDownloader(BaseHandlerDownloader):
 
 class OpenCellIDReader(BaseHandlerReader):
     """
-    Reader for OpenCellID data.
+    Reader for OpenCellID CSV exports.
+
+    Parses raw cell tower data, applies temporal filters, and aggregates 
+    results into tabular or geospatial objects.
     """
 
     def load_from_paths(
@@ -183,7 +230,18 @@ class OpenCellIDReader(BaseHandlerReader):
         **kwargs,
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
-        Load OpenCellID data from local paths, process it, and return a GeoDataFrame or DataFrame.
+        Load cell tower data from one or more local CSV paths.
+
+        Args:
+            source_data_path: List of local paths to OpenCellID files.
+            created_newer: Optional start year for creation date filtering.
+            created_before: Optional end year for creation date filtering.
+            drop_duplicates: If True, resolves duplicate towers by latest update.
+            as_geodataframe: If True, returns a GeoDataFrame with point geometries.
+            **kwargs: Additional loading parameters.
+
+        Returns:
+            A pandas DataFrame or geopandas GeoDataFrame of processed cell data.
         """
         if created_before is None:
             created_before = pd.Timestamp.now().year
@@ -212,8 +270,8 @@ class OpenCellIDReader(BaseHandlerReader):
             self.logger.info(f"Loading data from {path}")
             try:
                 df = read_dataset(
-                    self.data_store,
                     path,
+                    data_store=self.data_store,
                     header=None,
                     names=ocid_columns,
                     low_memory=False,
@@ -279,12 +337,26 @@ class OpenCellIDReader(BaseHandlerReader):
 
 class OpenCellIDHandler(BaseHandler):
     """
-    Handler for OpenCellID data.
+    Unified handler for OpenCellID data.
+
+    Coordinates automated link discovery, coordinated downloads, and
+    standardized reading of cell tower datasets.
     """
 
     def create_config(
         self, data_store: DataStore, logger: logging.Logger, **kwargs
     ) -> OpenCellIDConfig:
+        """
+        Create an OpenCellID configuration instance.
+
+        Args:
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Configuration overrides.
+
+        Returns:
+            A configured OpenCellIDConfig.
+        """
         return OpenCellIDConfig(data_store=data_store, logger=logger, **kwargs)
 
     def create_downloader(
@@ -294,6 +366,18 @@ class OpenCellIDHandler(BaseHandler):
         logger: logging.Logger,
         **kwargs,
     ) -> OpenCellIDDownloader:
+        """
+        Create an OpenCellID downloader instance.
+
+        Args:
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Downloader parameters.
+
+        Returns:
+            A configured OpenCellIDDownloader.
+        """
         return OpenCellIDDownloader(config=config, data_store=data_store, logger=logger)
 
     def create_reader(
@@ -303,6 +387,18 @@ class OpenCellIDHandler(BaseHandler):
         logger: logging.Logger,
         **kwargs,
     ) -> OpenCellIDReader:
+        """
+        Create an OpenCellID reader instance.
+
+        Args:
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Reader parameters.
+
+        Returns:
+            A configured OpenCellIDReader.
+        """
         return OpenCellIDReader(config=config, data_store=data_store, logger=logger)
 
     def load_as_geodataframe(
@@ -313,7 +409,16 @@ class OpenCellIDHandler(BaseHandler):
         **kwargs,
     ) -> gpd.GeoDataFrame:
         """
-        Load OpenCellID data as a GeoDataFrame.
+        Acquire OpenCellID data and load it as a geospatial GeoDataFrame.
+
+        Args:
+            source: Geographic filter (country ISO) or direct file paths.
+            crop_to_source: If True, clips data to the source boundary.
+            ensure_available: If True, executes download if data is missing locally.
+            **kwargs: Additional parameters passed to `load_data`.
+
+        Returns:
+            A GeoDataFrame containing cell tower locations.
         """
         return self.load_data(
             source,

@@ -1,3 +1,8 @@
+"""
+Module for transmission node schema and processing.
+Defines the TransmissionNode entity, representing physical network infrastructure nodes
+like backbone cores, metro sites, and aggregation points.
+"""
 import pandas as pd
 import networkx as nx
 from pydantic import Field
@@ -10,6 +15,7 @@ from .shared import DataConfidence, PowerSource
 from .entity import ENUM_ENTITY_CONFIG, GigaEntity, EntityTable
 from gigaspatial.processing.entity_processor import EntityProcessor
 from gigaspatial.config import config
+from .cell_tower import BackhaulType, BACKHAUL_ALIAS_MAP
 
 logger = config.get_logger("TransmissionNodeManager")
 
@@ -39,7 +45,7 @@ class BackhaulTechnology(str, Enum):
 
 
 class NodeType(str, Enum):
-    """Enum for node operational status."""
+    """Enum for node types."""
 
     BACKBONE = "backbone"  # Core/national network, highest capacity
     METRO = "metro"  # Metropolitan/regional network
@@ -90,6 +96,9 @@ class TransmissionNode(GigaEntity):
     access_technologies: Optional[List[str]] = Field(
         None, description="Access technologies available at this node"
     )
+    is_logical_node: Optional[bool] = Field(
+        None, description="True if this site hosts active transmission equipment"
+    )
 
     # Ownership
     physical_infrastructure_provider: Optional[str] = Field(
@@ -139,6 +148,7 @@ class TransmissionNode(GigaEntity):
 
     @property
     def id(self) -> str:
+        """Alias for transmission_node_id."""
         return self.transmission_node_id
 
 
@@ -148,6 +158,7 @@ class TransmissionNode(GigaEntity):
 
 
 class TransmissionNodeProcessor(EntityProcessor):
+    """Processor for cleaning and normalizing transmission node data."""
 
     NUMERIC_COLUMNS: ClassVar[List[str]] = [
         *EntityProcessor.NUMERIC_COLUMNS,
@@ -166,12 +177,49 @@ class TransmissionNodeProcessor(EntityProcessor):
     ]
 
     def process(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        """
+        Execute the full processing pipeline for transmission nodes.
+
+        Args:
+            df: Raw transmission node DataFrame.
+            **kwargs: Additional processing arguments.
+
+        Returns:
+            Processed and normalized DataFrame.
+        """
         df = super().process(df, **kwargs)
+        df = self._normalize_transmission_medium(df)
         df = self._split_list_columns(df)
         return df
 
+    def _normalize_transmission_medium(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize transmission_medium values to canonical enums.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized transmission_medium column.
+        """
+        return self._normalize_enum_column(
+            df,
+            column="transmission_medium",
+            alias_map=BACKHAUL_ALIAS_MAP,
+            valid_values={tm.value for tm in TransmissionMedium},
+            required=False,
+        )
+
     def _split_list_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Split comma-separated string columns into lists."""
+        """
+        Split comma-separated string columns into Python lists.
+
+        Args:
+            df: DataFrame to process.
+
+        Returns:
+            DataFrame with list columns.
+        """
         for col in (
             "network_providers",
             "access_technologies",
@@ -370,11 +418,21 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
     # ------------------------------------------------------------------
 
     def get_node_types(self) -> Set[str]:
-        """Return the set of all unique node types present in the table."""
+        """
+        Return the set of all unique node types present in the table.
+
+        Returns:
+            Set of unique node type strings.
+        """
         return {e.node_type for e in self.entities if e.node_type is not None}
 
     def get_providers(self) -> Set[str]:
-        """Return all unique physical infrastructure providers."""
+        """
+        Return all unique physical infrastructure providers.
+
+        Returns:
+            Set of unique provider name strings.
+        """
         return {
             e.physical_infrastructure_provider
             for e in self.entities
@@ -382,11 +440,21 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         }
 
     def get_backbone_nodes(self) -> "TransmissionNodeTable":
-        """Return only backbone (core network) nodes."""
+        """
+        Filter to only backbone (core network) nodes.
+
+        Returns:
+            TransmissionNodeTable with only backbone nodes.
+        """
         return self.filter_by_node_type(NodeType.BACKBONE)
 
     def get_access_nodes(self) -> "TransmissionNodeTable":
-        """Return only access-layer nodes."""
+        """
+        Filter to only access-layer nodes.
+
+        Returns:
+            TransmissionNodeTable with only access nodes.
+        """
         return self.filter_by_node_type(NodeType.ACCESS)
 
     # ------------------------------------------------------------------

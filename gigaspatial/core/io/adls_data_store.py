@@ -1,3 +1,7 @@
+"""
+Module for Azure Data Lake Storage (ADLS) DataStore implementation.
+Provides a consistent interface for interacting with blobs in Azure storage.
+"""
 try:
     from azure.storage.blob import BlobServiceClient
 
@@ -37,15 +41,24 @@ class ADLSDataStore(DataStore):
         account_url: str = config.ADLS_ACCOUNT_URL,
         sas_token: str = config.ADLS_SAS_TOKEN,
     ):
+        """
+        Initialize the ADLS data store.
+
+        Args:
+            container: The name of the container in ADLS to interact with.
+            connection_string: Azure storage connection string.
+            account_url: Azure storage account URL.
+            sas_token: SAS token for authentication if connection_string is not provided.
+
+        Raises:
+            ImportError: If 'azure-storage-blob' is not installed.
+            ValueError: If authentication credentials are missing.
+        """
         if not _HAS_AZURE:
             raise ImportError(
                 "ADLSDataStore requires 'azure-storage-blob'. "
                 "Install it with: pip install 'giga-spatial[azure]'"
             )
-        """
-        Create a new instance of ADLSDataStore
-        :param container: The name of the container in ADLS to interact with.
-        """
         if connection_string:
             self.blob_service_client = BlobServiceClient.from_connection_string(
                 connection_string
@@ -94,11 +107,17 @@ class ADLSDataStore(DataStore):
         self, path: Pathish, encoding: Optional[str] = None
     ) -> Union[str, bytes]:
         """
-        Read file with flexible encoding support.
+        Read file contents from blob storage.
 
-        :param path: Path to the file in blob storage
-        :param encoding: File encoding (optional)
-        :return: File contents as string or bytes
+        Args:
+            path: Path to the file in blob storage.
+            encoding: Optional string encoding (e.g., 'utf-8'). If None, returns bytes.
+
+        Returns:
+            File contents as a string if encoding is provided, otherwise bytes.
+
+        Raises:
+            IOError: If there's an error downloading the blob.
         """
         try:
             blob_key = self._to_blob_key(path)
@@ -117,10 +136,14 @@ class ADLSDataStore(DataStore):
 
     def write_file(self, path: Pathish, data) -> None:
         """
-        Write file with support for content type and improved type handling.
+        Write data (string or bytes) to a blob.
 
-        :param path: Destination path in blob storage
-        :param data: File contents
+        Args:
+            path: Destination path in blob storage.
+            data: Data to write (str or bytes).
+
+        Raises:
+            ValueError: If data type is not supported.
         """
         blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
@@ -132,7 +155,7 @@ class ADLSDataStore(DataStore):
         elif isinstance(data, bytes):
             binary_data = data
         else:
-            raise Exception(f'Unsupported data type. Only "bytes" or "string" accepted')
+            raise ValueError(f'Unsupported data type. Only "bytes" or "string" accepted')
 
         blob_client.upload_blob(binary_data, overwrite=True)
 
@@ -190,10 +213,11 @@ class ADLSDataStore(DataStore):
 
     def copy_directory(self, source_dir: Pathish, destination_dir: Pathish):
         """
-        Copies all files from a source directory to a destination directory within the same container.
+        Copies all files from a source directory to a destination directory.
 
-        :param source_dir: The source directory path in the blob storage
-        :param destination_dir: The destination directory path in the blob storage
+        Args:
+            source_dir: The source directory path in blob storage.
+            destination_dir: The destination directory path in blob storage.
         """
         try:
             # Ensure source directory path ends with a trailing slash
@@ -223,11 +247,16 @@ class ADLSDataStore(DataStore):
         self, source_path: Pathish, destination_path: Pathish, overwrite: bool = False
     ):
         """
-        Copies a single file from source to destination within the same container.
+        Copies a single file from source to destination.
 
-        :param source_path: The source file path in the blob storage
-        :param destination_path: The destination file path in the blob storage
-        :param overwrite: If True, overwrite the destination file if it already exists
+        Args:
+            source_path: The source file path in blob storage.
+            destination_path: The destination file path in blob storage.
+            overwrite: If True, overwrite the destination file if it already exists.
+
+        Raises:
+            FileNotFoundError: If source file is missing.
+            FileExistsError: If destination exists and overwrite=False.
         """
         try:
             if not self.file_exists(source_path):
@@ -256,6 +285,7 @@ class ADLSDataStore(DataStore):
             raise
 
     def exists(self, path: Pathish) -> bool:
+        """Checks if a blob exists at the prefix."""
         blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
             container=self.container, blob=blob_key, snapshot=None
@@ -263,6 +293,7 @@ class ADLSDataStore(DataStore):
         return blob_client.exists()
 
     def file_exists(self, path: Pathish) -> bool:
+        """Checks if a blob is a file and exists."""
         return self.exists(path) and not self.is_dir(path)
 
     def file_size(self, path: Pathish) -> float:
@@ -465,8 +496,11 @@ class ADLSDataStore(DataStore):
         """
         Retrieve comprehensive file metadata.
 
-        :param path: File path in blob storage
-        :return: File metadata dictionary
+        Args:
+            path: File path in blob storage.
+
+        Returns:
+            Dictionary containing metadata like 'size_bytes', 'last_modified', 'etag'.
         """
         blob_key = self._to_blob_key(path)
         blob_client = self.container_client.get_blob_client(blob_key)
@@ -481,9 +515,11 @@ class ADLSDataStore(DataStore):
         }
 
     def is_file(self, path: Pathish) -> bool:
+        """Checks if path is a file."""
         return self.file_exists(path)
 
     def is_dir(self, path: Pathish) -> bool:
+        """Checks if path is a directory."""
         dir_key = self._to_blob_key(path, ensure_dir=True)
 
         existing_blobs = self.list_files(dir_key)
@@ -498,6 +534,7 @@ class ADLSDataStore(DataStore):
         return False
 
     def rmdir(self, dir: Pathish) -> None:
+        """Removes a directory."""
         # Normalize directory path to ensure it targets all children
         dir_key = self._to_blob_key(dir, ensure_dir=True)
 
@@ -515,12 +552,16 @@ class ADLSDataStore(DataStore):
 
     def mkdir(self, path: Pathish, exist_ok: bool = False) -> None:
         """
-        Create a directory in Azure Blob Storage.
+        Create a virtual directory in ADLS.
 
-        In ADLS, directories are conceptual and created by adding a placeholder blob.
+        Directories are conceptual in blob storage and represented by a placeholder blob.
 
-        :param path: Path of the directory to create
-        :param exist_ok: If False, raise an error if the directory already exists
+        Args:
+            path: Path of the directory to create.
+            exist_ok: If False, raise an error if the directory already exists.
+
+        Raises:
+            FileExistsError: If directory exists and exist_ok=False.
         """
         dir_key = self._to_blob_key(path, ensure_dir=True)
 
@@ -544,6 +585,7 @@ class ADLSDataStore(DataStore):
             blob_client.upload_blob(placeholder_content, overwrite=True)
 
     def remove(self, path: Pathish) -> None:
+        """Removes a file."""
         blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
             container=self.container, blob=blob_key, snapshot=None

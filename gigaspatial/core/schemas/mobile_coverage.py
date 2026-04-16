@@ -1,3 +1,8 @@
+"""
+Module for mobile coverage schema and processing.
+Defines the MobileCoverage entity, representing cellular coverage areas
+(measured or modeled) with polygon geometries.
+"""
 from enum import Enum
 from typing import Optional, List, Set, Union, Dict, ClassVar
 from pydantic import Field
@@ -190,6 +195,16 @@ class MobileCoverageProcessor(EntityProcessor):
     COVERAGE_TYPE_ALIAS_MAP: ClassVar[Dict[str, str]] = COVERAGE_TYPE_ALIAS_MAP
 
     def process(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        """
+        Execute the full processing pipeline for mobile coverage.
+
+        Args:
+            df: Raw mobile coverage DataFrame.
+            **kwargs: Additional processing arguments.
+
+        Returns:
+            Processed and normalized DataFrame.
+        """
         df = super().process(df, **kwargs)
         df = self._normalize_radio_type(df)
         df = self._normalize_signal_strength(df)
@@ -198,6 +213,15 @@ class MobileCoverageProcessor(EntityProcessor):
         return df
 
     def _normalize_radio_type(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize radio_type values to canonical RadioType enums.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized radio_type column.
+        """
         return self._normalize_enum_column(
             df,
             "radio_type",
@@ -207,6 +231,15 @@ class MobileCoverageProcessor(EntityProcessor):
         )
 
     def _normalize_signal_strength(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize signal_strength values to canonical SignalStrength enums.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized signal_strength column.
+        """
         return self._normalize_enum_column(
             df,
             "signal_strength",
@@ -215,6 +248,15 @@ class MobileCoverageProcessor(EntityProcessor):
         )
 
     def _normalize_coverage_type(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize coverage_type values to canonical CoverageType enums.
+
+        Args:
+            df: DataFrame to normalize.
+
+        Returns:
+            DataFrame with normalized coverage_type column.
+        """
         return self._normalize_enum_column(
             df,
             "coverage_type",
@@ -443,11 +485,21 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
     # ------------------------------------------------------------------
 
     def get_operators(self) -> Set[str]:
-        """Return all unique operator names present in the table."""
+        """
+        Return the set of all unique operator names present in the table.
+
+        Returns:
+            Set of operator name strings.
+        """
         return {e.operator_name for e in self.entities if e.operator_name is not None}
 
     def get_radio_types(self) -> Set[str]:
-        """Return all unique radio types present in the table."""
+        """
+        Return the set of all unique radio types present in the table.
+
+        Returns:
+            Set of radio type strings.
+        """
         return {e.radio_type for e in self.entities if e.radio_type is not None}
 
     def get_coverage_summary(self) -> pd.DataFrame:

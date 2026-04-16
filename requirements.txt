@@ -17,6 +17,7 @@ bs4==0.0.2
 s3fs>=2024.12.0
 psutil>=6.0.0
 httpx>=0.27
+pyarrow>=17.0.0
 
 # Grid systems
 mercantile==1.2.1

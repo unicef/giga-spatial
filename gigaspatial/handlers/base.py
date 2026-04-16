@@ -1,3 +1,16 @@
+"""
+Base classes and abstractions for dataset handlers.
+
+This module defines the foundational architecture for all data handlers in
+GigaSpatial. It provides abstract base classes for:
+- Configuration (`BaseHandlerConfig`)
+- Data downloaders (`BaseHandlerDownloader`)
+- Data readers (`BaseHandlerReader`)
+- Orchestrating handlers (`BaseHandler`)
+
+Standardizing these interfaces ensures consistency across various data sources
+(e.g., GHSL, WorldPop, OSM, Google Buildings).
+"""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,9 +33,16 @@ from gigaspatial.processing.tif_processor import TifProcessor
 @dataclass
 class BaseHandlerConfig(ABC):
     """
-    Abstract base class for handler configuration objects.
-    Provides standard fields for path, parallelism, data store, and logger.
-    Extend this class for dataset-specific configuration.
+    Abstract base class for handler configurations.
+
+    Standardizes common fields used across all handlers, such as file paths,
+    worker counts, and data store abstractions.
+
+    Attributes:
+        base_path: Root directory for the dataset's files.
+        n_workers: Number of parallel workers for processing or downloading.
+        data_store: Abstraction for file-system access (local or cloud).
+        logger: Logger instance for tracking handler operations.
     """
 
     base_path: Path = None
@@ -38,7 +58,7 @@ class BaseHandlerConfig(ABC):
 
     @property
     def crs(self) -> str:
-        """The default CRS for this configuration's geometries."""
+        """The default CRS for this configuration's geometries (default: EPSG:4326)."""
         return "EPSG:4326"
 
     def _cache_key(self, source, **kwargs):
@@ -61,14 +81,29 @@ class BaseHandlerConfig(ABC):
     def get_relevant_data_units(
         self,
         source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
+            str,
+            List[Union[Tuple[float, float], Point]],
+            BaseGeometry,
+            gpd.GeoDataFrame,
         ],
         force_recompute: bool = False,
         **kwargs,
     ):
+        """
+        Retrieve data unit identifiers relevant to a specific source.
+
+        Standardizes the resolution of a source (e.g., country code or geometry)
+        into a list of data units (e.g., specific files or tiles needing to be
+        loaded).
+
+        Args:
+            source: Input source identifier (ISO country code, geometry, point list, or GDF).
+            force_recompute: If True, ignores cached units and recomputes.
+            **kwargs: Additional parameters for source parsing.
+
+        Returns:
+            A list of relevant data unit identifiers.
+        """
         key = self._cache_key(source, **kwargs)
 
         # Check cache unless forced recompute
@@ -90,20 +125,41 @@ class BaseHandlerConfig(ABC):
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
     ) -> Any:
         """
-        Given a geometry, return a list of relevant data unit identifiers (e.g., tiles, files, resources).
+        Identify data units associated with a specific geometry.
+
+        Args:
+            geometry: The spatial filter to find relevant units for.
+            **kwargs: Additional filtering parameters.
+
+        Returns:
+            A collection of relevant data unit identifiers.
         """
         pass
 
     @abstractmethod
     def get_data_unit_path(self, unit: Any, **kwargs) -> list:
         """
-        Given a data unit identifier, return the corresponding file path.
+        Resolve a data unit identifier to its file path(s).
+
+        Args:
+            unit: The data unit identifier (e.g., a filename or tile ID).
+            **kwargs: Additional resolution context.
+
+        Returns:
+            A list of paths corresponding to the unit.
         """
         pass
 
     def get_data_unit_paths(self, units: Union[Iterable[Any]], **kwargs) -> list:
         """
-        Given data unit identifiers, return the corresponding file paths.
+        Resolve multiple data unit identifiers to their corresponding file paths.
+
+        Args:
+            units: Iterable of data unit identifiers.
+            **kwargs: Additional resolution context.
+
+        Returns:
+            A flat list of all resolved file paths.
         """
         if not isinstance(units, Iterable):
             units = [units]
@@ -115,17 +171,20 @@ class BaseHandlerConfig(ABC):
 
     def extract_search_geometry(self, source, **kwargs):
         """
-        General method to extract a canonical geometry from supported source types.
+        Extract a canonical geometry representation from various input types.
 
-        Notes
-        -----
-        - For ``gpd.GeoDataFrame`` inputs, an optional ``crs`` keyword
-          argument is interpreted as the *target* CRS. If provided and
-          different from ``source.crs``, the GeoDataFrame is reprojected
-          before unioning the geometry.
-        - For bare geometries and point collections, no CRS transformation
-          is performed here; subclasses can add handler-specific CRS
-          normalization if needed (see e.g. ``GHSLDataConfig``).
+        Supports ISO-2 country codes, GeoDataFrames, Shapely geometries,
+        and lists of point coordinates.
+
+        Args:
+            source: Input source to convert to geometry.
+            **kwargs: Additional parameters (e.g., crs for reprojection).
+
+        Returns:
+            A unified Shapely geometry object representing the source.
+
+        Raises:
+            ValueError: If the source type is unsupported or missing CRS.
         """
         if isinstance(source, str):
             # Use the admin boundary as geometry
@@ -173,9 +232,16 @@ class BaseHandlerConfig(ABC):
 
 class BaseHandlerDownloader(ABC):
     """
-    Abstract base class for handler downloader classes.
-    Standardizes config, data_store, and logger initialization.
-    Extend this class for dataset-specific downloaders.
+    Abstract base class for data downloaders.
+
+    Handles the logic for acquiring dataset files from remote sources and
+    saving them to a `DataStore`. Supports parallel downloads and progress
+    tracking.
+
+    Attributes:
+        config: Handler configuration object.
+        data_store: Abstraction for file-system access.
+        logger: Logger instance for tracking download progress.
     """
 
     def __init__(
@@ -201,13 +267,31 @@ class BaseHandlerDownloader(ABC):
     @abstractmethod
     def download_data_unit(self, *args, **kwargs):
         """
-        Abstract method to download data. Implement in subclasses.
+        Download a single data unit.
+
+        Must be implemented by subclasses to define the specific download
+        logic for the dataset.
+
+        Args:
+            *args: Data unit identifier and other positional arguments.
+            **kwargs: Additional parameters for the download.
         """
         pass
 
     def download_data_units(self, units: Iterable[Any], **kwargs) -> List[Any]:
         """
-        Download multiple data units. handles optional parallelism if n_workers > 1.
+        Download multiple data units in parallel.
+
+        Iterates through the provided units and downloads them using
+        `download_data_unit`. Parallelism is controlled by `n_workers` in
+         the configuration.
+
+        Args:
+            units: Iterable of data unit identifiers.
+            **kwargs: Additional parameters for the download.
+
+        Returns:
+            A flat list of all downloaded file paths or data records.
         """
         if units is None or (hasattr(units, "__len__") and len(units) == 0):
             self.logger.warning("There is no matching data to download.")
@@ -225,11 +309,21 @@ class BaseHandlerDownloader(ABC):
         if n_workers > 1:
             import multiprocessing
             import functools
+
             with multiprocessing.Pool(n_workers) as pool:
                 download_func = functools.partial(self.download_data_unit, **kwargs)
-                results = list(tqdm(pool.imap(download_func, units_list), total=len(units_list), desc=desc))
+                results = list(
+                    tqdm(
+                        pool.imap(download_func, units_list),
+                        total=len(units_list),
+                        desc=desc,
+                    )
+                )
         else:
-            results = [self.download_data_unit(unit, **kwargs) for unit in tqdm(units_list, desc=desc)]
+            results = [
+                self.download_data_unit(unit, **kwargs)
+                for unit in tqdm(units_list, desc=desc)
+            ]
 
         # Filter out None and flatten any list results (e.g. from extracted archives)
         flattened = []
@@ -243,10 +337,19 @@ class BaseHandlerDownloader(ABC):
 
         return flattened
 
-
     def download(self, source, **kwargs):
         """
-        Given source download the data.
+        Acquire all data units relevant to a specific source.
+
+        Resolves the source (e.g., country code) into units and triggers
+        the download process.
+
+        Args:
+            source: Input source identifier.
+            **kwargs: Additional parameters for unit resolution or download.
+
+        Returns:
+            A list of all downloaded items.
         """
         units = self.config.get_relevant_data_units(source, **kwargs)
         return self.download_data_units(units, **kwargs)
@@ -254,10 +357,16 @@ class BaseHandlerDownloader(ABC):
 
 class BaseHandlerReader(ABC):
     """
-    Abstract base class for handler reader classes.
-    Provides common methods for resolving source paths and loading data.
-    Supports resolving by country, points, geometry, GeoDataFrame, or explicit paths.
-    Includes generic loader functions for raster and tabular data.
+    Abstract base class for data readers.
+
+    Provides high-level methods for resolving data paths and loading various
+    data types (raster, tabular) into memory. Standardizes the loading
+    interface across disparate datasets.
+
+    Attributes:
+        config: Handler configuration object.
+        data_store: Abstraction for file-system access.
+        logger: Logger instance for tracking data loading.
     """
 
     def __init__(
@@ -283,25 +392,29 @@ class BaseHandlerReader(ABC):
     def resolve_source_paths(
         self,
         source: Union[
-            str,  # country code
-            List[Union[Tuple[float, float], Point]],  # points
+            str,
+            List[Union[Tuple[float, float], Point]],
             BaseGeometry,
             gpd.GeoDataFrame,
-            Path,  # path
-            str,  # path
+            Path,
+            str,
             List[Union[str, Path]],
         ],
         **kwargs,
     ) -> List[Union[str, Path]]:
         """
-        Resolve source data paths based on the type of source input.
+        Identify data file paths corresponding to a specific source input.
+
+        Parses the input source (e.g., country code, geometry, or explicit
+        paths) and resolves them into a list of absolute paths within the
+        `DataStore`.
 
         Args:
-            source: Can be a country code or name (str), list of points, geometry, GeoDataFrame, or explicit path(s)
-            **kwargs: Additional parameters for path resolution
+            source: Source specification (country, geometry, points, or paths).
+            **kwargs: Additional parameters for resolving paths.
 
         Returns:
-            List of resolved source paths
+            A list of resolved file paths.
         """
         if (
             isinstance(source, Path)
@@ -360,13 +473,13 @@ class BaseHandlerReader(ABC):
 
     def _check_file_exists(self, file_paths: List[Union[str, Path]]):
         """
-        Check that all specified files exist in the data store.
+        Validate that all specified files exist in the data store.
 
         Args:
-            file_paths (List[Union[str, Path]]): List of file paths to check.
+            file_paths: List of file paths to check.
 
         Raises:
-            RuntimeError: If any file does not exist in the data store.
+            RuntimeError: If any file does not exist in the configured data store.
         """
         for file_path in file_paths:
             if not self.data_store.file_exists(str(file_path)):
@@ -381,16 +494,15 @@ class BaseHandlerReader(ABC):
         **kwargs,
     ) -> Union[List[TifProcessor], TifProcessor]:
         """
-        Load raster data from file paths.
+        Initialize TifProcessors for one or more raster files.
 
         Args:
-            raster_paths (List[Union[str, Path]]): List of file paths to raster files.
-            merge_rasters (bool): If True, all rasters will be merged into a single TifProcessor.
-                                  Defaults to False.
+            raster_paths: List of file paths to raster files.
+            merge_rasters: If True, combines all rasters into a single `TifProcessor`.
+            **kwargs: Additional parameters for TifProcessor initialization.
 
         Returns:
-            Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects or a single
-                                                    TifProcessor if merge_rasters is True.
+            Single TifProcessor (if merged) or list of TifProcessors.
         """
         if merge_rasters or len(raster_paths) == 1:
             self.logger.info(
@@ -412,18 +524,17 @@ class BaseHandlerReader(ABC):
         **kwargs,
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
-        Load and concatenate tabular data from multiple files.
+        Load and consolidate tabular data from multiple files.
 
         Args:
-            file_paths (List[Union[str, Path]]): List of file paths to load data from.
-            read_function (Callable): Function to use for reading individual files.
-                Defaults to read_dataset. Should accept (data_store, file_path) arguments.
-            show_progress (bool): Whether to display a progress bar while loading files.
-            progress_desc (Optional[str]): Custom description for the progress bar.
+            file_paths: List of file paths to load.
+            read_function: Callable used to read individual files.
+            show_progress: If True, displays a progress bar.
+            progress_desc: Custom description for the progress bar.
+            **kwargs: Additional parameters for the read function.
 
         Returns:
-            Union[pd.DataFrame, gpd.GeoDataFrame]: Concatenated data from all files.
-                Returns empty DataFrame if no data is loaded.
+            The concatenated DataFrame or GeoDataFrame.
         """
         all_data = []
         iterator: Iterable = file_paths
@@ -435,7 +546,9 @@ class BaseHandlerReader(ABC):
             )
 
         for file_path in iterator:
-            all_data.append(read_function(self.data_store, file_path, **kwargs))
+            all_data.append(
+                read_function(file_path, data_store=self.data_store, **kwargs)
+            )
 
         if not all_data:
             return pd.DataFrame()
@@ -443,6 +556,18 @@ class BaseHandlerReader(ABC):
         return result
 
     def crop_to_geometry(self, data, geometry, predicate="intersects", **kwargs):
+        """
+        Crop loaded data (raster or tabular) to a specific geometry.
+
+        Args:
+            data: The data object to crop (DataFrame, GDF, or TifProcessor).
+            geometry: The spatial filter geometry.
+            predicate: Spatial predicate for tabular filtering ('intersects', 'within', etc.).
+            **kwargs: Additional parameters for cropping (e.g., crs, crop).
+
+        Returns:
+            The cropped data object.
+        """
 
         # Project geometry to the projection of the data if data has projection
         geom_crs = kwargs.pop("crs", "EPSG:4326")
@@ -471,7 +596,8 @@ class BaseHandlerReader(ABC):
             clip_kwargs = {
                 k: v
                 for k, v in kwargs.items()
-                if k in (
+                if k
+                in (
                     "crop",
                     "all_touched",
                     "invert",
@@ -504,8 +630,8 @@ class BaseHandlerReader(ABC):
     def load(
         self,
         source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
+            str,
+            List[Union[Tuple[float, float], Point]],
             BaseGeometry,
             gpd.GeoDataFrame,
             Path,
@@ -516,16 +642,18 @@ class BaseHandlerReader(ABC):
         **kwargs,
     ) -> Any:
         """
-        Load data from the given source.
+        Orchestrate the resolution and loading of data from a source.
+
+        Standardizes the workflow: Resolve Paths -> Pre-load Hook -> Load ->
+        Post-load Hook -> Optional Crop.
 
         Args:
-            source: The data source (country code/name, points, geometry, paths, etc.).
-            crop_to_source : bool, default False
-                If True, crop loaded data to the exact source geometry
-            **kwargs: Additional parameters to pass to the loading process.
+            source: specification of the data to load.
+            crop_to_source: If True, the data is spatially cropped to the source.
+            **kwargs: Additional parameters for loading.
 
         Returns:
-            The loaded data. The type depends on the subclass implementation.
+            The loaded data object.
         """
         source_data_paths = self.resolve_source_paths(source, **kwargs)
         if not source_data_paths:
@@ -564,14 +692,14 @@ class BaseHandlerReader(ABC):
 
 class BaseHandler(ABC):
     """
-    Abstract base class that orchestrates configuration, downloading, and reading functionality.
+    Main entry point and orchestrator for dataset handlers.
 
-    This class serves as the main entry point for dataset handlers, providing a unified
-    interface for data acquisition and loading. It manages the lifecycle of config,
-    downloader, and reader components.
+    Encapsulates a configuration, downloader, and reader to provide a unified
+    API for data acquisition and access. Handlers managed by this class are
+    intended to be the primary interface for library users.
 
-    Subclasses should implement the abstract methods to provide specific handler types
-    and define how components are created and interact.
+    Subclasses must implement the factory methods to provide specific
+    component implementations.
     """
 
     def __init__(
@@ -700,29 +828,29 @@ class BaseHandler(ABC):
     def ensure_data_available(
         self,
         source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-            Path,  # path
-            List[Union[str, Path]],  # list of paths
+            str,
+            List[Union[tuple, Point]],
+            BaseGeometry,
+            gpd.GeoDataFrame,
+            Path,
+            List[Union[str, Path]],
         ],
         force_download: bool = False,
         **kwargs,
     ) -> bool:
         """
-        Ensure that data is available for the given source.
+        Guarantee that the required data for a source exists in the `DataStore`.
 
-        This method checks if the required data exists locally, and if not (or if
-        force_download is True), downloads it using the downloader.
+        Checks for local availability of data files. If any are missing or if
+        `force_download` is True, it triggers the downloader to acquire them.
 
         Args:
-            source: The data source specification
-            force_download: If True, download even if data exists locally
-            **kwargs: Additional parameters passed to download methods
+            source: Specification of the required data.
+            force_download: If True, downloads data regardless of local state.
+            **kwargs: Additional parameters for unit resolution or download.
 
         Returns:
-            bool: True if data is available after this operation
+            True if all required data is available in the DataStore, False otherwise.
         """
         try:
             # Get relevant units (cached if already computed for this source)
@@ -785,27 +913,34 @@ class BaseHandler(ABC):
     def load_data(
         self,
         source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-            Path,  # path
-            List[Union[str, Path]],  # list of paths
+            str,
+            List[Union[tuple, Point]],
+            BaseGeometry,
+            gpd.GeoDataFrame,
+            Path,
+            List[Union[str, Path]],
         ],
         crop_to_source: bool = False,
         ensure_available: bool = True,
         **kwargs,
     ) -> Any:
         """
-        Load data from the given source.
+        Load data from a source, ensuring its availability first.
+
+        This is the primary high-level method for users to retrieve data
+        from a handler.
 
         Args:
-            source: The data source specification
-            ensure_available: If True, ensure data is downloaded before loading
-            **kwargs: Additional parameters passed to load methods
+            source: Specification of the data to load.
+            crop_to_source: If True, crops the result to the source geometry.
+            ensure_available: If True, downloads missing data before loading.
+            **kwargs: Additional parameters for loading or downloading.
 
         Returns:
-            Loaded data (type depends on specific handler implementation)
+            The loaded data object.
+
+        Raises:
+            RuntimeError: If data availability cannot be ensured.
         """
         if ensure_available:
             if not self.ensure_data_available(source, **kwargs):
@@ -816,27 +951,28 @@ class BaseHandler(ABC):
     def download_and_load(
         self,
         source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-            Path,  # path
-            List[Union[str, Path]],  # list of paths
+            str,
+            List[Union[tuple, Point]],
+            BaseGeometry,
+            gpd.GeoDataFrame,
+            Path,
+            List[Union[str, Path]],
         ],
         crop_to_source: bool = False,
         force_download: bool = False,
         **kwargs,
     ) -> Any:
         """
-        Convenience method to download (if needed) and load data in one call.
+        Download (if missing) and load data in a single call.
 
         Args:
-            source: The data source specification
-            force_download: If True, download even if data exists locally
-            **kwargs: Additional parameters
+            source: Specification of the data to acquire and load.
+            crop_to_source: If True, crops the result to the source geometry.
+            force_download: If True, re-downloads data even if present.
+            **kwargs: Additional parameters for downloading or loading.
 
         Returns:
-            Loaded data
+            The loaded data object.
         """
         self.ensure_data_available(source, force_download=force_download, **kwargs)
         return self.reader.load(source, crop_to_source=crop_to_source, **kwargs)
@@ -844,22 +980,22 @@ class BaseHandler(ABC):
     def get_available_data_info(
         self,
         source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
+            str,
+            List[Union[tuple, Point]],
+            BaseGeometry,
+            gpd.GeoDataFrame,
         ],
         **kwargs,
     ) -> dict:
         """
-        Get information about available data for the given source.
+        Determine the availability status of data for a given source.
 
         Args:
-            source: The data source specification
-            **kwargs: Additional parameters
+            source: Specification of the data to check.
+            **kwargs: Additional parameters for resolving paths.
 
         Returns:
-            dict: Information about data availability, paths, etc.
+            A dictionary containing counts and paths of available/missing data.
         """
         try:
             if hasattr(self.config, "get_relevant_data_units"):

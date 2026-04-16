@@ -1,19 +1,26 @@
+"""
+Utilities for satellite imagery processing.
+Currently focuses on coordinate-to-pixel resolution calculations for
+Mercator projections.
+"""
 import numpy as np
 import pyproj
 
 def calculate_pixels_at_location(gdf, resolution, bbox_size=300, crs="EPSG:3857"):
     """
-    Calculates the number of pixels required to cover a given bounding box
-    around a geographic coordinate, given a resolution in meters per pixel.
+    Calculate the number of pixels required to cover a bounding box.
 
-    Parameters:
-        gdf: a geodataframe with Point geometries that are geographic coordinates
-        resolution (float): Desired resolution (meters per pixel).
-        bbox_size (float): Bounding box size in meters (default 300m x 300m).
-        crs (str): Target projection (default is EPSG:3857).
-    
+    Calculates the dimensions in pixels for a given physical size (meters)
+    around a coordinate, accounting for Mercator scale distortion.
+
+    Args:
+        gdf: GeoDataFrame with Point geometries (WGS84).
+        resolution: Target resolution in meters per pixel.
+        bbox_size: Bounding box side length in meters.
+        crs: Target projection CRS.
+
     Returns:
-        int: Number of pixels per side (width and height).
+        Number of pixels per side (width and height).
     """
 
     # Calculate avg lat and lon

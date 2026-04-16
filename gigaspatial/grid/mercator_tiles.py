@@ -7,7 +7,7 @@ from shapely.strtree import STRtree
 from shapely import Point
 import json
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Union, Iterable, Optional, Tuple, ClassVar
 import pycountry
 
@@ -17,17 +17,38 @@ from gigaspatial.config import config
 
 
 class MercatorTiles(BaseModel):
+    """
+    Representation of a collection of Web Mercator tiles as quadkeys.
+
+    Provides utility methods to create, filter, and manipulate Web Mercator
+    grids for spatial analysis. Handles conversion between coordinate pairs,
+    geometries, and quadkey strings.
+
+    Attributes:
+        zoom_level: Web Mercator zoom level (0-20).
+        quadkeys: List of quadkey strings.
+        data_store: Storage interface for I/O operations.
+        logger: Class-level logger.
+    """
+
     zoom_level: int = Field(..., ge=0, le=20)
     quadkeys: List[str] = Field(default_factory=list)
     data_store: DataStore = Field(default_factory=LocalDataStore, exclude=True)
     logger: ClassVar = config.get_logger("MercatorTiles")
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
-    def from_quadkeys(cls, quadkeys: Iterable[Union[str, int]]):
-        """Create MercatorTiles from list of quadkeys."""
+    def from_quadkeys(cls, quadkeys: Iterable[Union[str, int]]) -> "MercatorTiles":
+        """
+        Create MercatorTiles from a list of quadkeys.
+
+        Args:
+            quadkeys: Iterable of quadkey strings or integers.
+
+        Returns:
+            A new MercatorTiles instance.
+        """
         quadkeys = list(set(str(q) for q in quadkeys))
         if not quadkeys:
             cls.logger.warning("No quadkeys provided to from_quadkeys.")
@@ -40,8 +61,20 @@ class MercatorTiles(BaseModel):
     @classmethod
     def from_bounds(
         cls, xmin: float, ymin: float, xmax: float, ymax: float, zoom_level: int
-    ):
-        """Create MercatorTiles from boundary coordinates."""
+    ) -> "MercatorTiles":
+        """
+        Create MercatorTiles covering the specified geographic bounding box.
+
+        Args:
+            xmin: Minimum longitude.
+            ymin: Minimum latitude.
+            xmax: Maximum longitude.
+            ymax: Maximum latitude.
+            zoom_level: Web Mercator zoom level.
+
+        Returns:
+            A new MercatorTiles instance covering the bounds.
+        """
         cls.logger.info(
             f"Creating MercatorTiles from bounds: ({xmin}, {ymin}, {xmax}, {ymax}) at zoom level: {zoom_level}"
         )
@@ -59,12 +92,24 @@ class MercatorTiles(BaseModel):
         source: Union[
             BaseGeometry,
             gpd.GeoDataFrame,
-            List[Union[Point, Tuple[float, float]]],  # points
+            List[Union[Point, Tuple[float, float]]],
         ],
         zoom_level: int,
         predicate: str = "intersects",
         **kwargs,
-    ):
+    ) -> "MercatorTiles":
+        """
+        Factory method to create MercatorTiles from various spatial sources.
+
+        Args:
+            source: Spatial data source (Geometry, GDF, or points).
+            zoom_level: Web Mercator zoom level.
+            predicate: Spatial predicate for containment ('intersects', 'within').
+            **kwargs: Forwarded to specific factory methods.
+
+        Returns:
+            A new MercatorTiles instance.
+        """
         cls.logger.info(
             f"Creating MercatorTiles from spatial source (type: {type(source)}) at zoom level: {zoom_level} with predicate: {predicate}"
         )
@@ -91,8 +136,19 @@ class MercatorTiles(BaseModel):
         zoom_level: int,
         predicate: str = "intersects",
         **kwargs,
-    ):
-        """Create MercatorTiles from a polygon."""
+    ) -> "MercatorTiles":
+        """
+        Create MercatorTiles from a Shapely geometry.
+
+        Args:
+            geometry: Input geometry.
+            zoom_level: Web Mercator zoom level.
+            predicate: Spatial join predicate.
+            **kwargs: Additional metadata parameters.
+
+        Returns:
+            MercatorTiles instance covering the geometry.
+        """
         cls.logger.info(
             f"Creating MercatorTiles from geometry (bounds: {geometry.bounds}) at zoom level: {zoom_level} with predicate: {predicate}"
         )
@@ -120,7 +176,16 @@ class MercatorTiles(BaseModel):
     def from_points(
         cls, points: List[Union[Point, Tuple[float, float]]], zoom_level: int, **kwargs
     ) -> "MercatorTiles":
-        """Create MercatorTiles from a list of points or lat-lon pairs."""
+        """Creates a MercatorTiles collection from a list of points.
+
+        Args:
+            points: List of points as Shapely Points or (lon, lat) tuples.
+            zoom_level: Web Mercator zoom level (0-20).
+            **kwargs: Additional metadata parameters.
+
+        Returns:
+            A new MercatorTiles instance containing tiles for all points.
+        """
         cls.logger.info(
             f"Creating MercatorTiles from {len(points)} points at zoom level: {zoom_level}"
         )
@@ -132,7 +197,17 @@ class MercatorTiles(BaseModel):
     def from_json(
         cls, data_store: DataStore, file: Union[str, Path], **kwargs
     ) -> "MercatorTiles":
-        """Load MercatorTiles from a JSON file."""
+        """
+        Load MercatorTiles from a JSON file in storage.
+
+        Args:
+            data_store: DataStore instance for the file.
+            file: Path to the JSON file.
+            **kwargs: Metadata overrides.
+
+        Returns:
+            MercatorTiles instance loaded from file.
+        """
         cls.logger.info(
             f"Loading MercatorTiles from JSON file: {file} using data store: {type(data_store).__name__}"
         )
@@ -154,7 +229,14 @@ class MercatorTiles(BaseModel):
             return instance
 
     def filter_quadkeys(self, quadkeys: Iterable[str]) -> "MercatorTiles":
-        """Filter quadkeys by a given set of quadkeys."""
+        """Filters the current collection against a provided set of quadkeys.
+
+        Args:
+            quadkeys: An iterable of quadkey strings to keep.
+
+        Returns:
+            A new MercatorTiles instance containing only the intersecting tiles.
+        """
         original_count = len(self.quadkeys)
         incoming_count = len(
             list(quadkeys)
@@ -171,7 +253,11 @@ class MercatorTiles(BaseModel):
         )
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Convert to pandas DataFrame with quadkey and centroid coordinates."""
+        """Converts the tile collection to a pandas DataFrame.
+
+        Returns:
+            A DataFrame with 'quadkey', 'latitude', and 'longitude' columns.
+        """
         self.logger.info(
             f"Converting {len(self.quadkeys)} quadkeys to pandas DataFrame."
         )
@@ -202,6 +288,11 @@ class MercatorTiles(BaseModel):
         )
 
     def to_geoms(self) -> List[box]:
+        """Converts quadkeys into a list of Shapely box (polygon) geometries.
+
+        Returns:
+            A list of boxes representing the tile boundaries.
+        """
         self.logger.info(
             f"Converting {len(self.quadkeys)} quadkeys to shapely box geometries."
         )
@@ -211,7 +302,11 @@ class MercatorTiles(BaseModel):
         ]
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
-        """Convert to GeoPandas GeoDataFrame."""
+        """Converts the tile collection to a GeoPandas GeoDataFrame.
+
+        Returns:
+            A GeoDataFrame with 'quadkey' and 'geometry' columns.
+        """
         return gpd.GeoDataFrame(
             {"quadkey": self.quadkeys, "geometry": self.to_geoms()}, crs="EPSG:4326"
         )
@@ -240,7 +335,16 @@ class MercatorTiles(BaseModel):
         return quadkeys
 
     def save(self, file: Union[str, Path], format: str = "json") -> None:
-        """Save MercatorTiles to file in specified format."""
+        """Saves the MercatorTiles collection to persistent storage.
+
+        Args:
+            file: The destination file path.
+            format: The output format. Supported: 'json', 'parquet', 'geojson'.
+                Defaults to 'json'.
+
+        Raises:
+            ValueError: If an unsupported format is provided.
+        """
         with self.data_store.open(str(file), "wb" if format == "parquet" else "w") as f:
             if format == "parquet":
                 self.to_geodataframe().to_parquet(f, index=False)
@@ -256,10 +360,17 @@ class MercatorTiles(BaseModel):
 
 
 class CountryMercatorTiles(MercatorTiles):
-    """MercatorTiles specialized for country-level operations.
+    """
+    MercatorTiles specialized for country-level operations.
 
-    This class extends MercatorTiles to work specifically with country boundaries.
-    It can only be instantiated through the create() classmethod.
+    Extends MercatorTiles to work specifically with country boundaries retrieved
+    from the Giga administrative boundary dataset.
+
+    Note:
+        Instances should be created using the `create()` factory method.
+
+    Attributes:
+        country: ISO 3166-1 alpha-3 country code.
     """
 
     country: str = Field(..., exclude=True)
@@ -272,14 +383,26 @@ class CountryMercatorTiles(MercatorTiles):
 
     @classmethod
     def create(
-        cls,
+        self,
         country: str,
         zoom_level: int,
         predicate: str = "intersects",
         data_store: Optional[DataStore] = None,
         country_geom_path: Optional[Union[str, Path]] = None,
-    ):
-        """Create CountryMercatorTiles for a specific country."""
+    ) -> "CountryMercatorTiles":
+        """Factory method to create MercatorTiles for a specific country's boundary.
+
+        Args:
+            country: ISO country code (3-letter alpha-3) or name.
+            zoom_level: Target Web Mercator zoom level (0-20).
+            predicate: Spatial join predicate for the boundary.
+                Defaults to 'intersects'.
+            data_store: Optional storage interface for boundary lookup.
+            country_geom_path: Optional path override for the boundary file.
+
+        Returns:
+            A new CountryMercatorTiles instance fully populated for the country.
+        """
         from gigaspatial.handlers.boundaries import AdminBoundaries
 
         instance = super().__new__(cls)

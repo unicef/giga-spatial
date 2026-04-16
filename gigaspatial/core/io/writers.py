@@ -1,3 +1,7 @@
+"""
+Module for writing datasets (DataFrames, GeoDataFrames, JSON) to a DataStore.
+Provides high-level utilities for serializing geospatial and tabular data.
+"""
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
@@ -8,33 +12,36 @@ from .data_store import DataStore
 
 
 def write_json(data, data_store: DataStore, path, **kwargs):
+    """
+    Write data to a JSON file in the data store.
+
+    Args:
+        data: Object to serialize to JSON.
+        data_store: DataStore instance to use for writing.
+        path: Destination path in the data store.
+        **kwargs: Additional arguments passed to json.dump.
+    """
     with data_store.open(path, "w") as f:
         json.dump(data, f, **kwargs)
 
 
 def write_dataset(data, data_store: DataStore, path, **kwargs):
     """
-    Write DataFrame, GeoDataFrame, or a generic object (for JSON)
-    to various file formats in DataStore.
+    Write DataFrame, GeoDataFrame, or a generic object to various file formats.
 
-    Parameters:
-    ----------
-    data : pandas.DataFrame, geopandas.GeoDataFrame, or any object
-        The data to write to data storage.
-    data_store : DataStore
-        Instance of DataStore for accessing data storage.
-    path : str
-        Path where the file will be written in data storage.
-    **kwargs : dict
-        Additional arguments passed to the specific writer function.
+    Supported formats include .csv, .xlsx, .json, .parquet for DataFrames,
+    and .geojson, .gpkg, .parquet for GeoDataFrames.
+
+    Args:
+        data: The data to write. Can be pd.DataFrame, gpd.GeoDataFrame, or a JSON-serializable object.
+        data_store: Instance of DataStore for accessing data storage.
+        path: Path where the file will be written.
+        **kwargs: Additional arguments passed to the specific writer function (e.g., index=False).
 
     Raises:
-    ------
-    ValueError
-        If the file type is unsupported or if there's an error writing the file.
-    TypeError
-            If input data is not a DataFrame, GeoDataFrame, AND not a generic object
-            intended for a .json file.
+        ValueError: If the file type is unsupported or if there's an error writing the file.
+        TypeError: If input data type is incompatible with the file extension.
+        RuntimeError: For unexpected errors during the write process.
     """
 
     # Define supported file formats and their writers
@@ -126,19 +133,13 @@ def write_datasets(data_dict, data_store: DataStore, **kwargs):
     """
     Write multiple datasets to data storage at once.
 
-    Parameters:
-    ----------
-    data_dict : dict
-        Dictionary mapping paths to DataFrames/GeoDataFrames.
-    data_store : DataStore
-        Instance of DataStore for accessing data storage.
-    **kwargs : dict
-        Additional arguments passed to write_dataset.
+    Args:
+        data_dict: Dictionary mapping paths (str) to data objects.
+        data_store: DataStore instance.
+        **kwargs: Additional arguments passed to write_dataset for each item.
 
     Raises:
-    ------
-    ValueError
-        If there are any errors writing the datasets.
+        ValueError: If one or more datasets fail to write, containing details of all errors.
     """
     errors = {}
 

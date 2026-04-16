@@ -1,3 +1,11 @@
+"""
+Humantarian Data Exchange (HDX) dataset handler.
+
+This module provides specialized handlers for the HDX platform.
+It supports searching for datasets, filtering specific resources (e.g., by country
+or file format), and downloading/loading diverse humanitarian datasets (CSV,
+GeoJSON, Excel, etc.) into vectorized or tabular formats.
+"""
 import logging
 from tqdm import tqdm
 from pathlib import Path
@@ -28,7 +36,18 @@ from gigaspatial.handlers.base import (
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class HDXConfig(BaseHandlerConfig):
-    """Configuration for HDX data access"""
+    """
+    Configuration for HDX dataset access.
+
+    Manages dataset identification, HDX API authentication (user agent),
+    and resource filtering logic.
+
+    Attributes:
+        dataset_name: Unique identifier for the HDX dataset.
+        base_path: Root directory for local dataset storage.
+        user_agent: Token identifying the application to the HDX API.
+        hdx_site: Target HDX environment ('prod' or 'test').
+    """
 
     # User configuration
     dataset_name: str = Field(
@@ -37,6 +56,9 @@ class HDXConfig(BaseHandlerConfig):
 
     # Optional configuration with defaults
     base_path: Path = Field(default=global_config.get_path("hdx", "bronze"))
+    n_workers: int = (
+        1  # HDX data is not parallelizable beyond single file, so just iterate.
+    )
     user_agent: str = Field(
         default="gigaspatial", description="User agent for HDX API requests"
     )
@@ -54,22 +76,18 @@ class HDXConfig(BaseHandlerConfig):
         hdx_site: str = "prod",
         user_agent: str = "gigaspatial",
     ) -> List[Dict]:
-        """Search for datasets in HDX before initializing the class.
+        """
+        Search for datasets on the HDX platform.
 
         Args:
-            query: Search query string
-            rows: Number of results per page. Defaults to all datasets (sys.maxsize).
-            sort: Sort order - one of 'relevance', 'views_recent', 'views_total', 'last_modified' (default: 'relevance')
-            hdx_site: HDX site to use - 'prod' or 'test' (default: 'prod')
-            user_agent: User agent for HDX API requests (default: 'gigaspatial')
+            query: Search keywords or CKAN query string.
+            rows: Max number of results to return.
+            sort: Field and direction to sort by.
+            hdx_site: HDX environment to query.
+            user_agent: API collector identifier.
 
         Returns:
-            List of dataset dictionaries containing search results
-
-        Example:
-            >>> results = HDXConfig.search_datasets("population", rows=5)
-            >>> for dataset in results:
-            >>>     print(f"Name: {dataset['name']}, Title: {dataset['title']}")
+            A list of matching dataset metadata dictionaries.
         """
         try:
             Configuration.create(
@@ -133,9 +151,15 @@ class HDXConfig(BaseHandlerConfig):
             self.logger.error(f"Error fetching HDX dataset: {str(e)}")
             raise
 
-    def _match_pattern(self, value: str, pattern: str) -> bool:
+    def _match_pattern(self, value: str, pattern: str, token_match: bool = False) -> bool:
         """Check if a value matches a pattern"""
         if isinstance(pattern, str):
+            if token_match:
+                import re
+
+                # Match as a token delimited by common separators or start/end of string
+                regex = rf"(^|[._/-]){re.escape(pattern)}([._/-]|$)"
+                return bool(re.search(regex, value, re.IGNORECASE))
             return pattern.lower() in value.lower()
         return value == pattern
 
@@ -179,13 +203,21 @@ class HDXConfig(BaseHandlerConfig):
         return patterns
 
     def get_dataset_resources(
-        self, filter: Optional[Dict[str, Any]] = None, exact_match: bool = False
+        self,
+        filter: Optional[Dict[str, Any]] = None,
+        exact_match: bool = False,
+        token_match: bool = False,
     ) -> List[Resource]:
-        """Get resources from the HDX dataset
+        """
+        Retrieve resource metadata matching specific criteria.
 
         Args:
-            filter: Dictionary of key-value pairs to filter resources
-            exact_match: If True, perform exact matching. If False, use pattern matching
+            filter: Key-value pairs to match against resource metadata.
+            exact_match: If True, requires strict equality for filter values.
+            token_match: If True, pattern must match a distinct metadata component.
+
+        Returns:
+            A list of HDX Resource objects.
         """
         try:
             resources = self.dataset.get_resources()
@@ -213,7 +245,11 @@ class HDXConfig(BaseHandlerConfig):
                             # For pattern matching, generate patterns for value(s)
                             patterns = self._get_patterns_for_value(value)
                             if not any(
-                                self._match_pattern(str(res.data[key]), pattern)
+                                self._match_pattern(
+                                    str(res.data[key]),
+                                    pattern,
+                                    token_match=token_match,
+                                )
                                 for pattern in patterns
                             ):
                                 match = False
@@ -233,8 +269,17 @@ class HDXConfig(BaseHandlerConfig):
     ) -> List[Resource]:
         return self.get_dataset_resources(geometry, **kwargs)
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> str:
-        """Get the path for a data unit"""
+    def get_data_unit_path(self, unit: Resource, **kwargs) -> Path:
+        """
+        Resolve an HDX resource to its local storage path.
+
+        Args:
+            unit: HDX Resource object.
+            **kwargs: Additional resolution context.
+
+        Returns:
+            Absolute local path for the resource file.
+        """
         try:
             filename = unit.data["name"]
         except:
@@ -258,12 +303,14 @@ class HDXConfig(BaseHandlerConfig):
 
     def extract_search_geometry(self, source, **kwargs):
         """
-        Override the base class method since geometry extraction does not apply.
-        Returns dictionary to filter.
+        Identify filter criteria from a geographic or structural source.
 
         Args:
-            source: Either a country name/code (str) or a filter dictionary
-            **kwargs: Additional keyword arguments passed to the specific method
+            source: Country name/code, or a direct filter dictionary.
+            **kwargs: Resolution parameters (e.g., 'key' to filter on).
+
+        Returns:
+            A dictionary for resource filtering.
         """
         if isinstance(source, str):
             country = pycountry.countries.lookup(source)
@@ -292,7 +339,12 @@ class HDXConfig(BaseHandlerConfig):
 
 
 class HDXDownloader(BaseHandlerDownloader):
-    """Downloader for HDX datasets"""
+    """
+    Downloader for HDX datasets.
+
+    Handles the acquisition of files from the HDX platform, utilizing
+    temporary storage and DataStore abstraction for final persistence.
+    """
 
     def __init__(
         self,
@@ -303,8 +355,17 @@ class HDXDownloader(BaseHandlerDownloader):
         config = config if isinstance(config, HDXConfig) else HDXConfig(**config)
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, resource: str, **kwargs) -> str:
-        """Download a single resource"""
+    def download_data_unit(self, resource: Resource, **kwargs) -> str:
+        """
+        Download a specific HDX resource.
+
+        Args:
+            resource: HDX Resource object to download.
+            **kwargs: Additional parameters.
+
+        Returns:
+            Local path to the downloaded resource on success, or None on failure.
+        """
         try:
             resource_name = resource.get("name", "Unknown")
             self.logger.info(f"Downloading resource: {resource_name}")
@@ -325,9 +386,13 @@ class HDXDownloader(BaseHandlerDownloader):
             return None
 
 
-
 class HDXReader(BaseHandlerReader):
-    """Reader for HDX datasets"""
+    """
+    Reader for HDX datasets.
+
+    Parses local HDX resource files (CSV, GeoJSON, etc.) into structured
+    Python objects or dataframes.
+    """
 
     def __init__(
         self,
@@ -341,14 +406,27 @@ class HDXReader(BaseHandlerReader):
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], **kwargs
     ) -> Any:
-        """Load data from paths"""
+        """
+        Load data from one or more local HDX resource paths.
+
+        Args:
+            source_data_path: List of local paths to resource files.
+            **kwargs: Parameters passed to `read_dataset`.
+
+        Returns:
+            Aggregated data contents (typically a dict or single DataFrame).
+        """
         if len(source_data_path) == 1:
-            return read_dataset(self.data_store, source_data_path[0])
+            return read_dataset(
+                source_data_path[0], data_store=self.data_store, **kwargs
+            )
 
         all_data = {}
         for file_path in source_data_path:
             try:
-                all_data[file_path] = read_dataset(self.data_store, file_path)
+                all_data[file_path] = read_dataset(
+                    file_path, data_store=self.data_store, **kwargs
+                )
             except Exception as e:
                 raise ValueError(f"Could not read file {file_path}: {str(e)}")
         return all_data
@@ -359,7 +437,12 @@ class HDXReader(BaseHandlerReader):
 
 
 class HDXHandler(BaseHandler):
-    """Handler for HDX datasets"""
+    """
+    Unified handler for HDX datasets.
+
+    Provides a streamlined API for interacting with the HDX platform,
+    allowing for dataset-specific configuration and resource-level access.
+    """
 
     def __init__(
         self,
@@ -384,7 +467,17 @@ class HDXHandler(BaseHandler):
     def create_config(
         self, data_store: DataStore, logger: logging.Logger, **kwargs
     ) -> HDXConfig:
-        """Create and return a HDXConfig instance"""
+        """
+        Create an HDX configuration instance.
+
+        Args:
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Configuration overrides.
+
+        Returns:
+            A configured HDXConfig.
+        """
         return HDXConfig(
             dataset_name=self._dataset_name,
             data_store=data_store,
@@ -399,7 +492,18 @@ class HDXHandler(BaseHandler):
         logger: logging.Logger,
         **kwargs,
     ) -> HDXDownloader:
-        """Create and return a HDXDownloader instance"""
+        """
+        Create an HDX downloader instance.
+
+        Args:
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Downloader parameters.
+
+        Returns:
+            A configured HDXDownloader.
+        """
         return HDXDownloader(
             config=config,
             data_store=data_store,
@@ -414,7 +518,18 @@ class HDXHandler(BaseHandler):
         logger: logging.Logger,
         **kwargs,
     ) -> HDXReader:
-        """Create and return a HDXReader instance"""
+        """
+        Create an HDX reader instance.
+
+        Args:
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Reader parameters.
+
+        Returns:
+            A configured HDXReader.
+        """
         return HDXReader(
             config=config,
             data_store=data_store,

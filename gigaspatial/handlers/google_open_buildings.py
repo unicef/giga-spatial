@@ -1,3 +1,10 @@
+"""
+Google Open Buildings dataset handler.
+
+This module provides specialized handlers for the Google Open Buildings dataset,
+supporting both point and polygon geometries. It handles S2-tile-based resolution,
+multithreaded downloads from Google's public buckets, and spatial filtering.
+"""
 from dataclasses import dataclass
 from pathlib import Path
 import functools
@@ -25,7 +32,12 @@ from gigaspatial.config import config as global_config
 class GoogleOpenBuildingsConfig(BaseHandlerConfig):
     """
     Configuration for Google Open Buildings dataset files.
-    Implements the BaseHandlerConfig interface for data unit resolution.
+
+    Maintains settings for S2 tile resolution and local storage paths.
+
+    Attributes:
+        base_path: Root directory for storing building data.
+        data_types: Supported geometry formats ('polygons', 'points').
     """
 
     TILES_URL: str = (
@@ -39,7 +51,11 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         self._load_s2_tiles()
 
     def _load_s2_tiles(self):
-        """Load S2 tiles from GeoJSON file."""
+        """Loads S2 tiles from the remote GeoJSON file into a GeoDataFrame.
+
+        Raises:
+            requests.exceptions.RequestException: If the remote file cannot be fetched.
+        """
         response = requests.get(self.TILES_URL)
         response.raise_for_status()
         self.tiles_gdf = gpd.GeoDataFrame.from_features(
@@ -47,6 +63,17 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         )
 
     def get_relevant_data_units(self, source, force_recompute: bool = False, **kwargs):
+        """
+        Identify data units (tiles) relevant to a specific source.
+
+        Args:
+            source: Input source identifier (country, geometry, points, or GDF).
+            force_recompute: If True, bypasses the internal cache.
+            **kwargs: Additional resolution context.
+
+        Returns:
+            A list of intersecting tile information dictionaries.
+        """
         return super().get_relevant_data_units(
             source, force_recompute, crs="EPSG:4326", **kwargs
         )
@@ -55,7 +82,14 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
     ) -> List[dict]:
         """
-        Return intersecting tiles for a given geometry or GeoDataFrame.
+        Identify S2 tiles intersecting a given geometry.
+
+        Args:
+            geometry: The spatial filter to find relevant tiles for.
+            **kwargs: Additional filtering parameters.
+
+        Returns:
+            A list of dictionaries containing tile metadata (ID, URL, Size).
         """
         mask = (tile_geom.intersects(geometry) for tile_geom in self.tiles_gdf.geometry)
         return self.tiles_gdf.loc[mask, ["tile_id", "tile_url", "size_mb"]].to_dict(
@@ -69,7 +103,15 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         **kwargs,
     ) -> Path:
         """
-        Given a tile row or tile_id, return the corresponding file path.
+        Resolve a building tile to its local compressed CSV path.
+
+        Args:
+            unit: Tile identifier or metadata record.
+            data_type: Geometry format ('polygons' or 'points').
+            **kwargs: Additional context.
+
+        Returns:
+            Absolute path to the local data file.
         """
         tile_id = (
             unit["tile_id"]
@@ -85,7 +127,15 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         **kwargs,
     ) -> list:
         """
-        Given data unit identifiers, return the corresponding file paths.
+        Resolve multiple tile identifiers to their corresponding local paths.
+
+        Args:
+            units: Collection of tile identifiers or metadata.
+            data_type: Geometry format ('polygons' or 'points').
+            **kwargs: Additional context.
+
+        Returns:
+            List of resolved absolute paths.
         """
         if isinstance(units, pd.DataFrame):
             return [
@@ -96,7 +146,12 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
 
 
 class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
-    """A class to handle downloads of Google's Open Buildings dataset."""
+    """
+    Downloader for Google's Open Buildings dataset.
+
+    Manages the acquisition of building footprint data (CSV files) from Google's
+    public dataset buckets. Supports point and polygon geometries.
+    """
 
     def __init__(
         self,
@@ -124,10 +179,14 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
         data_type: Literal["polygons", "points"] = "polygons",
     ) -> Optional[str]:
         """
-        Download data file for a single tile.
+        Download a single building data file for a specific tile.
 
-        data_type: The type of building data to download ('polygons' or 'points').
-            Defaults to 'polygons'.
+        Args:
+            tile_info: Metadata dictionary or Series containing 'tile_url' and 'tile_id'.
+            data_type: Geometry format ('polygons' or 'points').
+
+        Returns:
+            The local file path on success, or None if the download failed.
         """
 
         tile_url = tile_info["tile_url"]
@@ -201,7 +260,10 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
 
 class GoogleOpenBuildingsReader(BaseHandlerReader):
     """
-    Reader for Google Open Buildings data, supporting country, points, and geometry-based resolution.
+    Reader for Google Open Buildings data.
+
+    Coordinates the loading of building footprint data (CSV) from the local
+    data store into GeoDataFrames.
     """
 
     def __init__(
@@ -217,11 +279,14 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
         self, source_data_path: List[Union[str, Path]], **kwargs
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
-        Load building data from Google Open Buildings dataset.
+        Load building data from specific file paths.
+
         Args:
-            source_data_path: List of file paths to load
+            source_data_path: List of local paths to building data files.
+            **kwargs: Additional parameters for `_load_tabular_data`.
+
         Returns:
-            GeoDataFrame containing building data
+            A GeoDataFrame containing the aggregated building data.
         """
         result = self._load_tabular_data(file_paths=source_data_path)
         return result
@@ -233,14 +298,32 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
             source=source, crop_to_source=crop_to_source, data_type=data_type, **kwargs
         )
 
-    def load_points(self, source, crop_to_source: bool = False, **kwargs):
-        """This is a convenience method to load points data"""
+    def load_points(self, source, crop_to_source: bool = False, **kwargs) -> gpd.GeoDataFrame:
+        """Convenience method to load building point data.
+
+        Args:
+            source: Geographic filter (country, geometry, or points).
+            crop_to_source: If True, crops the result to the source geometry.
+            **kwargs: Additional parameters for `load`.
+
+        Returns:
+            GeoDataFrame containing building points.
+        """
         return self.load(
             source=source, crop_to_source=crop_to_source, data_type="points", **kwargs
         )
 
-    def load_polygons(self, source, crop_to_source: bool = False, **kwargs):
-        """This is a convenience method to load polygons data"""
+    def load_polygons(self, source, crop_to_source: bool = False, **kwargs) -> gpd.GeoDataFrame:
+        """Convenience method to load building polygon data.
+
+        Args:
+            source: Geographic filter (country, geometry, or points).
+            crop_to_source: If True, crops the result to the source geometry.
+            **kwargs: Additional parameters for `load`.
+
+        Returns:
+            GeoDataFrame containing building polygons.
+        """
         return self.load(
             source=source, crop_to_source=crop_to_source, data_type="polygons", **kwargs
         )
@@ -248,25 +331,25 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
 
 class GoogleOpenBuildingsHandler(BaseHandler):
     """
-    Handler for Google Open Buildings dataset.
+    Unified handler for the Google Open Buildings dataset.
 
-    This class provides a unified interface for downloading and loading Google Open Buildings data.
-    It manages the lifecycle of configuration, downloading, and reading components.
+    Provides a top-level API for acquiring and accessing building footprints
+    across multiple geometry formats (points and polygons).
     """
 
     def create_config(
         self, data_store: DataStore, logger: logging.Logger, **kwargs
     ) -> GoogleOpenBuildingsConfig:
         """
-        Create and return a GoogleOpenBuildingsConfig instance.
+        Create a configuration instance for Google Open Buildings.
 
         Args:
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional configuration parameters
+            data_store: DataStore for tile indexing.
+            logger: Component logger.
+            **kwargs: Configuration overrides.
 
         Returns:
-            Configured GoogleOpenBuildingsConfig instance
+            A configured GoogleOpenBuildingsConfig.
         """
         return GoogleOpenBuildingsConfig(data_store=data_store, logger=logger, **kwargs)
 
@@ -301,16 +384,16 @@ class GoogleOpenBuildingsHandler(BaseHandler):
         **kwargs,
     ) -> GoogleOpenBuildingsReader:
         """
-        Create and return a GoogleOpenBuildingsReader instance.
+        Create a reader instance for Google Open Buildings.
 
         Args:
-            config: The configuration object
-            data_store: The data store instance to use
-            logger: The logger instance to use
-            **kwargs: Additional reader parameters
+            config: Handler configuration.
+            data_store: DataStore for reading files.
+            logger: Component logger.
+            **kwargs: Reader parameters.
 
         Returns:
-            Configured GoogleOpenBuildingsReader instance
+            A configured GoogleOpenBuildingsReader.
         """
         return GoogleOpenBuildingsReader(
             config=config, data_store=data_store, logger=logger, **kwargs

@@ -1,3 +1,8 @@
+"""
+Engine for large-scale building data processing.
+Provides partitioned processing for Google and Microsoft building datasets,
+supporting zonal counts and nearest-building searches for POIs.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -47,7 +52,15 @@ class GoogleMSBuildingsEngine:
     def _s2_grid_gdf_from_building_files(
         building_files: Sequence[Path],
     ) -> gpd.GeoDataFrame:
-        """Build an S2 grid GeoDataFrame with a `filepath` column from S2-tile filenames."""
+        """
+        Build an S2 grid GeoDataFrame with a `filepath` column from S2-tile filenames.
+
+        Args:
+            building_files: Sequence of paths to S2-tiled building files.
+
+        Returns:
+            GeoDataFrame containing S2 cell geometries and corresponding filepaths.
+        """
         from gigaspatial.grid.s2 import S2Cells
 
         cells = {int(p.stem): p for p in building_files}
@@ -67,7 +80,13 @@ class GoogleMSBuildingsEngine:
         """
         Create job list for partitioned building data by finding intersecting S2 cells.
 
-        Returns list of (filepath, zone_id_array) tuples.
+        Args:
+            zones_gdf: GeoDataFrame of administrative or grid zones.
+            building_files: Sequence of building file paths.
+            predicate: Spatial predicate for matching.
+
+        Returns:
+            List of (filepath, zone_id_array) tuples.
         """
         grid_gdf = cls._s2_grid_gdf_from_building_files(building_files)
 
@@ -96,9 +115,16 @@ class GoogleMSBuildingsEngine:
         predicate: Literal["intersects"] = "intersects",
     ) -> List[Tuple[Path, np.ndarray]]:
         """
-        Create job list for partitioned building data by buffering POIs and finding intersecting S2 cells.
+        Create job list for partitioned building data by buffering POIs.
 
-        Returns list of (filepath, poi_id_array) tuples.
+        Args:
+            pois_gdf: GeoDataFrame of Points of Interest.
+            building_files: Sequence of building file paths.
+            search_radius_m: Buffer radius in meters.
+            predicate: Spatial predicate for matching.
+
+        Returns:
+            List of (filepath, poi_id_array) tuples.
         """
         grid_gdf = cls._s2_grid_gdf_from_building_files(building_files)
 
@@ -138,9 +164,15 @@ class GoogleMSBuildingsEngine:
         """
         Count buildings intersecting each zone.
 
-        Expects:
-        - `zones_gdf` contains columns: `zone_id`, `geometry`
-        - `building_files` is a sequence of paths (single-file or S2-partitioned)
+        Args:
+            handler: The building data handler (e.g. MSBuildingsHandler).
+            building_files: Sequence of building file paths.
+            zones_gdf: GeoDataFrame with 'zone_id' and 'geometry'.
+            source_filter: Filter for specific building sources ('google' or 'microsoft').
+            logger: Optional logger.
+
+        Returns:
+            BuildingCountsResult containing the per-zone counts.
         """
         from shapely.strtree import STRtree
 
@@ -214,9 +246,18 @@ class GoogleMSBuildingsEngine:
         logger=None,
     ) -> NearestBuildingsResult:
         """
-        Find the nearest building distance (meters) per POI (haversine).
+        Find the nearest building distance (meters) per POI.
 
-        Expects `pois_gdf` contains columns: `poi_id`, `geometry` (EPSG:4326).
+        Args:
+            handler: The building data handler.
+            building_files: Sequence of building file paths.
+            pois_gdf: GeoDataFrame with 'poi_id' and 'geometry'.
+            source_filter: Filter for building sources.
+            search_radius_m: Search distance for partitioned optimization.
+            logger: Optional logger.
+
+        Returns:
+            NearestBuildingsResult containing distances in meters.
         """
         from scipy.spatial import cKDTree
 

@@ -1,15 +1,19 @@
+"""
+Relative Wealth Index (RWI) data handler.
+
+This module provides specialized handlers for the Meta/Facebook Relative Wealth
+Index datasets hosted on HDX. It extends the HDX handler to support:
+- Automatic selection of the latest RWI resources.
+- Quadkey generation from point locations (Zoom 14).
+- Seamless conversion to geospatial tiles.
+"""
+
 import logging
-from typing import List, Optional, Tuple, Union, Literal
-from geopandas.geodataframe import GeoDataFrame
+from typing import Optional, Union, Literal
 from pydantic.dataclasses import dataclass
 from datetime import datetime
-import pycountry
-
-from hdx.data.resource import Resource
 
 from pydantic import Field, ConfigDict
-from shapely.geometry import Point
-from shapely.geometry.base import BaseGeometry
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
@@ -18,7 +22,14 @@ from gigaspatial.grid.mercator_tiles import MercatorTiles
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
 class RWIConfig(HDXConfig):
-    """Configuration for Relative Wealth Index data access"""
+    """
+    Configuration for Relative Wealth Index (RWI) data access.
+
+    Attributes:
+        dataset_name: Fixed to 'relative-wealth-index'.
+        country: Optional ISO country code for resource filtering.
+        latest_only: If True, filters for the most recent creation date.
+    """
 
     # Override dataset_name to be fixed for RWI
     dataset_name: Literal["relative-wealth-index"] = Field(
@@ -40,8 +51,22 @@ class RWIConfig(HDXConfig):
     def get_relevant_data_units(
         self, source: str, force_recompute: bool = False, **kwargs
     ):
+        """
+        Identify relevant RWI resources on HDX for a given source.
+
+        Args:
+            source: Geographic source (e.g., country name).
+            force_recompute: If True, bypasses the internal cache.
+            **kwargs: Additional filtering parameters.
+
+        Returns:
+            A list of matching HDX Resource objects.
+        """
         key = self._cache_key(source, **kwargs)
-        resources = super().get_relevant_data_units(source, force_recompute, **kwargs)
+        # Use token_match=True to prevent 'af' matching 'caf'
+        resources = super().get_relevant_data_units(
+            source, force_recompute, token_match=True, **kwargs
+        )
 
         if self.latest_only and len(resources) > 1:
             # Find the resource with the latest creation date
@@ -74,7 +99,11 @@ class RWIConfig(HDXConfig):
 
 
 class RWIDownloader(HDXDownloader):
-    """Specialized downloader for the Relative Wealth Index dataset from HDX"""
+    """
+    Downloader for RWI datasets.
+
+    Handles acquisition of wealth index CSVs from the HDX platform.
+    """
 
     def __init__(
         self,
@@ -87,7 +116,11 @@ class RWIDownloader(HDXDownloader):
 
 
 class RWIReader(HDXReader):
-    """Specialized reader for the Relative Wealth Index dataset from HDX"""
+    """
+    Reader for RWI datasets.
+
+    Parses wealth index CSVs into tabular formats, ensuring quadkey consistency.
+    """
 
     def __init__(
         self,
@@ -100,7 +133,12 @@ class RWIReader(HDXReader):
 
 
 class RWIHandler(HDXHandler):
-    """Handler for Relative Wealth Index dataset"""
+    """
+    Unified handler for Relative Wealth Index data.
+
+    Coordinates acquisition, reading, and quadkey-based spatial processing
+    of wealth index resources.
+    """
 
     def __init__(
         self,
@@ -124,7 +162,17 @@ class RWIHandler(HDXHandler):
     def create_config(
         self, data_store: DataStore, logger: logging.Logger, **kwargs
     ) -> RWIConfig:
-        """Create and return a RWIConfig instance"""
+        """
+        Create an RWI configuration instance.
+
+        Args:
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Configuration overrides.
+
+        Returns:
+            A configured RWIConfig.
+        """
         return RWIConfig(
             data_store=data_store,
             logger=logger,
@@ -138,7 +186,18 @@ class RWIHandler(HDXHandler):
         logger: logging.Logger,
         **kwargs,
     ) -> RWIDownloader:
-        """Create and return a RWIDownloader instance"""
+        """
+        Create an RWI downloader instance.
+
+        Args:
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Downloader parameters.
+
+        Returns:
+            A configured RWIDownloader.
+        """
         return RWIDownloader(
             config=config,
             data_store=data_store,
@@ -153,7 +212,18 @@ class RWIHandler(HDXHandler):
         logger: logging.Logger,
         **kwargs,
     ) -> RWIReader:
-        """Create and return a RWIReader instance"""
+        """
+        Create an RWI reader instance.
+
+        Args:
+            config: Handler configuration.
+            data_store: Storage backend for local files.
+            logger: Component logger.
+            **kwargs: Reader parameters.
+
+        Returns:
+            A configured RWIReader.
+        """
         return RWIReader(
             config=config,
             data_store=data_store,
@@ -168,6 +238,18 @@ class RWIHandler(HDXHandler):
         ensure_available: bool = True,
         **kwargs,
     ):
+        """
+        Acquire and process RWI data, ensuring quadkey availability.
+
+        Args:
+            source: Geographic source or direct file paths.
+            crop_to_source: If True, filters results to the source boundary.
+            ensure_available: If True, executes download if data is missing locally.
+            **kwargs: Additional processing parameters.
+
+        Returns:
+            A pandas DataFrame of wealth index results with quadkeys.
+        """
         data = super().load_data(source, crop_to_source, ensure_available, **kwargs)
         if "quadkey" not in data:
             quadkeys = MercatorTiles.get_quadkeys_from_points(
@@ -190,6 +272,18 @@ class RWIHandler(HDXHandler):
         ensure_available: bool = True,
         **kwargs,
     ):
+        """
+        Acquire and load RWI data as a geospatial GeoDataFrame of tiles.
+
+        Args:
+            source: Geographic source or direct file paths.
+            crop_to_source: If True, filters results to the source boundary.
+            ensure_available: If True, executes download if data is missing locally.
+            **kwargs: Additional processing parameters.
+
+        Returns:
+            A GeoDataFrame containing wealth index data mapped to spatial tiles.
+        """
         data = self.load_data(source, crop_to_source, ensure_available, **kwargs)
         tiles = MercatorTiles.from_quadkeys(data.quadkey.to_list()).to_geodataframe()
         gdf_rwi = tiles.merge(data, on="quadkey")

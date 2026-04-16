@@ -1,7 +1,17 @@
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Union, Literal
 from datetime import datetime, timedelta
-import ee
+
+try:
+    import ee
+    import geemap
+
+    _HAS_GEE = True
+except ImportError:
+    _HAS_GEE = False
+    ee = None
+    geemap = None
 
 from .registry import GEEDatasetRegistry
 
@@ -216,7 +226,7 @@ class GEEConfig:
         """Export configuration as dictionary."""
         return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
 
-    def get_ee_reducer(self) -> ee.Reducer:
+    def get_ee_reducer(self) -> "ee.Reducer":
         """
         Get the appropriate Earth Engine Reducer based on config.
 
@@ -225,6 +235,12 @@ class GEEConfig:
         ee.Reducer
             Earth Engine reducer object
         """
+        if not _HAS_GEE:
+            raise ImportError(
+                "GEEConfig.get_ee_reducer requires 'earthengine-api' and 'geemap'. "
+                "Install them with: pip install 'giga-spatial[gee]'"
+            )
+
         reducer_map = {
             "mean": ee.Reducer.mean(),
             "median": ee.Reducer.median(),

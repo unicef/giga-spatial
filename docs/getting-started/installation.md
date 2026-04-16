@@ -81,8 +81,9 @@ If you encounter any issues during installation, consider the following:
   pip install giga-spatial  # or pip install . if installing from source
   ```
 
----
+## Next Steps
 
-### Next Steps
+Once the installation is complete, you **must configure your storage and API credentials** before running complex analyses.
 
-Once the installation is complete, you can proceed to the [Quick Start Guide](quickstart.md) to begin using the `gigaspatial` package.
+1. **[Configuration Guide](configuration.md)**: Set up your `.env` file, storage backends (Local, ADLS, or Snowflake), and API keys.
+2. **[Quick Start Guide](quickstart.md)**: Learn how to perform your first spatial query.
