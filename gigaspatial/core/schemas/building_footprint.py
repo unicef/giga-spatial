@@ -3,6 +3,7 @@ Module for building footprint schema and processing.
 Defines the BuildingFootprint entity, representing physical building structures
 with polygon geometries.
 """
+
 from enum import Enum
 from typing import Optional, ClassVar, Union
 from pathlib import Path
@@ -331,9 +332,12 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
         Returns:
             BuildingFootprintTable with validated BuildingFootprint entities.
         """
-        if clean:
-            df = BuildingFootprintProcessor().process(df)
-        return super().from_dataframe(df=df, entity_class=entity_class)
+        return super().from_dataframe(
+            df=df,
+            entity_class=entity_class,
+            clean=clean,
+            processor=BuildingFootprintProcessor(),
+        )
 
     # ------------------------------------------------------------------
     # Filters

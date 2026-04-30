@@ -4,6 +4,7 @@ Provides the foundation for all geospatial and network entities in Giga Spatial,
 including point-based (GigaEntity) and geometry-based (GigaGeoEntity) records,
 along with generic table containers (EntityTable).
 """
+
 from __future__ import annotations
 
 from functools import wraps
@@ -352,6 +353,9 @@ class EntityTable(BaseModel, Generic[E]):
         cls,
         df: pd.DataFrame,
         entity_class: Type[E],
+        clean: bool = False,
+        processor: Optional[EntityProcessor] = None,
+        **kwargs,
     ) -> "EntityTable[E]":
         """
         Create an EntityTable from an existing DataFrame.
@@ -359,17 +363,30 @@ class EntityTable(BaseModel, Generic[E]):
         Args:
             df: DataFrame containing entity data.
             entity_class: The Pydantic entity class to validate each row against.
+            clean: Whether to apply an EntityProcessor before validation.
+            processor: Optional processor instance to use if clean=True.
+                Defaults to the base EntityProcessor if None.
+            **kwargs: Additional arguments passed to the processor.
 
         Returns:
             EntityTable instance. Rows that fail validation are skipped with a warning.
         """
+        if clean:
+            if processor is None:
+                processor = EntityProcessor()
+            df = processor.process(df, **kwargs)
+
         entities: List[E] = []
         failed_rows: List[dict] = []
         errors: List[str] = []
 
         tqdm_stream = config.get_tqdm_logger_stream(logger)
+        # Convert NaN to None so Pydantic handles missing Optional fields correctly.
+        # Otherwise, np.nan triggers numeric validations (like ge=0) and fails.
+        records = df.replace({np.nan: None}).to_dict(orient="records")
+
         for row in tqdm(
-            df.to_dict(orient="records"),
+            records,
             file=tqdm_stream,
             desc=f"Validating {entity_class.__name__} entities",
             total=len(df),

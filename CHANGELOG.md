@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.4] - 2026-04-30
+
+### Added
+
+-   **Giga Countries Fetcher (`gigaspatial/handlers/giga/countries.py`)**
+    -   Implemented `GigaCountriesFetcher` to query the Giga Countries API (`/api/v1/countries`).
+    -   Supports fetching the full list of countries (approx. 250 records) in a single request, with optional filtering by `id` and `country_iso3_code`.
+    -   Integrated with `GigaApiClient` to handle standard authentication and the `data` response wrapper.
+    -   Added `GIGA_COUNTRIES_API_KEY` to the global `Config` class in `gigaspatial/config.py`.
+
+### Fixed
+
+-   **`EntityTable.from_dataframe`: Pydantic-safe NaN-to-None conversion**
+    -   Resolved a recurring validation issue where `np.nan` values in numeric columns triggered Pydantic numeric constraints (e.g., `ge=0`). Pydantic treats `NaN` as a float that must satisfy constraints, whereas `None` skips them.
+    -   Implemented a terminal "bridge" step in the base `EntityTable.from_dataframe` using `df.replace({np.nan: None})` to ensure all missing values reach Pydantic as `None`.
+    -   Centralized the `clean` logic into the base class, adding a `processor` parameter to `from_dataframe` to support automated cleaning of raw DataFrames.
+
+-   **`EntityProcessor`: Final stage normalization**
+    -   Updated the core `process()` pipeline in `EntityProcessor` to replace `np.nan` with `None` as its final step, ensuring that cleaned DataFrames are immediately compatible with Pydantic validation when converted to records.
+
+-   **`DBConnection`: Fixed cross-catalog reflection and unified table parsing (`gigaspatial/core/io/database.py`)**
+    -   Resolved a `NoSuchTableError` occurring during metadata reflection (e.g., `get_column_names`) when using 3-part identifiers (`catalog.schema.table`) in Trino.
+    -   Implemented a robust fallback mechanism in `get_table_info`: if standard SQLAlchemy reflection fails, the class now performs a native `DESCRIBE` query and maps the results to the expected SQLAlchemy metadata format.
+    -   Unified table name parsing logic into a private `_parse_schema_table` helper, ensuring consistent handling of defaults and prefixes across `get_column_names`, `get_table_info`, `get_primary_keys`, and `table_exists`.
+    -   Restored several core metadata methods (`get_schema_names`, `get_table_names`, `get_view_names`) accidentally removed in a prior refactor.
+    -   Updated `table_exists` to use the improved discovery logic for higher reliability with complex identifiers.
+
+### Changed
+
+-   **Consolidated Table Initialization API**
+    -   Refactored all domain-specific tables: `CellTowerTable`, `TransmissionNodeTable`, `MobileCoverageTable`, `AdminBoundaryTable`, and `BuildingFootprintTable` to use the new consolidated base class `from_dataframe` implementation.
+    -   Removed redundant `if clean: ...` logic from subclasses, significantly reducing boilerplate and improving API consistency across the library.
+
 ## [v0.9.3] - 2026-04-16
 
 ### Changed

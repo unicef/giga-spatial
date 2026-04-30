@@ -1,4 +1,4 @@
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 
 import gigaspatial.core.io as io
 import gigaspatial.processing.algorithms as algorithms
@@ -26,6 +26,7 @@ from .handlers import (
     GigaSchoolLocationFetcher,
     GigaSchoolMeasurementsFetcher,
     GigaSchoolProfileFetcher,
+    GigaCountriesFetcher,
     OoklaSpeedtestHandler,
     OSMLocationFetcher,
     HealthSitesFetcher,
@@ -82,6 +83,7 @@ __all__ = [
     "GigaSchoolLocationFetcher",
     "GigaSchoolMeasurementsFetcher",
     "GigaSchoolProfileFetcher",
+    "GigaCountriesFetcher",
     "OoklaSpeedtestHandler",
     "OSMLocationFetcher",
     "HealthSitesFetcher",

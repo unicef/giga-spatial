@@ -225,6 +225,10 @@ class EntityProcessor:
             df = self._filter_by_country_boundary(df, boundary=country, **kwargs)
             df = self._annotate_with_admin_regions(df, country, **kwargs)
 
+        # --- final normalization for Pydantic (NaN -> None) ---
+        # This allows optional numeric fields with missing values to pass validation.
+        df = df.replace({np.nan: None})
+
         return df
 
     # ------------------------------------------------------------------

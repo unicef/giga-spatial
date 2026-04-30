@@ -2,6 +2,7 @@
 Module for cell tower schema and processing.
 Defines the CellTower entity, representing physical cellular tower infrastructure.
 """
+
 import pandas as pd
 from pydantic import Field
 from typing import Optional, List, Union, Dict, Set, ClassVar
@@ -193,10 +194,7 @@ class CellTowerProcessor(EntityProcessor):
         Prevents entire row rejection due to a single out-of-range value.
         """
         if "tower_height" in df.columns:
-            df.loc[
-                df["tower_height"].notna() & (df["tower_height"] < 0),
-                "tower_height",
-            ] = None
+            df.loc[df["tower_height"] < 0, "tower_height"] = None
         return df
 
 
@@ -240,7 +238,11 @@ class CellTowerTable(EntityTable[CellTower]):
 
     @classmethod
     def from_dataframe(
-        cls, df: pd.DataFrame, entity_class=CellTower
+        cls,
+        df: pd.DataFrame,
+        entity_class=CellTower,
+        clean: bool = False,
+        **kwargs,
     ) -> "CellTowerTable":
         """
         Create a CellTowerTable from an existing DataFrame.
@@ -248,11 +250,19 @@ class CellTowerTable(EntityTable[CellTower]):
         Args:
             df: DataFrame containing cell tower data.
             entity_class: Entity class to validate against. Defaults to CellTower.
+            clean: Whether to apply CellTowerProcessor before validation.
+                Defaults to False since DataFrames passed directly are assumed pre-cleaned.
 
         Returns:
             CellTowerTable instance with validated CellTower entities.
         """
-        return super().from_dataframe(df=df, entity_class=entity_class)
+        return super().from_dataframe(
+            df=df,
+            entity_class=entity_class,
+            clean=clean,
+            processor=CellTowerProcessor(),
+            **kwargs,
+        )
 
     @classmethod
     def from_files(

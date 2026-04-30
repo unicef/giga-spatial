@@ -3,6 +3,7 @@ Module for administrative boundary schema and processing.
 Defines the AdminBoundary entity, representing hierarchical divisions like
 countries, states, and districts with polygon geometries.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -199,9 +200,12 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
         Returns:
             AdminBoundaryTable with validated AdminBoundary entities.
         """
-        if clean:
-            df = AdminBoundaryProcessor().process(df)
-        return super().from_dataframe(df=df, entity_class=entity_class)
+        return super().from_dataframe(
+            df=df,
+            entity_class=entity_class,
+            clean=clean,
+            processor=AdminBoundaryProcessor(),
+        )
 
     # ------------------------------------------------------------------
     # Filters

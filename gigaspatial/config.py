@@ -71,6 +71,9 @@ class Config(BaseSettings):
     GIGA_SCHOOL_MEASUREMENTS_API_KEY: str = Field(
         default="", alias="GIGA_SCHOOL_MEASUREMENTS_API_KEY"
     )
+    GIGA_COUNTRIES_API_KEY: str = Field(
+        default="", alias="GIGA_COUNTRIES_API_KEY"
+    )
 
     # Healthsites configuration
     # Used for accessing Healthsites global health facility data
@@ -248,7 +251,7 @@ class Config(BaseSettings):
         elif isinstance(value, Path):
             path = value
         else:
-            raise ValueError(f"Invalid path type for {field.name}: {type(value)}")
+            raise ValueError(f"Invalid path type: {type(value)}")
 
         resolved = path.expanduser().resolve()
         return resolved if resolve else path

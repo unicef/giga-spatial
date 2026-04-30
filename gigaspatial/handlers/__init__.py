@@ -57,6 +57,7 @@ from gigaspatial.handlers.giga import (
     GigaSchoolLocationFetcher,
     GigaSchoolProfileFetcher,
     GigaSchoolMeasurementsFetcher,
+    GigaCountriesFetcher,
 )
 from gigaspatial.handlers.healthsites import HealthSitesFetcher
 from gigaspatial.handlers.srtm import (

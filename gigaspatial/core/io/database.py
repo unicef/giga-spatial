@@ -169,6 +169,31 @@ class DBConnection:
         """
         return self._connection_string
 
+    def _parse_schema_table(
+        self, table_name: str, schema: Optional[str] = None
+    ) -> tuple[Optional[str], str]:
+        """
+        Parse a table name that might contain schema or catalog prefixes.
+
+        Args:
+            table_name: The table name (e.g., 'table', 'schema.table', or 'catalog.schema.table').
+            schema: Optional explicit schema.
+
+        Returns:
+            A tuple of (schema, table_name).
+        """
+        if "." in table_name:
+            parts = table_name.split(".")
+            if len(parts) == 3:
+                # For Trino and others, we join catalog and schema
+                schema = f"{parts[0]}.{parts[1]}"
+                table_name = parts[2]
+            elif len(parts) == 2:
+                schema, table_name = parts
+
+        schema = schema or self.default_schema
+        return schema, table_name
+
     def get_schema_names(self) -> List[str]:
         """
         Get list of all schema names in the database.
@@ -220,13 +245,8 @@ class DBConnection:
         Returns:
             List of column names.
         """
-        if "." in table_name:
-            schema, table_name = table_name.split(".")
-        else:
-            schema = schema or self.default_schema
 
-        inspector = inspect(self.engine)
-        columns = inspector.get_columns(table_name, schema=schema)
+        columns = self.get_table_info(table_name, schema=schema)
         return [col["name"] for col in columns]
 
     def get_table_info(
@@ -242,13 +262,39 @@ class DBConnection:
         Returns:
             List of column metadata dictionaries.
         """
-        if "." in table_name:
-            schema, table_name = table_name.split(".")
-        else:
-            schema = schema or self.default_schema
-
-        inspector = inspect(self.engine)
-        return inspector.get_columns(table_name, schema=schema)
+        orig_name = table_name
+        schema, table_name = self._parse_schema_table(table_name, schema)
+        try:
+            inspector = inspect(self.engine)
+            return inspector.get_columns(table_name, schema=schema)
+        except Exception:
+            # Fallback for Trino cross-catalog issues or other reflection failures
+            if self.db_type == "trino":
+                # Reconstruct path for DESCRIBE
+                path = (
+                    orig_name
+                    if "." in orig_name
+                    else f"{schema}.{table_name}"
+                    if schema
+                    else table_name
+                )
+                try:
+                    # DESCRIBE returns Column, Type, Extra, Comment
+                    df = self.read_sql_to_dataframe(f"DESCRIBE {path}")
+                    return [
+                        {
+                            "name": row["Column"],
+                            "type": row["Type"],
+                            "nullable": True,
+                            "default": None,
+                            "autoincrement": False,
+                            "comment": row.get("Comment"),
+                        }
+                        for _, row in df.iterrows()
+                    ]
+                except Exception:
+                    pass
+            raise
 
     def get_primary_keys(
         self, table_name: str, schema: Optional[str] = None
@@ -263,10 +309,7 @@ class DBConnection:
         Returns:
             List of primary key column names.
         """
-        if "." in table_name:
-            schema, table_name = table_name.split(".")
-        else:
-            schema = schema or self.default_schema
+        schema, table_name = self._parse_schema_table(table_name, schema)
 
         inspector = inspect(self.engine)
         try:
@@ -287,12 +330,11 @@ class DBConnection:
         Returns:
             True if table exists, False otherwise.
         """
-        if "." in table_name:
-            schema, table_name = table_name.split(".")
-        else:
-            schema = schema or self.default_schema
-
-        return table_name in self.get_table_names(schema=schema)
+        try:
+            columns = self.get_table_info(table_name, schema=schema)
+            return len(columns) > 0
+        except Exception:
+            return False
 
     # PostgreSQL-specific methods
     def get_extensions(self) -> List[str]:
@@ -429,11 +471,7 @@ class DBConnection:
             connection_string = self.get_connection_string()
 
             # Handle schema.table format
-            if "." in table_name:
-                schema, table = table_name.split(".")
-            else:
-                schema = self.default_schema
-                table = table_name
+            schema, table = self._parse_schema_table(table_name)
 
             metadata = MetaData()
             table_obj = Table(table, metadata, schema=schema, autoload_with=self.engine)

@@ -292,9 +292,13 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         Returns:
             TransmissionNodeTable instance with validated TransmissionNode entities.
         """
-        if clean:
-            df = TransmissionNodeProcessor().process(df, **kwargs)
-        return super().from_dataframe(df=df, entity_class=entity_class)
+        return super().from_dataframe(
+            df=df,
+            entity_class=entity_class,
+            clean=clean,
+            processor=TransmissionNodeProcessor(),
+            **kwargs,
+        )
 
     @classmethod
     def from_files(

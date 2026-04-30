@@ -322,9 +322,12 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
         Returns:
             MobileCoverageTable with validated MobileCoverage entities.
         """
-        if clean:
-            df = MobileCoverageProcessor().process(df)
-        return super().from_dataframe(df=df, entity_class=entity_class)
+        return super().from_dataframe(
+            df=df,
+            entity_class=entity_class,
+            clean=clean,
+            processor=MobileCoverageProcessor(),
+        )
 
     # ------------------------------------------------------------------
     # Filters
