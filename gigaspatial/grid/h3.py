@@ -514,7 +514,7 @@ class CountryH3Hexagons(H3Hexagons):
 
     @classmethod
     def create(
-        self,
+        cls,
         country: str,
         resolution: int,
         contain: Literal["center", "full", "overlap", "bbox_overlap"] = "overlap",
@@ -537,7 +537,7 @@ class CountryH3Hexagons(H3Hexagons):
         from gigaspatial.handlers.boundaries import AdminBoundaries
 
         instance = super().__new__(cls)
-        super(CountryH3Hexagons, instance).__init__(
+        super(cls, instance).__init__(
             resolution=resolution,
             hexagons=[],
             data_store=data_store or LocalDataStore(),

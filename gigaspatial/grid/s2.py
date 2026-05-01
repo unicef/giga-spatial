@@ -498,7 +498,7 @@ class CountryS2Cells(S2Cells):
         from gigaspatial.handlers.boundaries import AdminBoundaries
 
         instance = super().__new__(cls)
-        super(CountryS2Cells, instance).__init__(
+        super(cls, instance).__init__(
             level=level,
             cells=[],
             data_store=data_store or LocalDataStore(),

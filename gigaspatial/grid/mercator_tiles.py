@@ -383,7 +383,7 @@ class CountryMercatorTiles(MercatorTiles):
 
     @classmethod
     def create(
-        self,
+        cls,
         country: str,
         zoom_level: int,
         predicate: str = "intersects",
@@ -406,7 +406,7 @@ class CountryMercatorTiles(MercatorTiles):
         from gigaspatial.handlers.boundaries import AdminBoundaries
 
         instance = super().__new__(cls)
-        super(CountryMercatorTiles, instance).__init__(
+        super(cls, instance).__init__(
             zoom_level=zoom_level,
             quadkeys=[],
             data_store=data_store or LocalDataStore(),

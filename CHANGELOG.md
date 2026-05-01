@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.5] - 2026-05-XX
+
+### Fixed
+
+-   **Dynamic Class Initialization in Grid Modules**
+    -   Refactored the factory method `create()` in `CountryH3Hexagons`, `CountryMercatorTiles`, and `CountryS2Cells` to use `cls` instead of hardcoded class names in the `super()` call, ensuring proper inheritance behavior.
+
 ## [v0.9.4] - 2026-04-30
 
 ### Added
