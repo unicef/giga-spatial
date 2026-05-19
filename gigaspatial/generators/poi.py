@@ -924,6 +924,92 @@ class PoiViewGenerator:
 
         self._update_view(final_mapped_df)
         return self.view
+    
+    def map_aqueduct_flood_hazard(
+        self,
+        handler=None,
+        return_period: str = "rp00100",
+        flood_type: str = "inunriver",
+        climate_scenario: str = "historical",
+        year: str = "1980",
+        model: Optional[str] = "000000000WATCH",
+        subsidence: Optional[str] = None,
+        projection: Optional[str] = None,
+        buffer_meters: float = 500,
+        output_column: Optional[str] = None,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """Maps WRI Aqueduct 3.0 flood hazard depth to POIs.
+
+        Loads the corresponding global Aqueduct raster and samples the mean
+        flood inundation depth within a circular buffer around each POI
+        using :meth:`map_zonal_stats`.
+
+        Args:
+            handler: Optional pre-built :class:`~gigaspatial.handlers.wri.AqueductFloodHandler`.
+                If provided, it overrides other hazard parameters.
+            return_period: Return-period key, e.g. ``"rp00100"``.
+                Defaults to ``"rp00100"``.
+            flood_type: Flood type — ``"inunriver"`` (riverine) or
+                ``"inuncoast"`` (coastal). Defaults to ``"inunriver"``.
+            climate_scenario: Climate scenario — ``"historical"``, ``"rcp4p5"``,
+                or ``"rcp8p5"``. Defaults to ``"historical"``.
+            year: Reference year. Defaults to ``"1980"``.
+            model: *Riverine only.* GCM model token (e.g. ``"000000000WATCH"``).
+            subsidence: *Coastal only.* Subsidence assumption — ``"nosub"`` or ``"wtsub"``.
+            projection: *Coastal only.* Projection percentile — ``"0"``, ``"0_perc_05"``,
+                or ``"0_perc_50"``.
+            buffer_meters: Sampling buffer radius in metres. Mean flood depth
+                within this circle is used as the POI value. Defaults to 500.
+            output_column: Optional column name. If ``None``, the filename
+                (without extension) plus ``_meters`` is used.
+            **kwargs: Forwarded to the handler's ``load_data`` call.
+
+        Returns:
+            The updated POI view DataFrame.
+        """
+        from gigaspatial.handlers.wri import AqueductFloodHandler
+
+        h = handler or AqueductFloodHandler(
+            flood_type=flood_type,
+            climate_scenario=climate_scenario,
+            year=year,
+            return_period=return_period,
+            model=model,
+            subsidence=subsidence,
+            projection=projection,
+            data_store=self.data_store,
+        )
+
+        self.logger.info(
+            f"Mapping WRI Aqueduct flood hazard to POIs ({h.config.DATASET_URL})"
+        )
+
+        # Load the raster
+        tif = h.load_data(
+            self.points_gdf,
+            ensure_available=self.config.ensure_available,
+            **kwargs,
+        )
+
+        if not tif:
+            self.logger.warning("Could not load Aqueduct raster; skipping.")
+            return self.view
+
+        # Determine column name
+        col = output_column or (h.config._get_filename().replace(".tif", "") + "_meters")
+
+        self.logger.info(f"Sampling flood depth into column: {col}")
+        mapped = self.map_zonal_stats(
+            data=tif,
+            stat="mean",
+            map_radius_meters=buffer_meters,
+            output_column=col,
+        )
+        self._update_view(mapped)
+
+        self.logger.info("Flood hazard mapping complete.")
+        return self.view
 
     def save_view(
         self,
