@@ -89,7 +89,7 @@
 </span><span id=__span-0-514><a id=__codelineno-0-514 name=__codelineno-0-514></a>
 </span><span id=__span-0-515><a id=__codelineno-0-515 name=__codelineno-0-515></a>    <span class=nd>@classmethod</span>
 </span><span id=__span-0-516><a id=__codelineno-0-516 name=__codelineno-0-516></a>    <span class=k>def</span> <span class=nf>create</span><span class=p>(</span>
-</span><span id=__span-0-517><a id=__codelineno-0-517 name=__codelineno-0-517></a>        <span class=bp>self</span><span class=p>,</span>
+</span><span id=__span-0-517><a id=__codelineno-0-517 name=__codelineno-0-517></a>        <span class=bp>cls</span><span class=p>,</span>
 </span><span id=__span-0-518><a id=__codelineno-0-518 name=__codelineno-0-518></a>        <span class=n>country</span><span class=p>:</span> <span class=nb>str</span><span class=p>,</span>
 </span><span id=__span-0-519><a id=__codelineno-0-519 name=__codelineno-0-519></a>        <span class=n>resolution</span><span class=p>:</span> <span class=nb>int</span><span class=p>,</span>
 </span><span id=__span-0-520><a id=__codelineno-0-520 name=__codelineno-0-520></a>        <span class=n>contain</span><span class=p>:</span> <span class=n>Literal</span><span class=p>[</span><span class=s2>&quot;center&quot;</span><span class=p>,</span> <span class=s2>&quot;full&quot;</span><span class=p>,</span> <span class=s2>&quot;overlap&quot;</span><span class=p>,</span> <span class=s2>&quot;bbox_overlap&quot;</span><span class=p>]</span> <span class=o>=</span> <span class=s2>&quot;overlap&quot;</span><span class=p>,</span>
@@ -112,7 +112,7 @@
 </span><span id=__span-0-537><a id=__codelineno-0-537 name=__codelineno-0-537></a>        <span class=kn>from</span> <span class=nn>gigaspatial.handlers.boundaries</span> <span class=kn>import</span> <span class=n>AdminBoundaries</span>
 </span><span id=__span-0-538><a id=__codelineno-0-538 name=__codelineno-0-538></a>
 </span><span id=__span-0-539><a id=__codelineno-0-539 name=__codelineno-0-539></a>        <span class=n>instance</span> <span class=o>=</span> <span class=nb>super</span><span class=p>()</span><span class=o>.</span><span class=fm>__new__</span><span class=p>(</span><span class=bp>cls</span><span class=p>)</span>
-</span><span id=__span-0-540><a id=__codelineno-0-540 name=__codelineno-0-540></a>        <span class=nb>super</span><span class=p>(</span><span class=n>CountryH3Hexagons</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
+</span><span id=__span-0-540><a id=__codelineno-0-540 name=__codelineno-0-540></a>        <span class=nb>super</span><span class=p>(</span><span class=bp>cls</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
 </span><span id=__span-0-541><a id=__codelineno-0-541 name=__codelineno-0-541></a>            <span class=n>resolution</span><span class=o>=</span><span class=n>resolution</span><span class=p>,</span>
 </span><span id=__span-0-542><a id=__codelineno-0-542 name=__codelineno-0-542></a>            <span class=n>hexagons</span><span class=o>=</span><span class=p>[],</span>
 </span><span id=__span-0-543><a id=__codelineno-0-543 name=__codelineno-0-543></a>            <span class=n>data_store</span><span class=o>=</span><span class=n>data_store</span> <span class=ow>or</span> <span class=n>LocalDataStore</span><span class=p>(),</span>
@@ -180,7 +180,7 @@
 <span class=normal><a href=#__codelineno-0-559>559</a></span>
 <span class=normal><a href=#__codelineno-0-560>560</a></span></pre></div></td><td class=code><div><pre><span></span><code><span id=__span-0-515><a id=__codelineno-0-515 name=__codelineno-0-515></a><span class=nd>@classmethod</span>
 </span><span id=__span-0-516><a id=__codelineno-0-516 name=__codelineno-0-516></a><span class=k>def</span> <span class=nf>create</span><span class=p>(</span>
-</span><span id=__span-0-517><a id=__codelineno-0-517 name=__codelineno-0-517></a>    <span class=bp>self</span><span class=p>,</span>
+</span><span id=__span-0-517><a id=__codelineno-0-517 name=__codelineno-0-517></a>    <span class=bp>cls</span><span class=p>,</span>
 </span><span id=__span-0-518><a id=__codelineno-0-518 name=__codelineno-0-518></a>    <span class=n>country</span><span class=p>:</span> <span class=nb>str</span><span class=p>,</span>
 </span><span id=__span-0-519><a id=__codelineno-0-519 name=__codelineno-0-519></a>    <span class=n>resolution</span><span class=p>:</span> <span class=nb>int</span><span class=p>,</span>
 </span><span id=__span-0-520><a id=__codelineno-0-520 name=__codelineno-0-520></a>    <span class=n>contain</span><span class=p>:</span> <span class=n>Literal</span><span class=p>[</span><span class=s2>&quot;center&quot;</span><span class=p>,</span> <span class=s2>&quot;full&quot;</span><span class=p>,</span> <span class=s2>&quot;overlap&quot;</span><span class=p>,</span> <span class=s2>&quot;bbox_overlap&quot;</span><span class=p>]</span> <span class=o>=</span> <span class=s2>&quot;overlap&quot;</span><span class=p>,</span>
@@ -203,7 +203,7 @@
 </span><span id=__span-0-537><a id=__codelineno-0-537 name=__codelineno-0-537></a>    <span class=kn>from</span> <span class=nn>gigaspatial.handlers.boundaries</span> <span class=kn>import</span> <span class=n>AdminBoundaries</span>
 </span><span id=__span-0-538><a id=__codelineno-0-538 name=__codelineno-0-538></a>
 </span><span id=__span-0-539><a id=__codelineno-0-539 name=__codelineno-0-539></a>    <span class=n>instance</span> <span class=o>=</span> <span class=nb>super</span><span class=p>()</span><span class=o>.</span><span class=fm>__new__</span><span class=p>(</span><span class=bp>cls</span><span class=p>)</span>
-</span><span id=__span-0-540><a id=__codelineno-0-540 name=__codelineno-0-540></a>    <span class=nb>super</span><span class=p>(</span><span class=n>CountryH3Hexagons</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
+</span><span id=__span-0-540><a id=__codelineno-0-540 name=__codelineno-0-540></a>    <span class=nb>super</span><span class=p>(</span><span class=bp>cls</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
 </span><span id=__span-0-541><a id=__codelineno-0-541 name=__codelineno-0-541></a>        <span class=n>resolution</span><span class=o>=</span><span class=n>resolution</span><span class=p>,</span>
 </span><span id=__span-0-542><a id=__codelineno-0-542 name=__codelineno-0-542></a>        <span class=n>hexagons</span><span class=o>=</span><span class=p>[],</span>
 </span><span id=__span-0-543><a id=__codelineno-0-543 name=__codelineno-0-543></a>        <span class=n>data_store</span><span class=o>=</span><span class=n>data_store</span> <span class=ow>or</span> <span class=n>LocalDataStore</span><span class=p>(),</span>
@@ -2074,7 +2074,7 @@
 </span><span id=__span-0-383><a id=__codelineno-0-383 name=__codelineno-0-383></a>
 </span><span id=__span-0-384><a id=__codelineno-0-384 name=__codelineno-0-384></a>    <span class=nd>@classmethod</span>
 </span><span id=__span-0-385><a id=__codelineno-0-385 name=__codelineno-0-385></a>    <span class=k>def</span> <span class=nf>create</span><span class=p>(</span>
-</span><span id=__span-0-386><a id=__codelineno-0-386 name=__codelineno-0-386></a>        <span class=bp>self</span><span class=p>,</span>
+</span><span id=__span-0-386><a id=__codelineno-0-386 name=__codelineno-0-386></a>        <span class=bp>cls</span><span class=p>,</span>
 </span><span id=__span-0-387><a id=__codelineno-0-387 name=__codelineno-0-387></a>        <span class=n>country</span><span class=p>:</span> <span class=nb>str</span><span class=p>,</span>
 </span><span id=__span-0-388><a id=__codelineno-0-388 name=__codelineno-0-388></a>        <span class=n>zoom_level</span><span class=p>:</span> <span class=nb>int</span><span class=p>,</span>
 </span><span id=__span-0-389><a id=__codelineno-0-389 name=__codelineno-0-389></a>        <span class=n>predicate</span><span class=p>:</span> <span class=nb>str</span> <span class=o>=</span> <span class=s2>&quot;intersects&quot;</span><span class=p>,</span>
@@ -2097,7 +2097,7 @@
 </span><span id=__span-0-406><a id=__codelineno-0-406 name=__codelineno-0-406></a>        <span class=kn>from</span> <span class=nn>gigaspatial.handlers.boundaries</span> <span class=kn>import</span> <span class=n>AdminBoundaries</span>
 </span><span id=__span-0-407><a id=__codelineno-0-407 name=__codelineno-0-407></a>
 </span><span id=__span-0-408><a id=__codelineno-0-408 name=__codelineno-0-408></a>        <span class=n>instance</span> <span class=o>=</span> <span class=nb>super</span><span class=p>()</span><span class=o>.</span><span class=fm>__new__</span><span class=p>(</span><span class=bp>cls</span><span class=p>)</span>
-</span><span id=__span-0-409><a id=__codelineno-0-409 name=__codelineno-0-409></a>        <span class=nb>super</span><span class=p>(</span><span class=n>CountryMercatorTiles</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
+</span><span id=__span-0-409><a id=__codelineno-0-409 name=__codelineno-0-409></a>        <span class=nb>super</span><span class=p>(</span><span class=bp>cls</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
 </span><span id=__span-0-410><a id=__codelineno-0-410 name=__codelineno-0-410></a>            <span class=n>zoom_level</span><span class=o>=</span><span class=n>zoom_level</span><span class=p>,</span>
 </span><span id=__span-0-411><a id=__codelineno-0-411 name=__codelineno-0-411></a>            <span class=n>quadkeys</span><span class=o>=</span><span class=p>[],</span>
 </span><span id=__span-0-412><a id=__codelineno-0-412 name=__codelineno-0-412></a>            <span class=n>data_store</span><span class=o>=</span><span class=n>data_store</span> <span class=ow>or</span> <span class=n>LocalDataStore</span><span class=p>(),</span>
@@ -2165,7 +2165,7 @@
 <span class=normal><a href=#__codelineno-0-428>428</a></span>
 <span class=normal><a href=#__codelineno-0-429>429</a></span></pre></div></td><td class=code><div><pre><span></span><code><span id=__span-0-384><a id=__codelineno-0-384 name=__codelineno-0-384></a><span class=nd>@classmethod</span>
 </span><span id=__span-0-385><a id=__codelineno-0-385 name=__codelineno-0-385></a><span class=k>def</span> <span class=nf>create</span><span class=p>(</span>
-</span><span id=__span-0-386><a id=__codelineno-0-386 name=__codelineno-0-386></a>    <span class=bp>self</span><span class=p>,</span>
+</span><span id=__span-0-386><a id=__codelineno-0-386 name=__codelineno-0-386></a>    <span class=bp>cls</span><span class=p>,</span>
 </span><span id=__span-0-387><a id=__codelineno-0-387 name=__codelineno-0-387></a>    <span class=n>country</span><span class=p>:</span> <span class=nb>str</span><span class=p>,</span>
 </span><span id=__span-0-388><a id=__codelineno-0-388 name=__codelineno-0-388></a>    <span class=n>zoom_level</span><span class=p>:</span> <span class=nb>int</span><span class=p>,</span>
 </span><span id=__span-0-389><a id=__codelineno-0-389 name=__codelineno-0-389></a>    <span class=n>predicate</span><span class=p>:</span> <span class=nb>str</span> <span class=o>=</span> <span class=s2>&quot;intersects&quot;</span><span class=p>,</span>
@@ -2188,7 +2188,7 @@
 </span><span id=__span-0-406><a id=__codelineno-0-406 name=__codelineno-0-406></a>    <span class=kn>from</span> <span class=nn>gigaspatial.handlers.boundaries</span> <span class=kn>import</span> <span class=n>AdminBoundaries</span>
 </span><span id=__span-0-407><a id=__codelineno-0-407 name=__codelineno-0-407></a>
 </span><span id=__span-0-408><a id=__codelineno-0-408 name=__codelineno-0-408></a>    <span class=n>instance</span> <span class=o>=</span> <span class=nb>super</span><span class=p>()</span><span class=o>.</span><span class=fm>__new__</span><span class=p>(</span><span class=bp>cls</span><span class=p>)</span>
-</span><span id=__span-0-409><a id=__codelineno-0-409 name=__codelineno-0-409></a>    <span class=nb>super</span><span class=p>(</span><span class=n>CountryMercatorTiles</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
+</span><span id=__span-0-409><a id=__codelineno-0-409 name=__codelineno-0-409></a>    <span class=nb>super</span><span class=p>(</span><span class=bp>cls</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
 </span><span id=__span-0-410><a id=__codelineno-0-410 name=__codelineno-0-410></a>        <span class=n>zoom_level</span><span class=o>=</span><span class=n>zoom_level</span><span class=p>,</span>
 </span><span id=__span-0-411><a id=__codelineno-0-411 name=__codelineno-0-411></a>        <span class=n>quadkeys</span><span class=o>=</span><span class=p>[],</span>
 </span><span id=__span-0-412><a id=__codelineno-0-412 name=__codelineno-0-412></a>        <span class=n>data_store</span><span class=o>=</span><span class=n>data_store</span> <span class=ow>or</span> <span class=n>LocalDataStore</span><span class=p>(),</span>
@@ -3564,7 +3564,7 @@
 </span><span id=__span-0-498><a id=__codelineno-0-498 name=__codelineno-0-498></a>        <span class=kn>from</span> <span class=nn>gigaspatial.handlers.boundaries</span> <span class=kn>import</span> <span class=n>AdminBoundaries</span>
 </span><span id=__span-0-499><a id=__codelineno-0-499 name=__codelineno-0-499></a>
 </span><span id=__span-0-500><a id=__codelineno-0-500 name=__codelineno-0-500></a>        <span class=n>instance</span> <span class=o>=</span> <span class=nb>super</span><span class=p>()</span><span class=o>.</span><span class=fm>__new__</span><span class=p>(</span><span class=bp>cls</span><span class=p>)</span>
-</span><span id=__span-0-501><a id=__codelineno-0-501 name=__codelineno-0-501></a>        <span class=nb>super</span><span class=p>(</span><span class=n>CountryS2Cells</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
+</span><span id=__span-0-501><a id=__codelineno-0-501 name=__codelineno-0-501></a>        <span class=nb>super</span><span class=p>(</span><span class=bp>cls</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
 </span><span id=__span-0-502><a id=__codelineno-0-502 name=__codelineno-0-502></a>            <span class=n>level</span><span class=o>=</span><span class=n>level</span><span class=p>,</span>
 </span><span id=__span-0-503><a id=__codelineno-0-503 name=__codelineno-0-503></a>            <span class=n>cells</span><span class=o>=</span><span class=p>[],</span>
 </span><span id=__span-0-504><a id=__codelineno-0-504 name=__codelineno-0-504></a>            <span class=n>data_store</span><span class=o>=</span><span class=n>data_store</span> <span class=ow>or</span> <span class=n>LocalDataStore</span><span class=p>(),</span>
@@ -3631,7 +3631,7 @@
 </span><span id=__span-0-498><a id=__codelineno-0-498 name=__codelineno-0-498></a>    <span class=kn>from</span> <span class=nn>gigaspatial.handlers.boundaries</span> <span class=kn>import</span> <span class=n>AdminBoundaries</span>
 </span><span id=__span-0-499><a id=__codelineno-0-499 name=__codelineno-0-499></a>
 </span><span id=__span-0-500><a id=__codelineno-0-500 name=__codelineno-0-500></a>    <span class=n>instance</span> <span class=o>=</span> <span class=nb>super</span><span class=p>()</span><span class=o>.</span><span class=fm>__new__</span><span class=p>(</span><span class=bp>cls</span><span class=p>)</span>
-</span><span id=__span-0-501><a id=__codelineno-0-501 name=__codelineno-0-501></a>    <span class=nb>super</span><span class=p>(</span><span class=n>CountryS2Cells</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
+</span><span id=__span-0-501><a id=__codelineno-0-501 name=__codelineno-0-501></a>    <span class=nb>super</span><span class=p>(</span><span class=bp>cls</span><span class=p>,</span> <span class=n>instance</span><span class=p>)</span><span class=o>.</span><span class=fm>__init__</span><span class=p>(</span>
 </span><span id=__span-0-502><a id=__codelineno-0-502 name=__codelineno-0-502></a>        <span class=n>level</span><span class=o>=</span><span class=n>level</span><span class=p>,</span>
 </span><span id=__span-0-503><a id=__codelineno-0-503 name=__codelineno-0-503></a>        <span class=n>cells</span><span class=o>=</span><span class=p>[],</span>
 </span><span id=__span-0-504><a id=__codelineno-0-504 name=__codelineno-0-504></a>        <span class=n>data_store</span><span class=o>=</span><span class=n>data_store</span> <span class=ow>or</span> <span class=n>LocalDataStore</span><span class=p>(),</span>
