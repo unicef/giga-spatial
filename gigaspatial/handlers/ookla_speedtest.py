@@ -222,12 +222,6 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
             self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
             return None
 
-    def download(
-        self, source: Optional[Union[str, List[str]]] = None, **kwargs
-    ) -> List[Optional[Path]]:
-        urls = self.config.get_relevant_data_units(source)
-        return self.download_data_units(urls, **kwargs)
-
 
 class OoklaSpeedtestReader(BaseHandlerReader):
     """

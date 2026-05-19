@@ -76,3 +76,9 @@ from gigaspatial.handlers.gee import (
 )
 from gigaspatial.handlers.mlab import MLabConfig, MLabHandler
 from gigaspatial.handlers.unicef.sdg import UnicefDataFetcher
+from gigaspatial.handlers.wri import (
+    AqueductFloodConfig,
+    AqueductFloodDownloader,
+    AqueductFloodReader,
+    AqueductFloodHandler,
+)

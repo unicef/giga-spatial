@@ -635,7 +635,6 @@ class TifProcessor:
                 f"Original error: {str(e)}"
             )
 
-        return df
 
     def to_geodataframe(
         self,

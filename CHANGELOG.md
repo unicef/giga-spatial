@@ -2,7 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.9.5] - 2026-05-XX
+## [v0.9.5] - 2026-05-19
+
+### Added
+
+-   **WRI Aqueduct Global Flood Hazard Layers v2 Handler (`gigaspatial/handlers/wri.py`)**
+    -   Implemented the `AqueductFloodHandler` suite (`Config`, `Downloader`, `Reader`, `Handler`) following the GigaSpatial base architecture to access tile-level global riverine and coastal flood inundation depth rasters.
+    -   Added support for 498 available raster combinations directly from the `wri-projects.s3.amazonaws.com` bucket.
+    -   Coastal support: 10 return periods (`rp0001`–`rp1000`), 3 climate scenarios, 2 subsidence options (`nosub`, `wtsub`), and 6 projection percentiles.
+    -   Riverine support: 9 return periods (`rp00002`–`rp01000`), 2 climate scenarios (`historical`, `rcp4p5`), and 4 GCM models.
+    -   Implemented 10 strict cross-field validation rules enforcing WRI inventory constraints (e.g., year compatibility with scenarios, projection dependencies for `rp0001`, model availability).
+    -   Added robust type literals differentiating coastal (4-digit) vs. riverine (5-digit) zero-padded return periods.
+    -   Added a `_log_config()` method to emit human-readable parameter summaries and the target S3 URL during configuration initialization.
+
+-   **`PoiViewGenerator.map_aqueduct_flood_hazard()` (`gigaspatial/generators/poi.py`)**
+    -   Added native flood depth enrichment to POI workflows. Accepts either a pre-built `AqueductFloodHandler` or inline hazard parameters.
+    -   Delegates spatial sampling to `map_zonal_stats(stat="mean")` via the `TifProcessor` with configurable metric buffer radii.
 
 ### Fixed
 
