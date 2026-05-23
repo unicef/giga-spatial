@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.6] - 2026-05-XX
+
+### Changed
+
+-   **WorldPop Configuration Refactor: Separate Category Resolution and Path Filtering (`gigaspatial/handlers/worldpop.py`)**
+    -   Extracted dataset category resolution out of the `WPPopulationConfig` Pydantic validator into a standalone pure function `resolve_dataset_category(release, project, year, resolution, un_adjusted, constrained, school_age, under_18, dug_level)` that returns `(dataset_category, normalized_fields, warnings)` with no side effects, making all release/project/constraint combinations independently testable without constructing a config object.
+    -   Added module-level constants `AVAILABLE_YEARS_GR1`, `AVAILABLE_YEARS_GR2`, and `AVAILABLE_RESOLUTIONS`, shared between `resolve_dataset_category` and `WPPopulationConfig` as a single source of truth.
+    -   Replaced the `_temp_age_sex_filters` dict side-channel with `DemographicPathFilter`, a frozen dataclass encapsulating all demographic TIF path-filtering logic. Constructed explicitly via `DemographicPathFilter.from_kwargs(**kwargs)` at the call site and stored in the new typed `config.demographic_filter` field, replacing the hidden intermediate state.
+    -   `WPPopulationConfig.validate_configuration` now delegates entirely to `resolve_dataset_category`; field normalisation overrides (e.g. `year`, `resolution`, boolean flags) and warning logging are applied from the returned values rather than encoded inline in the validator.
+    -   `WPPopulationConfig.get_data_unit_paths` constructs a `DemographicPathFilter` from `kwargs` and assigns it to `self.demographic_filter`, replacing the `self._temp_age_sex_filters` assignment.
+    -   `WPPopulationReader.load_from_paths` now consumes `config.demographic_filter` directly instead of checking for the removed `_temp_age_sex_filters` attribute; falls back to constructing a `DemographicPathFilter.from_kwargs(**kwargs)` on-the-fly when no pre-stored filter is present, so callers may also pass filter criteria directly to `load_from_paths`.
+    -   `_filter_age_sex_paths` retained as a backward-compatible shim delegating to `DemographicPathFilter.filter_paths`.
+
+-   **Consolidated Satellite Imagery Pixel Resolution Helper (`gigaspatial/processing/`)**
+    -   Moved `calculate_pixels_at_location` from `sat_images.py` to `geo.py` to group projection/coordinate utilities logically and remove the shallow, single-function `sat_images.py` module.
+    -   Removed `from gigaspatial.processing.sat_images import *` from `gigaspatial/processing/__init__.py` and deleted `sat_images.py`.
+
+### Added
+
+-   **`DemographicPathFilter` frozen dataclass (`gigaspatial/handlers/worldpop.py`)**
+    -   `from_kwargs(**kwargs)` constructor normalising `sex`, `education_level`/`level`, `ages`, `min_age`, and `max_age` from caller kwargs into typed frozensets.
+    -   `has_filters` property for a cheap boolean guard before applying filtering.
+    -   `filter_paths(paths, project, school_age, _logger)` method encapsulating all three demographic filename patterns: standard age-band (`ISO3_SEX_AGE_YEAR.tif`), school-age (`ISO3_F_M_LEVEL_YEAR.tif`), and under-18 (`ISO3_SEX_Under_18_YEAR.tif`).
+
+
+-   **Unit tests for `resolve_dataset_category` and `DemographicPathFilter` (`tests/handlers/test_worldpop_config.py`)**
+    -   Table-driven tests requiring no `WPPopulationConfig` instantiation or I/O overhead.
+    -   Covers: happy-path category resolution for all release/project/resolution combinations, `normalized_fields` correctness (including a no-spurious-overrides assertion), warning emission for every auto-correction path, `ValueError` for all documented invalid combinations, `DemographicPathFilter` construction and immutability, `has_filters` property, and `filter_paths` behaviour across all three filename patterns including mixed-corpus directories.
+
 ## [v0.9.5] - 2026-05-19
 
 ### Added
