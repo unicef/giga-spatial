@@ -5,7 +5,7 @@ Defines the CellTower entity, representing physical cellular tower infrastructur
 
 import pandas as pd
 from pydantic import Field
-from typing import Optional, List, Union, Dict, Set, ClassVar
+from typing import TYPE_CHECKING, Optional, List, Union, Dict, Set, ClassVar, Type
 from enum import Enum
 from pathlib import Path
 
@@ -14,6 +14,9 @@ from .shared import DataConfidence, PowerSource, RadioType
 from .entity import ENUM_ENTITY_CONFIG, GigaEntity, EntityTable
 from gigaspatial.processing.entity_processor import EntityProcessor
 from gigaspatial.config import config
+
+if TYPE_CHECKING:
+    from gigaspatial.core.schemas.cell import CellTable
 
 
 logger = config.get_logger("CellTowerManager")
@@ -211,18 +214,24 @@ class CellTowerTable(EntityTable[CellTower]):
         cls,
         file_path: Union[str, Path],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = CellTowerProcessor,
         **kwargs,
     ) -> "CellTowerTable":
         """
-        Create a CellTable from a file.
+        Create a CellTowerTable from a file.
 
         Args:
             file_path: Path to the dataset file.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to CellTowerProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
-            CellTable instance with validated Cell entities.
+            CellTowerTable instance with validated CellTower entities.
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -232,7 +241,8 @@ class CellTowerTable(EntityTable[CellTower]):
             file_path=file_path,
             entity_class=CellTower,
             data_store=data_store,
-            processor=CellTowerProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 
@@ -240,8 +250,11 @@ class CellTowerTable(EntityTable[CellTower]):
     def from_dataframe(
         cls,
         df: pd.DataFrame,
-        entity_class=CellTower,
+        entity_class: Type[CellTower] = CellTower,
         clean: bool = False,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = CellTowerProcessor,
         **kwargs,
     ) -> "CellTowerTable":
         """
@@ -252,6 +265,8 @@ class CellTowerTable(EntityTable[CellTower]):
             entity_class: Entity class to validate against. Defaults to CellTower.
             clean: Whether to apply CellTowerProcessor before validation.
                 Defaults to False since DataFrames passed directly are assumed pre-cleaned.
+            processor: Optional EntityProcessor subclass or instance. Defaults to CellTowerProcessor.
+            **kwargs: Additional arguments passed to the processor.
 
         Returns:
             CellTowerTable instance with validated CellTower entities.
@@ -260,7 +275,7 @@ class CellTowerTable(EntityTable[CellTower]):
             df=df,
             entity_class=entity_class,
             clean=clean,
-            processor=CellTowerProcessor(),
+            processor=processor,
             **kwargs,
         )
 
@@ -269,6 +284,10 @@ class CellTowerTable(EntityTable[CellTower]):
         cls,
         file_paths: List[Union[str, Path]],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = CellTowerProcessor,
         **kwargs,
     ) -> "CellTowerTable":
         """
@@ -277,7 +296,9 @@ class CellTowerTable(EntityTable[CellTower]):
         Args:
             file_paths: List of paths to source files.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to CellTowerProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             CellTowerTable with merged and validated CellTower entities.
@@ -286,7 +307,8 @@ class CellTowerTable(EntityTable[CellTower]):
             file_paths=file_paths,
             entity_class=CellTower,
             data_store=data_store,
-            processor=CellTowerProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 

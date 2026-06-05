@@ -3,10 +3,11 @@ Module for transmission node schema and processing.
 Defines the TransmissionNode entity, representing physical network infrastructure nodes
 like backbone cores, metro sites, and aggregation points.
 """
+
 import pandas as pd
 import networkx as nx
 from pydantic import Field
-from typing import Optional, List, Set, Union, ClassVar
+from typing import Optional, List, Set, Union, ClassVar, Type
 from enum import Enum
 from pathlib import Path
 
@@ -247,6 +248,10 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         cls,
         file_path: Union[str, Path],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = TransmissionNodeProcessor,
         **kwargs,
     ) -> "TransmissionNodeTable":
         """
@@ -255,7 +260,9 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         Args:
             file_path: Path to the dataset file.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to TransmissionNodeProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             TransmissionNodeTable instance with validated TransmissionNode entities.
@@ -268,7 +275,8 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
             file_path=file_path,
             entity_class=TransmissionNode,
             data_store=data_store,
-            processor=TransmissionNodeProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 
@@ -276,8 +284,11 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
     def from_dataframe(
         cls,
         df: pd.DataFrame,
-        entity_class: type = TransmissionNode,
+        entity_class: Type[TransmissionNode] = TransmissionNode,
         clean: bool = False,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = TransmissionNodeProcessor,
         **kwargs,
     ) -> "TransmissionNodeTable":
         """
@@ -288,6 +299,8 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
             entity_class: Entity class to validate against. Defaults to TransmissionNode.
             clean: Whether to apply TransmissionNodeProcessor before validation.
                 Defaults to False since DataFrames passed directly are assumed pre-cleaned.
+            processor: Optional EntityProcessor subclass or instance. Defaults to TransmissionNodeProcessor.
+            **kwargs: Additional arguments passed to the processor.
 
         Returns:
             TransmissionNodeTable instance with validated TransmissionNode entities.
@@ -296,7 +309,7 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
             df=df,
             entity_class=entity_class,
             clean=clean,
-            processor=TransmissionNodeProcessor(),
+            processor=processor,
             **kwargs,
         )
 
@@ -305,6 +318,10 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         cls,
         file_paths: List[Union[str, Path]],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = TransmissionNodeProcessor,
         **kwargs,
     ) -> "TransmissionNodeTable":
         """
@@ -313,7 +330,9 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         Args:
             file_paths: List of paths to source files.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to TransmissionNodeProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             TransmissionNodeTable with merged and validated TransmissionNode entities.
@@ -322,7 +341,8 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
             file_paths=file_paths,
             entity_class=TransmissionNode,
             data_store=data_store,
-            processor=TransmissionNodeProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 
@@ -330,35 +350,75 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
     # Filters
     # ------------------------------------------------------------------
 
-    def filter_by_node_type(self, node_type: NodeType) -> "TransmissionNodeTable":
-        """Filter nodes by their hierarchical type in the network."""
+    def filter_by_node_type(
+        self, node_type: Union[NodeType, str]
+    ) -> "TransmissionNodeTable":
+        """
+        Filter nodes by their hierarchical type in the network.
+
+        Args:
+            node_type: A ``NodeType`` enum member or its string value
+                (e.g. ``"backbone"``, ``"metro"``).
+        """
+        value = (
+            NodeType(node_type).value if isinstance(node_type, str) else node_type.value
+        )
         return self.__class__(
-            entities=[e for e in self.entities if e.node_type == node_type.value]
+            entities=[e for e in self.entities if e.node_type == value]
         )
 
     def filter_by_node_types(
-        self, node_types: Set[NodeType]
+        self, node_types: Set[Union[NodeType, str]]
     ) -> "TransmissionNodeTable":
-        """Filter nodes matching any of the given node types."""
-        values = {nt.value for nt in node_types}
+        """
+        Filter nodes matching any of the given node types.
+
+        Args:
+            node_types: A set of ``NodeType`` enum members or string values.
+        """
+        values = {
+            NodeType(nt).value if isinstance(nt, str) else nt.value for nt in node_types
+        }
         return self.__class__(
             entities=[e for e in self.entities if e.node_type in values]
         )
 
-    def filter_by_status(self, status: NodeStatus) -> "TransmissionNodeTable":
-        """Filter nodes by operational status."""
+    def filter_by_status(
+        self, status: Union[NodeStatus, str]
+    ) -> "TransmissionNodeTable":
+        """
+        Filter nodes by operational status.
+
+        Args:
+            status: A ``NodeStatus`` enum member or its string value
+                (e.g. ``"operational"``, ``"planned"``).
+        """
+        value = NodeStatus(status).value if isinstance(status, str) else status.value
         return self.__class__(
-            entities=[e for e in self.entities if e.node_status == status.value]
+            entities=[e for e in self.entities if e.node_status == value]
         )
 
     def filter_operational(self) -> "TransmissionNodeTable":
         """Return only operational nodes."""
         return self.filter_by_status(NodeStatus.OPERATIONAL)
 
-    def filter_by_medium(self, medium: TransmissionMedium) -> "TransmissionNodeTable":
-        """Filter nodes by transmission medium."""
+    def filter_by_medium(
+        self, medium: Union[TransmissionMedium, str]
+    ) -> "TransmissionNodeTable":
+        """
+        Filter nodes by transmission medium.
+
+        Args:
+            medium: A ``TransmissionMedium`` enum member or its string value
+                (e.g. ``"fiber"``, ``"microwave"``, ``"satellite"``).
+        """
+        value = (
+            TransmissionMedium(medium).value
+            if isinstance(medium, str)
+            else medium.value
+        )
         return self.__class__(
-            entities=[e for e in self.entities if e.transmission_medium == medium.value]
+            entities=[e for e in self.entities if e.transmission_medium == value]
         )
 
     def filter_by_provider(self, provider: str) -> "TransmissionNodeTable":
@@ -372,10 +432,20 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         )
 
     def filter_by_backhaul_technology(
-        self, technology: BackhaulTechnology
+        self, technology: Union[BackhaulTechnology, str]
     ) -> "TransmissionNodeTable":
-        """Filter nodes that use a specific backhaul technology."""
-        value = technology.value
+        """
+        Filter nodes that use a specific backhaul technology.
+
+        Args:
+            technology: A ``BackhaulTechnology`` enum member or its string value
+                (e.g. ``"dwdm"``, ``"mpls"``).
+        """
+        value = (
+            BackhaulTechnology(technology).value
+            if isinstance(technology, str)
+            else technology.value
+        )
         return self.__class__(
             entities=[
                 e

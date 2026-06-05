@@ -313,9 +313,10 @@ class EntityTable(BaseModel, Generic[E]):
         file_path: Union[str, Path],
         entity_class: Type[E],
         data_store: Optional[DataStore] = None,
-        processor: Optional[EntityProcessor] = None,
+        clean: bool = True,
+        processor: Optional[Union[Type[EntityProcessor], EntityProcessor]] = None,
         **kwargs,
-    ) -> "EntityTable":
+    ) -> "EntityTable[E]":
         """
         Create an EntityTable from a file, with optional pre-validation cleaning.
 
@@ -323,8 +324,9 @@ class EntityTable(BaseModel, Generic[E]):
             file_path: Path to the dataset file.
             entity_class: The Pydantic entity class to validate each row against.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            processor: Optional EntityCleaner subclass to apply before validation.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply an EntityProcessor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance to apply before validation.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             EntityTable instance containing successfully validated entities.
@@ -337,14 +339,14 @@ class EntityTable(BaseModel, Generic[E]):
         df = read_dataset(file_path, data_store=data_store, **kwargs)
         logger.debug("Loaded %d rows from %s", len(df), file_path)
 
-        if processor is not None:
-            df = processor.process(df, **kwargs)
-            logger.debug(
-                "Cleaned data has %d rows after %s.", len(df), processor.__name__
-            )
-
         try:
-            return cls.from_dataframe(df, entity_class)
+            return cls.from_dataframe(
+                df,
+                entity_class,
+                clean=clean,
+                processor=processor,
+                **kwargs,
+            )
         except Exception as e:
             raise ValueError(f"Error reading or processing the file: {e}")
 
@@ -354,7 +356,7 @@ class EntityTable(BaseModel, Generic[E]):
         df: pd.DataFrame,
         entity_class: Type[E],
         clean: bool = False,
-        processor: Optional[EntityProcessor] = None,
+        processor: Optional[Union[Type[EntityProcessor], EntityProcessor]] = None,
         **kwargs,
     ) -> "EntityTable[E]":
         """
@@ -364,7 +366,7 @@ class EntityTable(BaseModel, Generic[E]):
             df: DataFrame containing entity data.
             entity_class: The Pydantic entity class to validate each row against.
             clean: Whether to apply an EntityProcessor before validation.
-            processor: Optional processor instance to use if clean=True.
+            processor: Optional processor instance or class to use if clean=True.
                 Defaults to the base EntityProcessor if None.
             **kwargs: Additional arguments passed to the processor.
 
@@ -374,7 +376,14 @@ class EntityTable(BaseModel, Generic[E]):
         if clean:
             if processor is None:
                 processor = EntityProcessor()
+            elif isinstance(processor, type):
+                processor = processor()
             df = processor.process(df, **kwargs)
+            logger.debug(
+                "Cleaned data has %d rows after %s.",
+                len(df),
+                processor.__class__.__name__,
+            )
 
         entities: List[E] = []
         failed_rows: List[dict] = []
@@ -414,7 +423,8 @@ class EntityTable(BaseModel, Generic[E]):
         file_paths: List[Union[str, Path]],
         entity_class: Type[E],
         data_store: Optional[DataStore] = None,
-        processor: Optional[Type[EntityProcessor]] = None,
+        clean: bool = True,
+        processor: Optional[Union[Type[EntityProcessor], EntityProcessor]] = None,
         **kwargs,
     ) -> "EntityTable[E]":
         """
@@ -428,8 +438,9 @@ class EntityTable(BaseModel, Generic[E]):
             file_paths: List of paths to source files.
             entity_class: The Pydantic entity class to validate each row against.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            processor: Optional EntityProcessor subclass applied to each file.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply an EntityProcessor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance applied to each file.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             Merged EntityTable instance.
@@ -447,6 +458,7 @@ class EntityTable(BaseModel, Generic[E]):
                     file_path=path,
                     entity_class=entity_class,
                     data_store=data_store,
+                    clean=clean,
                     processor=processor,
                     **kwargs,
                 )

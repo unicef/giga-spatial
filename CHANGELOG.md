@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.9.6] - 2026-05-XX
+## [v0.9.6] - 2026-06-XX
 
 ### Changed
 
@@ -18,6 +18,28 @@ All notable changes to this project will be documented in this file.
 -   **Consolidated Satellite Imagery Pixel Resolution Helper (`gigaspatial/processing/`)**
     -   Moved `calculate_pixels_at_location` from `sat_images.py` to `geo.py` to group projection/coordinate utilities logically and remove the shallow, single-function `sat_images.py` module.
     -   Removed `from gigaspatial.processing.sat_images import *` from `gigaspatial/processing/__init__.py` and deleted `sat_images.py`.
+
+-   **`EntityTable`: Unified and delegated loading pipeline (`gigaspatial/core/schemas/entity.py`)**
+    -   Centralised all cleaning and processor instantiation logic in `from_dataframe`, which now accepts a `clean: bool = True` parameter and a `processor: Optional[Union[Type[EntityProcessor], EntityProcessor]] = None` parameter.
+    -   When `processor` is provided as a class (not an instance), `from_dataframe` automatically instantiates it with no arguments; passing a pre-configured instance is also supported.
+    -   `from_file` and `from_files` now both accept the same `clean` and `processor` keyword arguments and delegate directly to `from_dataframe`, eliminating duplicated `if clean: processor.process(df)` branching that previously lived in each subclass.
+
+-   **Consolidated Table Initialization API across all domain schemas**
+    -   Updated all domain-specific `EntityTable` subclasses to align their `from_file`, `from_dataframe`, and `from_files` signatures with the refactored base class. Affected files:
+        -   `gigaspatial/core/schemas/cell_tower.py` (`CellTowerTable`)
+        -   `gigaspatial/core/schemas/transmission_node.py` (`TransmissionNodeTable`)
+        -   `gigaspatial/core/schemas/mobile_coverage.py` (`MobileCoverageTable`)
+        -   `gigaspatial/core/schemas/building_footprint.py` (`BuildingFootprintTable`)
+        -   `gigaspatial/core/schemas/admin_boundary.py` (`AdminBoundaryTable`)
+        -   `gigaspatial/core/schemas/cell.py` (`CellTable`)
+    -   Each subclass now passes a **class reference** (e.g. `processor=CellTowerProcessor`) rather than a pre-built instance as its default, deferring instantiation to the base class.
+    -   Removed all redundant `if clean: ...` blocks from subclass implementations; cleaning is uniformly handled by `EntityTable.from_dataframe`.
+
+-   **`TransmissionNodeTable` filter methods: accept strings in addition to enum values (`gigaspatial/core/schemas/transmission_node.py`)**
+    -   Updated `filter_by_node_type`, `filter_by_node_types`, `filter_by_status`, `filter_by_medium`, and `filter_by_backhaul_technology` to accept either the corresponding enum member *or* its plain string value (e.g. `“fiber”`, `“backbone”`, `“operational”`, `“mpls”`).
+    -   String values are coerced through the enum constructor (`TransmissionMedium(medium)`) before comparison, ensuring they match the canonical stored value as set by Pydantic’s `use_enum_values=True`. Invalid strings raise a `ValueError` from the enum constructor rather than silently returning empty results.
+    -   `filter_by_node_types` likewise accepts `Set[Union[NodeType, str]]`, supporting mixed sets of enum members and strings.
+    -   Updated type annotations to `Union[<Enum>, str]` across all affected methods and expanded docstrings with illustrative string examples.
 
 ### Added
 

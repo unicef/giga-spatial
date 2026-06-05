@@ -3,8 +3,9 @@ Module for mobile coverage schema and processing.
 Defines the MobileCoverage entity, representing cellular coverage areas
 (measured or modeled) with polygon geometries.
 """
+
 from enum import Enum
-from typing import Optional, List, Set, Union, Dict, ClassVar
+from typing import Optional, List, Set, Union, Dict, ClassVar, Type
 from pydantic import Field
 import geopandas as gpd
 from shapely.geometry import Point
@@ -278,6 +279,10 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
         cls,
         file_path: Union[str, Path],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = MobileCoverageProcessor,
         **kwargs,
     ) -> "MobileCoverageTable":
         """
@@ -286,7 +291,9 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
         Args:
             file_path: Path to the dataset file.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to MobileCoverageProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             MobileCoverageTable with validated MobileCoverage entities.
@@ -299,7 +306,8 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
             file_path=file_path,
             entity_class=MobileCoverage,
             data_store=data_store,
-            processor=MobileCoverageProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 
@@ -307,8 +315,12 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
     def from_dataframe(
         cls,
         df: pd.DataFrame,
-        entity_class: type = MobileCoverage,
+        entity_class: Type[MobileCoverage] = MobileCoverage,
         clean: bool = False,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = MobileCoverageProcessor,
+        **kwargs,
     ) -> "MobileCoverageTable":
         """
         Create a MobileCoverageTable from an existing DataFrame.
@@ -318,6 +330,8 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
             entity_class: Entity class to validate against. Defaults to MobileCoverage.
             clean: Whether to apply MobileCoverageProcessor before validation.
                 Defaults to False since DataFrames passed directly are assumed pre-cleaned.
+            processor: Optional EntityProcessor subclass or instance. Defaults to MobileCoverageProcessor.
+            **kwargs: Additional arguments passed to the processor.
 
         Returns:
             MobileCoverageTable with validated MobileCoverage entities.
@@ -326,7 +340,8 @@ class MobileCoverageTable(EntityTable[MobileCoverage]):
             df=df,
             entity_class=entity_class,
             clean=clean,
-            processor=MobileCoverageProcessor(),
+            processor=processor,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------

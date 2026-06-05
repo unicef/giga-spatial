@@ -5,7 +5,7 @@ with polygon geometries.
 """
 
 from enum import Enum
-from typing import Optional, ClassVar, Union
+from typing import Optional, ClassVar, Union, Type
 from pathlib import Path
 
 from pydantic import Field
@@ -289,6 +289,10 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
         cls,
         file_path: Union[str, Path],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = BuildingFootprintProcessor,
         **kwargs,
     ) -> "BuildingFootprintTable":
         """
@@ -297,7 +301,9 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
         Args:
             file_path: Path to the dataset file.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to BuildingFootprintProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             BuildingFootprintTable with validated BuildingFootprint entities.
@@ -310,7 +316,8 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
             file_path=file_path,
             entity_class=BuildingFootprint,
             data_store=data_store,
-            processor=BuildingFootprintProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 
@@ -318,8 +325,12 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
     def from_dataframe(
         cls,
         df: pd.DataFrame,
-        entity_class: type = BuildingFootprint,
+        entity_class: Type[BuildingFootprint] = BuildingFootprint,
         clean: bool = False,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = BuildingFootprintProcessor,
+        **kwargs,
     ) -> "BuildingFootprintTable":
         """
         Create a BuildingFootprintTable from an existing DataFrame.
@@ -328,6 +339,8 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
             df: DataFrame containing building footprint data.
             entity_class: Entity class to validate against. Defaults to BuildingFootprint.
             clean: Whether to apply BuildingFootprintProcessor before validation.
+            processor: Optional EntityProcessor subclass or instance. Defaults to BuildingFootprintProcessor.
+            **kwargs: Additional arguments passed to the processor.
 
         Returns:
             BuildingFootprintTable with validated BuildingFootprint entities.
@@ -336,7 +349,8 @@ class BuildingFootprintTable(EntityTable[BuildingFootprint]):
             df=df,
             entity_class=entity_class,
             clean=clean,
-            processor=BuildingFootprintProcessor(),
+            processor=processor,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------

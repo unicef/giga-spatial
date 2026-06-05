@@ -7,7 +7,7 @@ countries, states, and districts with polygon geometries.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional, List, Set, Union, Dict, ClassVar
+from typing import Optional, List, Set, Union, Dict, ClassVar, Type
 from pydantic import Field
 from shapely.geometry import Point
 import pandas as pd
@@ -157,6 +157,10 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
         cls,
         file_path: Union[str, Path],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = AdminBoundaryProcessor,
         **kwargs,
     ) -> "AdminBoundaryTable":
         """
@@ -165,7 +169,9 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
         Args:
             file_path: Path to the dataset file.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to AdminBoundaryProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             AdminBoundaryTable with validated AdminBoundary entities.
@@ -178,7 +184,8 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
             file_path=file_path,
             entity_class=AdminBoundary,
             data_store=data_store,
-            processor=AdminBoundaryProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 
@@ -186,8 +193,12 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
     def from_dataframe(
         cls,
         df: pd.DataFrame,
-        entity_class: type = AdminBoundary,
+        entity_class: Type[AdminBoundary] = AdminBoundary,
         clean: bool = False,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = AdminBoundaryProcessor,
+        **kwargs,
     ) -> "AdminBoundaryTable":
         """
         Create an AdminBoundaryTable from an existing DataFrame.
@@ -196,6 +207,8 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
             df: DataFrame containing admin boundary data.
             entity_class: Entity class to validate against. Defaults to AdminBoundary.
             clean: Whether to apply AdminBoundaryProcessor before validation.
+            processor: Optional EntityProcessor subclass or instance. Defaults to AdminBoundaryProcessor.
+            **kwargs: Additional arguments passed to the processor.
 
         Returns:
             AdminBoundaryTable with validated AdminBoundary entities.
@@ -204,7 +217,8 @@ class AdminBoundaryTable(EntityTable[AdminBoundary]):
             df=df,
             entity_class=entity_class,
             clean=clean,
-            processor=AdminBoundaryProcessor(),
+            processor=processor,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------

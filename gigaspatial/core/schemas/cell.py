@@ -2,9 +2,10 @@
 Module for cellular cell schema and processing.
 Defines the Cell entity, representing individual sectors or cells on a cell tower.
 """
+
 import pandas as pd
 from pydantic import Field
-from typing import Optional, List, Union, Dict, Set, ClassVar
+from typing import Optional, List, Union, Dict, Set, ClassVar, Type
 from pathlib import Path
 
 from gigaspatial.core.io.data_store import DataStore
@@ -207,6 +208,10 @@ class CellTable(EntityTable[Cell]):
         cls,
         file_path: Union[str, Path],
         data_store: Optional[DataStore] = None,
+        clean: bool = True,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = CellProcessor,
         **kwargs,
     ) -> "CellTable":
         """
@@ -215,7 +220,9 @@ class CellTable(EntityTable[Cell]):
         Args:
             file_path: Path to the dataset file.
             data_store: DataStore instance for file access. Defaults to LocalDataStore.
-            **kwargs: Additional arguments forwarded to read_dataset.
+            clean: Whether to apply the processor before validation. Defaults to True.
+            processor: Optional EntityProcessor subclass or instance. Defaults to CellProcessor.
+            **kwargs: Additional arguments forwarded to read_dataset and the processor.
 
         Returns:
             CellTable instance with validated Cell entities.
@@ -228,23 +235,42 @@ class CellTable(EntityTable[Cell]):
             file_path=file_path,
             entity_class=Cell,
             data_store=data_store,
-            processor=CellProcessor,
+            clean=clean,
+            processor=processor,
             **kwargs,
         )
 
     @classmethod
-    def from_dataframe(cls, df: pd.DataFrame, entity_class=Cell) -> "CellTable":
+    def from_dataframe(
+        cls,
+        df: pd.DataFrame,
+        entity_class: Type[Cell] = Cell,
+        clean: bool = False,
+        processor: Optional[
+            Union[Type[EntityProcessor], EntityProcessor]
+        ] = CellProcessor,
+        **kwargs,
+    ) -> "CellTable":
         """
         Create a CellTable from an existing DataFrame.
 
         Args:
             df: DataFrame containing cell data.
             entity_class: Entity class to validate against. Defaults to Cell.
+            clean: Whether to apply CellProcessor before validation.
+            processor: Optional EntityProcessor subclass or instance. Defaults to CellProcessor.
+            **kwargs: Additional arguments passed to the processor.
 
         Returns:
             CellTable instance with validated Cell entities.
         """
-        return super().from_dataframe(df=df, entity_class=entity_class)
+        return super().from_dataframe(
+            df=df,
+            entity_class=entity_class,
+            clean=clean,
+            processor=processor,
+            **kwargs,
+        )
 
     # ------------------------------------------------------------------
     # Filters
