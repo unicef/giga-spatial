@@ -50,7 +50,7 @@ class Config(BaseSettings):
     # Used for accessing NASA Earthdata services (e.g., SRTM elevation data)
     EARTHDATA_USERNAME: str = Field(default="", alias="EARTHDATA_USERNAME")
     EARTHDATA_PASSWORD: str = Field(default="", alias="EARTHDATA_PASSWORD")
-
+    
     # OpenCellID configuration
     # Used for accessing OpenCellID mobile network cell tower data
     OPENCELLID_ACCESS_TOKEN: str = Field(default="", alias="OPENCELLID_ACCESS_TOKEN")

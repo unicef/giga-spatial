@@ -84,7 +84,7 @@ GigaSpatial accesses Ookla datasets via their public AWS S3 bucket.
 | :--- | :--- | :--- |
 | `MAPBOX_ACCESS_TOKEN` | Mapbox | Satellite imagery fetching |
 | `MAXAR_API_KEY` | Maxar | High-res satellite imagery |
-| `EARTHDATA_USERNAME` | NASA | SRTM / Elevation data |
+| `EARTHDATA_USERNAME` | NASA | SRTM / Elevation data (LP DAAC HTTPS auth) |
 | `EARTHDATA_PASSWORD` | NASA | (Pair with username) |
 | `OPENCELLID_ACCESS_TOKEN` | OpenCellID | Cell tower location database |
 | `HEALTHSITES_API_KEY` | Healthsites.io | Global health facility data |

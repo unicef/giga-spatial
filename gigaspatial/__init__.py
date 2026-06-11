@@ -1,8 +1,14 @@
 __version__ = "0.9.6"
 
+import sys
+
 import gigaspatial.core.io as io
 import gigaspatial.processing.algorithms as algorithms
-import gigaspatial.processing.geo as geo
+import gigaspatial.processing.elevation as elevation
+
+sys.modules["gigaspatial.io"] = io
+sys.modules["gigaspatial.elevation"] = elevation
+sys.modules["gigaspatial.algorithms"] = algorithms
 
 from .core.io import (
     ADLSDataStore,
@@ -107,8 +113,8 @@ __all__ = [
     "H3Hexagons",
     "S2Cells",
     # processing
+    "elevation",
     "TifProcessor",
-    "geo",
     "convert_to_geodataframe",
     "buffer_geodataframe",
     "aggregate_points_to_zones",

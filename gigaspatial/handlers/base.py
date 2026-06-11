@@ -69,6 +69,18 @@ class BaseHandlerConfig(ABC):
             return ("geometry", source.wkt)
         if isinstance(source, gpd.GeoDataFrame):
             return ("geometry", str(source.geometry.unary_union.wkt))
+        if isinstance(source, pd.DataFrame) and not isinstance(source, gpd.GeoDataFrame):
+            from gigaspatial.processing.geo import detect_coordinate_columns
+
+            try:
+                lat_col, lon_col = detect_coordinate_columns(source)
+                pt_str = tuple(
+                    zip(source[lat_col].tolist(), source[lon_col].tolist())
+                )
+                return ("dataframe_points", pt_str)
+            except (ValueError, TypeError):
+                pass
+            return ("dataframe", str(id(source)))
         if isinstance(source, Iterable) and all(
             isinstance(p, (Point, tuple)) for p in source
         ):
@@ -208,8 +220,16 @@ class BaseHandlerConfig(ABC):
             BaseGeometry,
         ):
             return source
-        elif isinstance(source, Iterable) and all(
-            isinstance(p, (Point, Iterable)) for p in source
+        elif isinstance(source, pd.DataFrame) and not isinstance(source, gpd.GeoDataFrame):
+            from gigaspatial.processing.geo import convert_to_geodataframe
+
+            crs = kwargs.get("crs", "EPSG:4326")
+            gdf = convert_to_geodataframe(source, crs=crs)
+            return gdf.geometry.union_all()
+        elif (
+            not isinstance(source, (str, pd.DataFrame))
+            and isinstance(source, Iterable)
+            and all(isinstance(p, (Point, Iterable)) for p in source)
         ):
             points = [p if isinstance(p, Point) else Point(p[1], p[0]) for p in source]
             return MultiPoint(points)

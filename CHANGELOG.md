@@ -2,9 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.9.6] - 2026-06-XX
+## [v0.9.6] - 2026-06-11
+
+### Added
+
+-   **Elevation Processing Module (`gigaspatial/processing/elevation/`)**
+    -   Introduced a new `elevation` submodule to centralize geospatial terrain processing, explicitly decoupling terrain analytics from raw data ingestion.
+    -   **`los_analyzer.py` (`LOSAnalyzer`, `LOSAnalyzerConfig`, `LOSResult`)**: 
+        -   Added a comprehensive, stateless tool for dual-state Line-of-Sight (LOS) and Fresnel zone analysis.
+        -   **Dual-state evaluation**: Validates links against standard median refractivity (e.g., $k = 4/3$) and worst-case sub-refractive conditions (e.g., $k = 0.6$, Earth bulging) to ensure infrastructure-grade availability.
+        -   **RF Propagation Features**: Computes Earth curvature corrections, variable Fresnel zone clearance requirements, and estimates worst-case knife-edge diffraction loss via ITU-R P.526 approximation.
+        -   **Stateless Architecture**: Designed `LOSAnalyzer` to retain the SRTM cache while accepting link-specific parameters (antenna heights, frequency) at call time (`analyze()` or `analyze_profile()`), enabling highly efficient batch processing.
+        -   **Visualization**: Included a built-in `plot()` method in `LOSResult` that generates interactive Plotly profiles mapping effective terrain, visual LOS, and Fresnel boundaries.
+
+-   **`DemographicPathFilter` frozen dataclass (`gigaspatial/handlers/worldpop.py`)**
+    -   `from_kwargs(**kwargs)` constructor normalising `sex`, `education_level`/`level`, `ages`, `min_age`, and `max_age` from caller kwargs into typed frozensets.
+    -   `has_filters` property for a cheap boolean guard before applying filtering.
+    -   `filter_paths(paths, project, school_age, _logger)` method encapsulating all three demographic filename patterns: standard age-band (`ISO3_SEX_AGE_YEAR.tif`), school-age (`ISO3_F_M_LEVEL_YEAR.tif`), and under-18 (`ISO3_SEX_Under_18_YEAR.tif`).
+
+-   **Unit tests for `resolve_dataset_category` and `DemographicPathFilter` (`tests/handlers/test_worldpop_config.py`)**
+    -   Table-driven tests requiring no `WPPopulationConfig` instantiation or I/O overhead.
+    -   Covers: happy-path category resolution for all release/project/resolution combinations, `normalized_fields` correctness (including a no-spurious-overrides assertion), warning emission for every auto-correction path, `ValueError` for all documented invalid combinations, `DemographicPathFilter` construction and immutability, `has_filters` property, and `filter_paths` behaviour across all three filename patterns including mixed-corpus directories.
+
+-   **LP DAAC credential tests (`tests/handlers/srtm/test_lpdaac_credentials.py`)**
+    -   Mocked regression tests for the Basic-auth GET credential fetch flow and 401 error messaging.
+
+-   **SRTM HTTPS URL tests (`tests/handlers/srtm/test_nasa_srtm_urls.py`)**
+    -   Unit tests for `get_tile_url()` across 30m/90m resolutions and public vs protected collection paths.
+
 
 ### Changed
+
+-   **NASA SRTM Handler: LP DAAC HTTPS download (`gigaspatial/handlers/srtm/nasa_srtm.py`)**
+    -   Replaced broken USGS HTTP tile URLs with LP DAAC Earthdata Cloud HTTPS URLs (`https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/SRTMGL{1,3}.003/...`).
+    -   `NasaSRTMDownloader` streams tiles via authenticated `EarthdataSession` GET requests; `lp-prod-public` uses anonymous HTTP.
+    -   Added `get_tile_url()` and `https_base_url` config; `LPDAAC_S3_BUCKET` selects the collection path segment in URLs.
+    -   `LPDAACS3CredentialProvider` retained in `gigaspatial/handlers/srtm/utils.py` for future direct-S3 access (not used by default downloads).
+    -   `SRTMManager` auto-download uses `NasaSRTMConfig.get_tile_url()`.
 
 -   **WorldPop Configuration Refactor: Separate Category Resolution and Path Filtering (`gigaspatial/handlers/worldpop.py`)**
     -   Extracted dataset category resolution out of the `WPPopulationConfig` Pydantic validator into a standalone pure function `resolve_dataset_category(release, project, year, resolution, un_adjusted, constrained, school_age, under_18, dug_level)` that returns `(dataset_category, normalized_fields, warnings)` with no side effects, making all release/project/constraint combinations independently testable without constructing a config object.
@@ -41,17 +75,19 @@ All notable changes to this project will be documented in this file.
     -   `filter_by_node_types` likewise accepts `Set[Union[NodeType, str]]`, supporting mixed sets of enum members and strings.
     -   Updated type annotations to `Union[<Enum>, str]` across all affected methods and expanded docstrings with illustrative string examples.
 
-### Added
+-   **SRTM Management Refactoring (`gigaspatial/processing/elevation/`)**
+    -   Relocated `srtm_parser.py` and `srtm_manager.py` from `gigaspatial/handlers/nasa/` to the new `gigaspatial/processing/elevation/` module. 
+    -   **Architectural Separation**: Isolates spatial interpolation (`RegularGridInterpolator`) and memory-efficient LRU caching from the data handler layer.
 
--   **`DemographicPathFilter` frozen dataclass (`gigaspatial/handlers/worldpop.py`)**
-    -   `from_kwargs(**kwargs)` constructor normalising `sex`, `education_level`/`level`, `ages`, `min_age`, and `max_age` from caller kwargs into typed frozensets.
-    -   `has_filters` property for a cheap boolean guard before applying filtering.
-    -   `filter_paths(paths, project, school_age, _logger)` method encapsulating all three demographic filename patterns: standard age-band (`ISO3_SEX_AGE_YEAR.tif`), school-age (`ISO3_F_M_LEVEL_YEAR.tif`), and under-18 (`ISO3_SEX_Under_18_YEAR.tif`).
+-   **Handler Namespace Reorganization (`gigaspatial/handlers/`)**
+    -   Renamed the `handlers/srtm/` submodule to `handlers/nasa/`.
+    -   Renamed the core handler script `nasa_srtm.py` to `srtm.py` (now located at `gigaspatial/handlers/nasa/srtm.py`). The script acts strictly as the entry point for NASA API operations and downloads.
+    -   **Why:** This shifts the handler architecture to group by *provider* (NASA) rather than *data type* (SRTM), establishing a cleaner, more extensible pattern for future data integrations.
 
+### Fixed
 
--   **Unit tests for `resolve_dataset_category` and `DemographicPathFilter` (`tests/handlers/test_worldpop_config.py`)**
-    -   Table-driven tests requiring no `WPPopulationConfig` instantiation or I/O overhead.
-    -   Covers: happy-path category resolution for all release/project/resolution combinations, `normalized_fields` correctness (including a no-spurious-overrides assertion), warning emission for every auto-correction path, `ValueError` for all documented invalid combinations, `DemographicPathFilter` construction and immutability, `has_filters` property, and `filter_paths` behaviour across all three filename patterns including mixed-corpus directories.
+-   **`MSBuildingsConfig`: Correct `read_json` argument order (`gigaspatial/handlers/microsoft_global_buildings.py`)**
+    -   Fixed `_setup_location_mapping` passing arguments to `read_json` in the old `(data_store, path)` order instead of the current `(path, data_store)` API introduced in v0.9.3. Loading a cached `location_mapping.json` previously raised `AttributeError: 'str' object has no attribute 'open'`.
 
 ## [v0.9.5] - 2026-05-19
 

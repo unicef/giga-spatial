@@ -119,7 +119,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
 
         if self.data_store.file_exists(str(self.LOCATION_MAPPING_FILE)):
             self.location_mapping = read_json(
-                self.data_store, str(self.LOCATION_MAPPING_FILE)
+                str(self.LOCATION_MAPPING_FILE), data_store=self.data_store
             )
         else:
             self.location_mapping = self.create_location_mapping(

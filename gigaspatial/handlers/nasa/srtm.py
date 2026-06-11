@@ -1,7 +1,5 @@
 import pandas as pd
 from pathlib import Path
-import functools
-import multiprocessing
 from typing import List, Union, Iterable, Literal, Optional
 import geopandas as gpd
 from shapely.geometry import box
@@ -10,7 +8,6 @@ from shapely.strtree import STRtree
 import logging
 import itertools
 import requests
-from tqdm import tqdm
 
 from pydantic.dataclasses import dataclass
 from pydantic import Field, ConfigDict
@@ -23,8 +20,8 @@ from gigaspatial.handlers.base import (
 )
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.config import config as global_config
-from gigaspatial.handlers.srtm.srtm_parser import SRTMParser
-from gigaspatial.handlers.srtm.utils import EarthdataSession
+from gigaspatial.processing.elevation.srtm_parser import SRTMParser
+from gigaspatial.handlers.nasa.utils import EarthdataSession, LPDAACS3CredentialProvider
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -43,7 +40,22 @@ class NasaSRTMConfig(BaseHandlerConfig):
         default=global_config.EARTHDATA_PASSWORD, description="Earthdata Login password"
     )
 
-    BASE_URL: str = "https://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL{}.003/2000.02.11/"
+    https_base_url: str = Field(
+        default="https://data.lpdaac.earthdatacloud.nasa.gov",
+        description="LP DAAC Earthdata Cloud HTTPS base URL",
+    )
+    s3_region: str = Field(
+        default="us-west-2",
+        description="AWS region for LP DAAC SRTM (reserved for future direct-S3 access)",
+    )
+    s3_bucket: Literal["lp-prod-protected", "lp-prod-public"] = Field(
+        default="lp-prod-protected",
+        description="LP DAAC collection bucket path segment in tile URLs",
+    )
+    s3_credentials_endpoint: str = Field(
+        default=LPDAACS3CredentialProvider.DEFAULT_ENDPOINT,
+        description="LP DAAC endpoint for temporary S3 credentials (future direct-S3 use)",
+    )
 
     # user config
     base_path: Path = global_config.get_path("nasa_srtm", "bronze")
@@ -52,31 +64,32 @@ class NasaSRTMConfig(BaseHandlerConfig):
     def __post_init__(self):
         super().__post_init__()
         self._res_arc = 3 if self.resolution == "90m" else 1
-        self.BASE_URL = self.BASE_URL.format(self._res_arc)
-        self.session = self._create_authenticated_session()
-        self._generate_tile_grid()
-
-    def _create_authenticated_session(self) -> requests.Session:
-        """
-        Create a persistent Earthdata-authenticated requests session
-        that keeps Authorization headers through redirects.
-        """
-        logging.info("Setting up Earthdata session with header redirection...")
-
-        session = EarthdataSession(
+        self._credential_provider: Optional[LPDAACS3CredentialProvider] = None
+        self.session = EarthdataSession(
             username=self.earthdata_username,
             password=self.earthdata_password,
         )
+        self._generate_tile_grid()
 
-        # Optionally verify credentials once (to pre-authenticate cookies)
-        auth_test = "https://urs.earthdata.nasa.gov"
-        try:
-            r = session.get(auth_test, timeout=10)
-            logging.debug(f"Earthdata auth test status: {r.status_code}")
-        except requests.RequestException as e:
-            logging.warning(f"Earthdata auth test failed: {e}")
+    def get_credential_provider(self) -> LPDAACS3CredentialProvider:
+        """Return LP DAAC STS credential provider (reserved for future direct-S3 access)."""
+        if self._credential_provider is None:
+            self._credential_provider = LPDAACS3CredentialProvider(
+                username=self.earthdata_username,
+                password=self.earthdata_password,
+                endpoint=self.s3_credentials_endpoint,
+                region=self.s3_region,
+            )
+        return self._credential_provider
 
-        return session
+    def get_tile_url(self, tile_id: str) -> str:
+        """Build the HTTPS URL for a single SRTM tile."""
+        product = f"SRTMGL{self._res_arc}"
+        folder = f"{tile_id}.{product}.hgt"
+        filename = f"{folder}.zip"
+        return (
+            f"{self.https_base_url}/{self.s3_bucket}/{product}.003/{folder}/{filename}"
+        )
 
     def _generate_tile_grid(self):
         """
@@ -89,11 +102,13 @@ class NasaSRTMConfig(BaseHandlerConfig):
         grid_records = []
         for lat, lon in itertools.product(lats, lons):
             tile_name = self._tile_name(lat, lon)
+            tile_url = self.get_tile_url(tile_name)
             grid_records.append(
                 {
                     "tile_id": tile_name,
                     "geometry": box(lon, lat, lon + 1, lat + 1),
-                    "tile_url": f"{self.BASE_URL}/{tile_name}.SRTMGL{self._res_arc}.hgt.zip",
+                    "tile_url": tile_url,
+                    "tile_uri": tile_url,
                 }
             )
 
@@ -163,6 +178,21 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
         config = config or NasaSRTMConfig()
         super().__init__(config=config, data_store=data_store, logger=logger)
 
+    def _http_request(self, method: str, url: str, **kwargs):
+        """Issue an HTTP request using Earthdata auth or anonymous access."""
+        if self.config.s3_bucket == "lp-prod-public":
+            return requests.request(method, url, **kwargs)
+        return self.config.session.request(method, url, **kwargs)
+
+    def validate_unit_exists(self, tile_url: str) -> bool:
+        """Check whether a tile exists at the remote HTTPS URL."""
+        try:
+            response = self._http_request("HEAD", tile_url, timeout=30, allow_redirects=True)
+            return response.status_code == 200
+        except Exception as e:
+            self.logger.warning(f"Error validating unit {tile_url}: {e}")
+            return False
+
     def download_data_unit(
         self,
         tile_info: Union[pd.Series, dict],
@@ -170,32 +200,39 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
     ) -> Optional[str]:
         """Download data file for a single SRTM tile."""
 
-        tile_url = tile_info["tile_url"]
+        tile_url = tile_info.get("tile_url") or tile_info.get("tile_uri")
+        file_path = str(self.config.get_data_unit_path(tile_info))
 
         try:
-            response = self.config.session.get(tile_url, stream=True)
+            response = self._http_request(
+                "GET", tile_url, stream=True, timeout=30, allow_redirects=True
+            )
             response.raise_for_status()
 
-            file_path = str(self.config.get_data_unit_path(tile_info))
-
             with self.data_store.open(file_path, "wb") as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
+                for chunk in response.iter_content(chunk_size=8192 * 1024):
+                    if chunk:
+                        file.write(chunk)
 
-                self.logger.debug(
-                    f"Successfully downloaded tile: {tile_info['tile_id']}"
-                )
-                return file_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(
-                f"Failed to download tile {tile_info['tile_id']}: {str(e)}"
+            self.logger.debug(
+                f"Successfully downloaded tile: {tile_info['tile_id']} from {tile_url}"
             )
+            return file_path
+
+        except requests.RequestException as e:
+            self.logger.error(
+                f"Failed to download tile {tile_info['tile_id']} from {tile_url}: {e}"
+            )
+            if self.data_store.file_exists(file_path):
+                self.data_store.remove(file_path)
             return None
         except Exception as e:
-            self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
+            self.logger.error(
+                f"Unexpected error downloading tile {tile_info['tile_id']}: {e}"
+            )
+            if self.data_store.file_exists(file_path):
+                self.data_store.remove(file_path)
             return None
-
 
 
 class NasaSRTMReader(BaseHandlerReader):

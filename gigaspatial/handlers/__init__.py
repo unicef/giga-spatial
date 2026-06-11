@@ -60,13 +60,11 @@ from gigaspatial.handlers.giga import (
     GigaCountriesFetcher,
 )
 from gigaspatial.handlers.healthsites import HealthSitesFetcher
-from gigaspatial.handlers.srtm import (
+from gigaspatial.handlers.nasa import (
     NasaSRTMConfig,
     NasaSRTMDownloader,
     NasaSRTMReader,
     NasaSRTMHandler,
-    SRTMParser,
-    SRTMManager,
 )
 from gigaspatial.handlers.gee import (
     GEEDatasetEntry,

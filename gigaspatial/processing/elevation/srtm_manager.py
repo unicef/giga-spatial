@@ -5,10 +5,11 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-from gigaspatial.handlers.srtm.srtm_parser import SRTMParser
-from gigaspatial.handlers.srtm.nasa_srtm import NasaSRTMDownloader
+from gigaspatial.processing.elevation.srtm_parser import SRTMParser
+from gigaspatial.handlers.nasa.srtm import NasaSRTMDownloader
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.config import config
 
 
 class SRTMManager:
@@ -21,7 +22,7 @@ class SRTMManager:
 
     def __init__(
         self,
-        srtm_directory: Union[str, Path],
+        srtm_directory: Union[str, Path] = config.get_path("nasa_srtm", "bronze"),
         downloader: NasaSRTMDownloader = None,
         cache_size: int = 10,
         data_store: Optional[DataStore] = None,
@@ -42,7 +43,7 @@ class SRTMManager:
             downloader.data_store > LocalDataStore()
         """
         self.srtm_directory = Path(srtm_directory)
-        self.downloader = downloader
+        self.downloader = downloader or NasaSRTMDownloader()
 
         # Set data_store: use provided, otherwise downloader's, otherwise LocalDataStore
         if data_store is not None:
@@ -147,12 +148,13 @@ class SRTMManager:
 
                 # Create tile_info following the pattern from NasaSRTMConfig
                 tile_id = self.downloader.config._tile_name(lat_tile, lon_tile)
-                tile_url = f"{self.downloader.config.BASE_URL}/{tile_id}.SRTMGL{self.downloader.config._res_arc}.hgt.zip"
+                tile_url = self.downloader.config.get_tile_url(tile_id)
 
                 tile_info = {
                     "tile_id": tile_id,
                     "geometry": box(lon_tile, lat_tile, lon_tile + 1, lat_tile + 1),
                     "tile_url": tile_url,
+                    "tile_uri": tile_url,
                 }
 
                 # Use download_data_unit for direct download
