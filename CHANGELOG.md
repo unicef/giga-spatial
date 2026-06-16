@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.7] - 2026-XX-XX
+
+### Added
+
+-   **Forward Azimuth & Point-to-Point Link Alignment**
+    -   Added a new `_calculate_azimuth(lat1, lon1, lat2, lon2)` static helper to `LOSAnalyzer` using spherical trigonometry to compute the initial compass bearing from transmitter to receiver.
+    -   Exposed the resulting `azimuth_deg` directly as a float attribute on the `LOSResult` dataclass, normalized to the range $[0, 360)^\circ$ (where $0^\circ = \text{North}$ and $180^\circ = \text{South}$).
+    -   Integrated the azimuth output into the public .summary() API to provide immediate antenna alignment metrics alongside clearance data.
+
 ## [v0.9.6] - 2026-06-11
 
 ### Added

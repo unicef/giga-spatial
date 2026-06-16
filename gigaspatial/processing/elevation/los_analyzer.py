@@ -94,6 +94,12 @@ class LOSResult:
     knife_edge_loss_worst_case_db : float or None
         Estimated knife-edge diffraction loss (dB) at the worst-case bottleneck
         (ITU-R P.526 approximation). None if path clears or frequency is missing.
+    azimuth_deg : float
+        The initial compass bearing (forward azimuth) from the transmitter
+        (start point) to the receiver (end point) in decimal degrees. Measured
+        clockwise from True North ($0^\circ = \text{North}$, $90^\circ = \text{East}$,
+        $180^\circ = \text{South}$, $270^\circ = \text{West}$) and normalized
+        to the range $[0, 360)$.
     tx_height_m : float
         Transmitter antenna height above ground used in the analysis.
     rx_height_m : float
@@ -114,6 +120,7 @@ class LOSResult:
     bottleneck_distance_worst_case_km: float
     obstruction_count_worst_case: int
     knife_edge_loss_worst_case_db: Optional[float]
+    azimuth_deg: float
     tx_height_m: float
     rx_height_m: float
     frequency_mhz: Optional[float]
@@ -145,6 +152,7 @@ class LOSResult:
         return {
             "is_highly_available": self.is_highly_available,
             "is_visual_los": self.is_visual_los,
+            "azimuth_deg": round(self.azimuth_deg, 2),
             "passes_median_clearance": self.passes_median_clearance,
             "passes_worst_case_clearance": self.passes_worst_case_clearance,
             "margin_median_m": round(self.margin_median_m, 2),
@@ -550,7 +558,15 @@ class LOSAnalyzer:
         profile = profile.copy()
         distances_km = profile["distance_km"].values
         elevations = profile["elevation"].values
+        lats = profile["latitude"].values
+        lons = profile["longitude"].values
+
         total_distance_km = float(distances_km[-1])
+
+        # Calculate Azimuth
+        azimuth = self._calculate_azimuth(
+            lat1=lats[0], lon1=lons[0], lat2=lats[-1], lon2=lons[-1]
+        )
 
         # Distances from TX (d1) and RX (d2)
         d1 = distances_km
@@ -691,6 +707,7 @@ class LOSAnalyzer:
             bottleneck_distance_worst_case_km=bottleneck_dist_worst_km,
             obstruction_count_worst_case=obstruction_count_worst,
             knife_edge_loss_worst_case_db=knife_edge_loss_db,
+            azimuth_deg=azimuth,
             tx_height_m=tx_height_m,
             rx_height_m=rx_height_m,
             frequency_mhz=frequency_mhz,
@@ -847,6 +864,43 @@ class LOSAnalyzer:
             return float(20.0 * np.log10(0.4 - np.sqrt(max(inner, 0.0))))
         else:
             return float(20.0 * np.log10(0.225 / nu))
+
+    @staticmethod
+    def _calculate_azimuth(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """
+        Calculate the initial compass bearing (forward azimuth) from point 1 to point 2.
+
+        Parameters
+        ----------
+        lat1, lon1 : float
+            Transmitter coordinates in decimal degrees.
+        lat2, lon2 : float
+            Receiver coordinates in decimal degrees.
+
+        Returns
+        -------
+        float
+            Azimuth angle in degrees, normalized to [0, 360).
+            0 = North, 90 = East, 180 = South, 270 = West.
+        """
+        # Convert decimal degrees to radians
+        lat1_rad = np.radians(lat1)
+        lat2_rad = np.radians(lat2)
+        delta_lon = np.radians(lon2 - lon1)
+
+        # Forward azimuth formula
+        x = np.sin(delta_lon) * np.cos(lat2_rad)
+        y = np.cos(lat1_rad) * np.sin(lat2_rad) - (
+            np.sin(lat1_rad) * np.cos(lat2_rad) * np.cos(delta_lon)
+        )
+
+        initial_bearing_rad = np.arctan2(x, y)
+
+        # Convert to degrees and normalize to 0-360
+        initial_bearing_deg = np.degrees(initial_bearing_rad)
+        compass_bearing = (initial_bearing_deg + 360) % 360
+
+        return float(compass_bearing)
 
     # ------------------------------------------------------------------
     # Validation
