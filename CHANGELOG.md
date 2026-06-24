@@ -11,6 +11,12 @@ All notable changes to this project will be documented in this file.
     -   Exposed the resulting `azimuth_deg` directly as a float attribute on the `LOSResult` dataclass, normalized to the range $[0, 360)^\circ$ (where $0^\circ = \text{North}$ and $180^\circ = \text{South}$).
     -   Integrated the azimuth output into the public .summary() API to provide immediate antenna alignment metrics alongside clearance data.
 
+-   **Memory-Safe Centroid Caching for Combined Buildings Dataset (`GoogleMSBuildingsHandler`)**
+    -   Introduced a highly optimized pipeline to extract and cache building geometries as lightweight `.npz` coordinate arrays, explicitly designed to prevent Out-Of-Memory (OOM) crashes on massive country-level datasets.
+    -   **`generate_centroid_cache(source, force, **kwargs)`**: Bypasses Pandas entirely by using direct PyArrow row-group streaming combined with Shapely's vectorized C-backend (`from_wkb`). Drastically reduces memory and disk footprint by casting coordinates to `np.float32` before saving to a compressed NumPy archive.
+    -   **`load_centroids(source, force, **kwargs)`**: Provides a seamless retrieval mechanism that dynamically resolves data sources (handling both single country files and multi-file S2 grids), auto-generates missing caches, and safely concatenates results into a unified $N \times 2$ matrix via `np.vstack`.
+    -   **Architectural Impact**: Unlocks lightning-fast access to pure coordinate matrices for downstream proximity and density computations (e.g., KD-Trees) while maintaining perfect API symmetry with the standard `handler.load()` workflow.
+
 ## [v0.9.6] - 2026-06-11
 
 ### Added
