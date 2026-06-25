@@ -3,6 +3,7 @@ Engine for large-scale building data processing.
 Provides partitioned processing for Google and Microsoft building datasets,
 supporting zonal counts and nearest-building searches for POIs.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,12 +13,10 @@ from typing import Iterable, List, Literal, Optional, Sequence, Tuple
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely
 
 from gigaspatial.config import config
 from gigaspatial.processing.geo import buffer_geodataframe, calculate_distance
-
-
-SourceFilter = Optional[Literal["google", "microsoft"]]
 
 LOGGER = config.get_logger("GoogleMSBuildingsEngine")
 
@@ -54,12 +53,6 @@ class GoogleMSBuildingsEngine:
     ) -> gpd.GeoDataFrame:
         """
         Build an S2 grid GeoDataFrame with a `filepath` column from S2-tile filenames.
-
-        Args:
-            building_files: Sequence of paths to S2-tiled building files.
-
-        Returns:
-            GeoDataFrame containing S2 cell geometries and corresponding filepaths.
         """
         from gigaspatial.grid.s2 import S2Cells
 
@@ -158,17 +151,15 @@ class GoogleMSBuildingsEngine:
         handler,
         building_files: Sequence[Path],
         zones_gdf: gpd.GeoDataFrame,
-        source_filter: SourceFilter,
         logger=None,
     ) -> BuildingCountsResult:
         """
-        Count buildings intersecting each zone.
+        Count buildings intersecting each zone using high-performance centroid caching.
 
         Args:
-            handler: The building data handler (e.g. MSBuildingsHandler).
+            handler: The building data handler.
             building_files: Sequence of building file paths.
             zones_gdf: GeoDataFrame with 'zone_id' and 'geometry'.
-            source_filter: Filter for specific building sources ('google' or 'microsoft').
             logger: Optional logger.
 
         Returns:
@@ -190,29 +181,27 @@ class GoogleMSBuildingsEngine:
 
         jobs_list = list(_iter_jobs())
         if len(building_files) > 1 and len(jobs_list) == 0:
-            # Partitioned case but no intersecting tiles
             return BuildingCountsResult(counts=global_counts)
 
         logger.info(f"Processing {len(jobs_list)} building file(s)...")
 
         for filepath, zone_ids, is_single_file in jobs_list:
             try:
-                columns_to_read = (
-                    ["geometry"] if source_filter is None else ["bf_source", "geometry"]
-                )
-                buildings = handler.reader.load(filepath, columns=columns_to_read)
+                # Load lightweight numpy centroids instead of heavy parquet files
+                centroid_data = handler.load_centroids(filepath)
+                b_coords = centroid_data.get("coords", np.array([]))
 
-                if source_filter is not None and len(buildings) > 0:
-                    buildings = buildings.loc[buildings["bf_source"] == source_filter]
-
-                if len(buildings) == 0:
-                    logger.debug(f"No buildings in {filepath.name} after filtering")
+                if len(b_coords) == 0:
+                    logger.debug(f"No buildings in {filepath.name}")
                     continue
 
                 subset_zones = zones_gdf.loc[zones_gdf.zone_id.isin(zone_ids)].copy()
                 subset_zones = subset_zones.reset_index(drop=True)
 
-                tree = STRtree(buildings.geometry)
+                # Instantly vectorize 2D numpy array into Shapely C-struct points
+                points = shapely.points(b_coords[:, 0], b_coords[:, 1])
+                tree = STRtree(points)
+
                 zone_idxs, _ = tree.query(subset_zones.geometry, predicate="intersects")
                 building_counts = np.bincount(zone_idxs, minlength=len(subset_zones))
 
@@ -241,18 +230,16 @@ class GoogleMSBuildingsEngine:
         handler,
         building_files: Sequence[Path],
         pois_gdf: gpd.GeoDataFrame,
-        source_filter: SourceFilter,
         search_radius_m: float,
         logger=None,
     ) -> NearestBuildingsResult:
         """
-        Find the nearest building distance (meters) per POI.
+        Find the nearest building distance (meters) per POI using KD-Trees and numpy.
 
         Args:
             handler: The building data handler.
             building_files: Sequence of building file paths.
             pois_gdf: GeoDataFrame with 'poi_id' and 'geometry'.
-            source_filter: Filter for building sources.
             search_radius_m: Search distance for partitioned optimization.
             logger: Optional logger.
 
@@ -284,16 +271,12 @@ class GoogleMSBuildingsEngine:
 
         for filepath, poi_ids, is_single_file in jobs:
             try:
-                columns_to_read = (
-                    ["geometry"] if source_filter is None else ["bf_source", "geometry"]
-                )
-                buildings = handler.reader.load(filepath, columns=columns_to_read)
+                # Load lightweight numpy centroids
+                centroid_data = handler.load_centroids(filepath)
+                b_coords = centroid_data.get("coords", np.array([]))
 
-                if source_filter is not None and len(buildings) > 0:
-                    buildings = buildings.loc[buildings["bf_source"] == source_filter]
-
-                if len(buildings) == 0:
-                    logger.debug(f"No buildings in {filepath.name} after filtering")
+                if len(b_coords) == 0:
+                    logger.debug(f"No buildings in {filepath.name}")
                     continue
 
                 subset_pois = pois_gdf.loc[pois_gdf.poi_id.isin(poi_ids)]
@@ -304,11 +287,7 @@ class GoogleMSBuildingsEngine:
                     (subset_pois.geometry.x, subset_pois.geometry.y)
                 ).T
 
-                b_centroids = buildings.geometry.centroid
-                b_coords = np.vstack((b_centroids.x, b_centroids.y)).T
-                if len(b_coords) == 0:
-                    continue
-
+                # Feed directly into KDTree (Massive speedup over GeoPandas overhead)
                 tree = cKDTree(b_coords)
                 _, building_idxs = tree.query(poi_coords, k=1)
 
@@ -334,5 +313,4 @@ class GoogleMSBuildingsEngine:
             except Exception as e:
                 logger.error(f"Failed to process {filepath.name}: {str(e)}")
 
-        # Replace inf with NaN at the callsite (so callers can choose how to represent missing)
         return NearestBuildingsResult(distances_m=global_min_dists)
