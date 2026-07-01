@@ -400,7 +400,7 @@ class MSBuildingsReader(BaseHandlerReader):
         from gigaspatial.core.io.readers import read_gzipped_json_or_csv
         from shapely.geometry import shape
 
-        def read_ms_dataset(data_store: DataStore, file_path: str):
+        def read_ms_dataset(file_path: str, data_store: DataStore = None):
             df = read_gzipped_json_or_csv(file_path=file_path, data_store=data_store)
             df["geometry"] = df["geometry"].apply(shape)
             return gpd.GeoDataFrame(df, crs=4326)
