@@ -23,7 +23,7 @@ from datetime import datetime
 from gigaspatial.config import config
 
 
-@dataclass
+@dataclass(kw_only=True)
 class OSMLocationFetcher:
     """
     Fetcher for OpenStreetMap POIs and boundaries using the Overpass API.

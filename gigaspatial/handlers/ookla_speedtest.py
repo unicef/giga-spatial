@@ -33,7 +33,7 @@ import logging
 from tqdm import tqdm
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
 class OoklaSpeedtestConfig(BaseHandlerConfig):
     """
     Configuration for Ookla Speedtest dataset access.

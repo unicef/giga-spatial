@@ -54,3 +54,7 @@ dask>=2024.12.1
 duckdb==1.2.0
 # Optional: UNICEF Data (pip install "giga-spatial[unicef]")
 unicefdata>=2.4.0
+
+# Optional: Elevation (pip install "giga-spatial[elevation]")
+itur>=0.4.0
+

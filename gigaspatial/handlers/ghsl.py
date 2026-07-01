@@ -41,7 +41,7 @@ class CoordSystem(int, Enum):
     Mollweide = 54009
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
 class GHSLDataConfig(BaseHandlerConfig):
     # constants
     AVAILABLE_YEARS: List = Field(default=np.append(np.arange(1975, 2031, 5), 2018))

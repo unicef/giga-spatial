@@ -19,7 +19,10 @@ class SRTMParser:
     """
 
     def __init__(
-        self, hgt_zip_path: Union[str, Path], data_store: Optional[DataStore] = None
+        self, 
+        hgt_zip_path: Union[str, Path], 
+        data_store: Optional[DataStore] = None,
+        local_cache_dir: Optional[Union[str, Path]] = None
     ):
         """
         Initialize the SRTM parser.
@@ -30,9 +33,12 @@ class SRTMParser:
             Path to the .hgt.zip file (e.g., 'S03E028.SRTMGL1.hgt.zip')
         data_store : DataStore, optional
             Data store for reading files. If None, uses LocalDataStore()
+        local_cache_dir : str or Path, optional
+            Local directory for Tier-2 disk caching of downloaded tiles.
         """
         self.hgt_zip_path = Path(hgt_zip_path)
         self.data_store = data_store or LocalDataStore()
+        self.local_cache_dir = Path(local_cache_dir) if local_cache_dir else None
 
         # Check if file exists
         if not self.data_store.file_exists(str(self.hgt_zip_path)):
@@ -70,25 +76,32 @@ class SRTMParser:
 
     def _load_data(self):
         """Load elevation data from .hgt.zip file using memory-efficient approach."""
-        # Read the zip file from DataStore
-        zip_data = self.data_store.read_file(str(self.hgt_zip_path))
-
-        # Create a BytesIO object from the zip data
-        zip_file_obj = io.BytesIO(zip_data)
-
-        # Extract .hgt file from zip
-        with zipfile.ZipFile(zip_file_obj, "r") as zip_ref:
-            # Find the .hgt file inside the zip
+        
+        def _extract_from_zip(zip_ref):
             hgt_files = [f for f in zip_ref.namelist() if f.endswith(".hgt")]
-
             if not hgt_files:
                 raise ValueError(f"No .hgt file found in {self.hgt_zip_path}")
+            with zip_ref.open(hgt_files[0]) as hgt_file:
+                return hgt_file.read()
 
-            hgt_filename = hgt_files[0]
-
-            # Read the binary data
-            with zip_ref.open(hgt_filename) as hgt_file:
-                hgt_data = hgt_file.read()
+        # Tier-2 Caching: Use local disk cache if provided
+        if self.local_cache_dir:
+            local_zip_path = self.local_cache_dir / self.hgt_zip_path.name
+            
+            # Download and cache if it doesn't exist locally
+            if not local_zip_path.exists():
+                zip_data = self.data_store.read_file(str(self.hgt_zip_path))
+                local_zip_path.write_bytes(zip_data)
+                
+            # Read from the local disk cache
+            with zipfile.ZipFile(local_zip_path, "r") as zip_ref:
+                hgt_data = _extract_from_zip(zip_ref)
+        else:
+            # Fallback: Read directly into memory
+            zip_data = self.data_store.read_file(str(self.hgt_zip_path))
+            zip_file_obj = io.BytesIO(zip_data)
+            with zipfile.ZipFile(zip_file_obj, "r") as zip_ref:
+                hgt_data = _extract_from_zip(zip_ref)
 
         # Determine resolution based on file size
         file_size = len(hgt_data)
