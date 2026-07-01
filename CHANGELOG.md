@@ -43,6 +43,11 @@ All notable changes to this project will be documented in this file.
     -   **View Mapper Simplification**: Refactored `find_nearest_buildings` and `_find_nearest_building_globally` to seamlessly interface with the new centroid-aware engine, deprecating the legacy `source_filter` to streamline the mapping pipeline.
     -   **Performance Impact**: Benchmarks for nearest-building searches show a massive **90-96% reduction in execution time** and an **80-90% reduction in peak memory** across both local and remote (ADLS) environments. For example, processing Mexico remotely (ADLS) dropped from ~32.5 minutes (7.5GB RAM) to ~1.4 minutes (1.3GB RAM).
 
+### Fixed
+
+-   **MSBuildingsReader**: 
+    -   Resolved a `TypeError` in `MSBuildingsReader` by adjusting the `read_ms_dataset` signature to accept `file_path` positionally and `data_store` as a keyword argument, matching the invocation pattern of `_load_tabular_data`.
+
 ## [v0.9.6] - 2026-06-11
 
 ### Added
