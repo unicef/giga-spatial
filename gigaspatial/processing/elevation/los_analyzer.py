@@ -12,8 +12,6 @@ from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.handlers.nasa.srtm import NasaSRTMDownloader
 from gigaspatial.processing.elevation.srtm_manager import SRTMManager
 
-logger = global_config.get_logger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -94,6 +92,18 @@ class LOSResult:
     knife_edge_loss_worst_case_db : float or None
         Estimated knife-edge diffraction loss (dB) at the worst-case bottleneck
         (ITU-R P.526 approximation). None if path clears or frequency is missing.
+    azimuth_deg : float
+        The initial compass bearing (forward azimuth) from the transmitter
+        (start point) to the receiver (end point) in decimal degrees. Measured
+        clockwise from True North ($0^\circ = \text{North}$, $90^\circ = \text{East}$,
+        $180^\circ = \text{South}$, $270^\circ = \text{West}$) and normalized
+        to the range $[0, 360)$.
+    elevation_angle_deg : float
+        The mechanical elevation angle (tilt) from the transmitter to the receiver
+        in decimal degrees. Positive values indicate a "tilt up" requirement,
+        while negative values indicate a "tilt down" requirement.
+        This is calculated based on the ground distance, absolute antenna heights,
+        and the atmospheric refraction constant ($k$-factor).
     tx_height_m : float
         Transmitter antenna height above ground used in the analysis.
     rx_height_m : float
@@ -114,6 +124,8 @@ class LOSResult:
     bottleneck_distance_worst_case_km: float
     obstruction_count_worst_case: int
     knife_edge_loss_worst_case_db: Optional[float]
+    azimuth_deg: float
+    elevation_angle_deg: float
     tx_height_m: float
     rx_height_m: float
     frequency_mhz: Optional[float]
@@ -145,6 +157,8 @@ class LOSResult:
         return {
             "is_highly_available": self.is_highly_available,
             "is_visual_los": self.is_visual_los,
+            "azimuth_deg": round(self.azimuth_deg, 2),
+            "elevation_angle_deg": round(self.elevation_angle_deg, 2),
             "passes_median_clearance": self.passes_median_clearance,
             "passes_worst_case_clearance": self.passes_worst_case_clearance,
             "margin_median_m": round(self.margin_median_m, 2),
@@ -374,6 +388,7 @@ class LOSAnalyzer:
     """
 
     EARTH_RADIUS_KM = 6371.0
+    logger = global_config.get_logger(__name__)
 
     def __init__(
         self,
@@ -384,6 +399,7 @@ class LOSAnalyzer:
         cache_size: int = 10,
         data_store: Optional[DataStore] = None,
         config: Optional[LOSAnalyzerConfig] = None,
+        logger=None,
         **config_kwargs,
     ):
         self.manager = SRTMManager(
@@ -393,7 +409,8 @@ class LOSAnalyzer:
             data_store=data_store,
         )
         self.config = config or LOSAnalyzerConfig(**config_kwargs)
-        logger.debug("LOSAnalyzer initialized with config: %s", self.config)
+        self.logger = logger or self.logger
+        self.logger.debug("LOSAnalyzer initialized with config: %s", self.config)
 
     # ------------------------------------------------------------------
     # Alternative constructor
@@ -404,6 +421,7 @@ class LOSAnalyzer:
         cls,
         manager: SRTMManager,
         config: Optional[LOSAnalyzerConfig] = None,
+        logger=None,
         **config_kwargs,
     ) -> "LOSAnalyzer":
         """
@@ -428,7 +446,8 @@ class LOSAnalyzer:
         instance = cls.__new__(cls)
         instance.manager = manager
         instance.config = config or LOSAnalyzerConfig(**config_kwargs)
-        logger.debug(
+        instance.logger = logger or cls.logger
+        instance.logger.debug(
             "LOSAnalyzer created from existing manager with config: %s",
             instance.config,
         )
@@ -550,13 +569,21 @@ class LOSAnalyzer:
         profile = profile.copy()
         distances_km = profile["distance_km"].values
         elevations = profile["elevation"].values
+        lats = profile["latitude"].values
+        lons = profile["longitude"].values
+
         total_distance_km = float(distances_km[-1])
+
+        # Calculate Azimuth
+        azimuth = self._calculate_azimuth(
+            lat1=lats[0], lon1=lons[0], lat2=lats[-1], lon2=lons[-1]
+        )
 
         # Distances from TX (d1) and RX (d2)
         d1 = distances_km
         d2 = total_distance_km - distances_km
 
-        logger.info(
+        self.logger.info(
             "Analyzing LOS for %.3f km path (%d points), "
             "tx_height=%.1f m, rx_height=%.1f m, freq=%s MHz",
             total_distance_km,
@@ -570,13 +597,17 @@ class LOSAnalyzer:
         tx_abs = elevations[0] + tx_height_m
         rx_abs = elevations[-1] + rx_height_m
 
+        # Calculate Elevation Angle
+        elevation_angle = self._calculate_elevation_angle(
+            total_distance_km, tx_abs, rx_abs, self.config.k_factor_median
+        )
+
         # 2. LOS visual line height at each point (Linear interpolation)
         t = distances_km / total_distance_km
         los_height = tx_abs + t * (rx_abs - tx_abs)
         profile["los_height_m"] = los_height
 
         # 3. Dual Earth curvature corrections
-        earth_radius_km = 6371.0
         if self.config.apply_earth_curvature:
             bulge_median = self._earth_curvature_correction(
                 distances_km, total_distance_km, self.config.k_factor_median
@@ -671,7 +702,7 @@ class LOSAnalyzer:
                 wavelength_m=wavelength_m,
             )
 
-        logger.info(
+        self.logger.info(
             "LOS analysis complete: passes_median=%s, passes_worst=%s, "
             "worst_margin=%.1f m, worst_bottleneck_dist=%.2f km",
             passes_median,
@@ -691,6 +722,8 @@ class LOSAnalyzer:
             bottleneck_distance_worst_case_km=bottleneck_dist_worst_km,
             obstruction_count_worst_case=obstruction_count_worst,
             knife_edge_loss_worst_case_db=knife_edge_loss_db,
+            azimuth_deg=azimuth,
+            elevation_angle_deg=elevation_angle,
             tx_height_m=tx_height_m,
             rx_height_m=rx_height_m,
             frequency_mhz=frequency_mhz,
@@ -700,6 +733,55 @@ class LOSAnalyzer:
     # ------------------------------------------------------------------
     # Geometric helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def calculate_radio_horizon_km(
+        tx_height_m,
+        rx_height_m,
+        k_factor: float = 4.0 / 3.0,
+        earth_radius_km: float = 6371.0,
+    ):
+        """
+        Calculate the maximum theoretical LOS distance over a smooth Earth.
+
+        Acts as an efficient $O(1)$ spatial pre-filter. If the distance between
+        two points exceeds this horizon, the link is mathematically blocked by
+        the Earth's curvature (assuming flat surrounding terrain).
+
+        If terrain is mountainous, inputs should ideally be heights Above Mean
+        Sea Level (AMSL). Otherwise, use Heights Above Ground Level (AGL) for
+        a conservative smooth-earth upper bound.
+
+        Supports both scalar and vectorized (numpy array/pandas Series) inputs.
+
+        Parameters
+        ----------
+        tx_height_m : float, int, np.ndarray, pd.Series
+            Effective height of the transmitter in meters.
+        rx_height_m : float, int, np.ndarray, pd.Series
+            Effective height of the target/receiver in meters.
+        k_factor : float, default=1.333...
+            Atmospheric refraction k-factor. Defaults to standard atmosphere (4/3).
+        earth_radius_km : float, default=6371.0
+            Mean Earth radius in kilometers.
+
+        Returns
+        -------
+        float
+            Maximum visual radio horizon distance in kilometers.
+        """
+        # Convert heights to km
+        h1_km = tx_height_m / 1000.0
+        h2_km = rx_height_m / 1000.0
+
+        # Effective Earth radius
+        r_eff = earth_radius_km * k_factor
+
+        # Distance to horizon from each point: d = sqrt(2 * R_eff * h)
+        d_tx = np.sqrt(2.0 * r_eff * h1_km)
+        d_rx = np.sqrt(2.0 * r_eff * h2_km)
+
+        return d_tx + d_rx
 
     def _earth_curvature_correction(
         self,
@@ -847,6 +929,85 @@ class LOSAnalyzer:
             return float(20.0 * np.log10(0.4 - np.sqrt(max(inner, 0.0))))
         else:
             return float(20.0 * np.log10(0.225 / nu))
+
+    @staticmethod
+    def _calculate_azimuth(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """
+        Calculate the initial compass bearing (forward azimuth) from point 1 to point 2.
+
+        Parameters
+        ----------
+        lat1, lon1 : float
+            Transmitter coordinates in decimal degrees.
+        lat2, lon2 : float
+            Receiver coordinates in decimal degrees.
+
+        Returns
+        -------
+        float
+            Azimuth angle in degrees, normalized to [0, 360).
+            0 = North, 90 = East, 180 = South, 270 = West.
+        """
+        # Convert decimal degrees to radians
+        lat1_rad = np.radians(lat1)
+        lat2_rad = np.radians(lat2)
+        delta_lon = np.radians(lon2 - lon1)
+
+        # Forward azimuth formula
+        x = np.sin(delta_lon) * np.cos(lat2_rad)
+        y = np.cos(lat1_rad) * np.sin(lat2_rad) - (
+            np.sin(lat1_rad) * np.cos(lat2_rad) * np.cos(delta_lon)
+        )
+
+        initial_bearing_rad = np.arctan2(x, y)
+
+        # Convert to degrees and normalize to 0-360
+        initial_bearing_deg = np.degrees(initial_bearing_rad)
+        compass_bearing = (initial_bearing_deg + 360) % 360
+
+        return float(compass_bearing)
+
+    @staticmethod
+    def _calculate_elevation_angle(
+        d_km: float, tx_abs_m: float, rx_abs_m: float, k_factor: float
+    ) -> float:
+        """
+        Calculate the mechanical elevation (tilt) angle from TX to RX.
+
+        Accounts for the target dropping below the local horizontal plane
+        due to Earth's curvature.
+
+        Parameters
+        ----------
+        d_km : float
+            Ground distance between TX and RX in km.
+        tx_abs_m : float
+            Transmitter absolute height (terrain + mast) in meters.
+        rx_abs_m : float
+            Receiver absolute height (terrain + mast) in meters.
+        k_factor : float
+            Atmospheric refraction k-factor (typically median, e.g., 1.333).
+
+        Returns
+        -------
+        float
+            Elevation angle in degrees.
+            Positive = tilt up, Negative = tilt down.
+        """
+        if d_km <= 0:
+            return 0.0
+
+        # 1. Earth curvature drop at the receiver location (meters)
+        earth_radius_km = 6371.0
+        drop_m = (d_km**2 * 1000.0) / (2.0 * k_factor * earth_radius_km)
+
+        # 2. Effective vertical difference relative to TX horizontal plane
+        effective_delta_h_m = (rx_abs_m - tx_abs_m) - drop_m
+
+        # 3. Trigonometry (arctan(opposite / adjacent))
+        angle_rad = np.arctan2(effective_delta_h_m, d_km * 1000.0)
+
+        return float(np.degrees(angle_rad))
 
     # ------------------------------------------------------------------
     # Validation

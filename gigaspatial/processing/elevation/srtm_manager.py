@@ -4,6 +4,8 @@ from typing import Tuple, List, Optional, Union
 from functools import lru_cache
 import numpy as np
 import pandas as pd
+import tempfile
+import threading
 
 from gigaspatial.processing.elevation.srtm_parser import SRTMParser
 from gigaspatial.handlers.nasa.srtm import NasaSRTMDownloader
@@ -18,6 +20,11 @@ class SRTMManager:
 
     Implements lazy loading with LRU caching for efficient memory usage.
     Automatically handles multiple tiles for elevation profiles.
+
+    WARNING: The LRU cache and Tier-2 temporary disk cache are bound to this instance. 
+    To benefit from caching and avoid redundant network downloads, you MUST reuse 
+    a single instance of SRTMManager (or LOSAnalyzer) across multiple queries/loops. 
+    Do not instantiate this class repeatedly inside a loop.
     """
 
     def __init__(
@@ -43,7 +50,6 @@ class SRTMManager:
             downloader.data_store > LocalDataStore()
         """
         self.srtm_directory = Path(srtm_directory)
-        self.downloader = downloader or NasaSRTMDownloader()
 
         # Set data_store: use provided, otherwise downloader's, otherwise LocalDataStore
         if data_store is not None:
@@ -53,9 +59,14 @@ class SRTMManager:
         else:
             self.data_store = LocalDataStore()
 
-        # Check if directory exists
-        if not self.data_store.is_dir(str(self.srtm_directory)):
-            raise FileNotFoundError(f"Directory not found: {self.srtm_directory}")
+        self.downloader = downloader or NasaSRTMDownloader(data_store=self.data_store)
+
+        # Concurrency locks
+        self._global_lock = threading.Lock()
+        self._tile_locks = {}
+
+        # Tier-2 local disk cache bound to the lifecycle of this instance
+        self._temp_dir = tempfile.TemporaryDirectory(prefix="srtm_cache_")
 
         # Build index of available tiles
         self.tile_index = self._build_tile_index()
@@ -141,39 +152,51 @@ class SRTMManager:
         """
         tile_key = (lat_tile, lon_tile)
 
-        if tile_key not in self.tile_index:
-            if self.downloader:
-                # Auto-download missing tile
-                from shapely.geometry import box
+        # 1. Ensure a lock exists for this specific tile
+        with self._global_lock:
+            if tile_key not in self._tile_locks:
+                self._tile_locks[tile_key] = threading.Lock()
 
-                # Create tile_info following the pattern from NasaSRTMConfig
-                tile_id = self.downloader.config._tile_name(lat_tile, lon_tile)
-                tile_url = self.downloader.config.get_tile_url(tile_id)
+        # 2. Acquire the tile-specific lock to prevent thundering herd
+        with self._tile_locks[tile_key]:
+            # Double-check index inside lock
+            if tile_key not in self.tile_index:
+                if self.downloader:
+                    # Auto-download missing tile
+                    from shapely.geometry import box
 
-                tile_info = {
-                    "tile_id": tile_id,
-                    "geometry": box(lon_tile, lat_tile, lon_tile + 1, lat_tile + 1),
-                    "tile_url": tile_url,
-                    "tile_uri": tile_url,
-                }
+                    # Create tile_info following the pattern from NasaSRTMConfig
+                    tile_id = self.downloader.config._tile_name(lat_tile, lon_tile)
+                    tile_url = self.downloader.config.get_tile_url(tile_id)
 
-                # Use download_data_unit for direct download
-                self.downloader.download_data_unit(tile_info)
+                    tile_info = {
+                        "tile_id": tile_id,
+                        "geometry": box(lon_tile, lat_tile, lon_tile + 1, lat_tile + 1),
+                        "tile_url": tile_url,
+                        "tile_uri": tile_url,
+                    }
 
-                # Rebuild index to find new tile
-                self.tile_index = self._build_tile_index()
+                    # Use download_data_unit for direct download
+                    self.downloader.download_data_unit(tile_info)
 
-                # Check if tile is now available
-                if tile_key not in self.tile_index:
+                    # Rebuild index to find new tile
+                    self.tile_index = self._build_tile_index()
+
+                    # Check if tile is now available
+                    if tile_key not in self.tile_index:
+                        raise FileNotFoundError(
+                            f"SRTM tile for ({lat_tile}, {lon_tile}) could not be downloaded to {self.srtm_directory}"
+                        )
+                else:
                     raise FileNotFoundError(
-                        f"SRTM tile for ({lat_tile}, {lon_tile}) could not be downloaded to {self.srtm_directory}"
+                        f"SRTM tile for ({lat_tile}, {lon_tile}) not found in {self.srtm_directory}"
                     )
-            else:
-                raise FileNotFoundError(
-                    f"SRTM tile for ({lat_tile}, {lon_tile}) not found in {self.srtm_directory}"
-                )
 
-        return SRTMParser(self.tile_index[tile_key], data_store=self.data_store)
+            return SRTMParser(
+                self.tile_index[tile_key], 
+                data_store=self.data_store,
+                local_cache_dir=Path(self._temp_dir.name)
+            )
 
     def get_elevation(self, latitude: float, longitude: float) -> float:
         """

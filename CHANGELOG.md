@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.7] - 2026-07-01
+
+### Added
+
+-   **Atmospheric Refractivity Module (`gigaspatial/processing/elevation/refractivity.py`)**
+    -   Implemented a new ITU-R P.453-14 refractivity model to derive effective Earth radius ($k$) factors.
+    -   **Multi-Modal Lookup**: Includes a fast climate-zone Look-Up Table (LUT) for lightweight environments and optional `itur` package delegation for high-accuracy, spatially-gridded ($p=50\%$) median refractivity mapping.
+    -   **High-Availability Planning**: Added `get_worst_case_k_factor` based on ITU-R P.530 criteria, providing conservative $k$ values ($0.6$ to $0.8$) necessary to validate link clearance against sub-refractive "Earth bulging" events.
+
+-   **Forward Azimuth & Point-to-Point Link Alignment**
+    -   Added a new `_calculate_azimuth(lat1, lon1, lat2, lon2)` static helper to `LOSAnalyzer` using spherical trigonometry to compute the initial compass bearing from transmitter to receiver.
+    -   Exposed the resulting `azimuth_deg` directly as a float attribute on the `LOSResult` dataclass, normalized to the range $[0, 360)^\circ$ (where $0^\circ = \text{North}$ and $180^\circ = \text{South}$).
+    -   Integrated the azimuth output into the public .summary() API to provide immediate antenna alignment metrics alongside clearance data.
+
+-   **Radio Horizon & Antenna Alignment Metrics**
+    -   Added `LOSAnalyzer.calculate_radio_horizon_km` as a public $O(1)$ spatial pre-filter. Calculates the theoretical smooth-Earth radio horizon ($d = \sqrt{2 \cdot R_{eff} \cdot h}$) to efficiently cull impossible link candidates before performing expensive terrain profile processing.
+    -   Added `_calculate_elevation_angle` to compute the required mechanical tilt for antenna installation. Accounts for the target receiver dropping below the local horizontal plane due to Earth curvature, returning the tilt angle in degrees.
+
+-   **Memory-Safe Centroid Caching for Combined Buildings Dataset (`GoogleMSBuildingsHandler`)**
+    -   Introduced a highly optimized pipeline to extract and cache building geometries as lightweight `.npz` coordinate arrays, explicitly designed to prevent Out-Of-Memory (OOM) crashes on massive country-level datasets.
+    -   **`generate_centroid_cache(source, force, **kwargs)`**: Bypasses Pandas entirely by using direct PyArrow row-group streaming combined with Shapely's vectorized C-backend (`from_wkb`). Drastically reduces memory and disk footprint by casting coordinates to `np.float32` before saving to a compressed NumPy archive.
+    -   **`load_centroids(source, force, **kwargs)`**: Provides a seamless retrieval mechanism that dynamically resolves data sources (handling both single country files and multi-file S2 grids), auto-generates missing caches, and safely concatenates results into a unified $N \times 2$ matrix via `np.vstack`.
+    -   **Architectural Impact**: Unlocks lightning-fast access to pure coordinate matrices for downstream proximity and density computations (e.g., KD-Trees) while maintaining perfect API symmetry with the standard `handler.load()` workflow.
+
+### Changed
+
+-   **Elevation Dependency Refactor**
+    -   Added the `itur` package to an optional dependency under the new `[elevation]` extra (`pip install "giga-spatial[elevation]"`), ensuring the base library remains lightweight while enabling high-accuracy refractivity mapping when needed.
+
+-   **Elevation Caching & Concurrency Optimizations (`SRTMManager`, `SRTMParser`)**
+    -   **Tier-2 Disk Cache**: Integrated a lifecycle-bound temporary directory (`tempfile.TemporaryDirectory`) in `SRTMManager` to cache raw `.hgt.zip` tile files locally, passing the cache path to `SRTMParser`. This prevents expensive network re-fetches from ADLS on memory-resident LRU cache evictions.
+    -   **Double-Checked Concurrency Locking**: Added a global coordinator lock (`_global_lock`) and per-tile lock registry (`_tile_locks`) to eliminate thundering herd problems, preventing race conditions or duplicate network downloads when concurrent threads request the same missing tile.
+    -   **Lifecycle Clarification**: Added clear docstring warnings inside `SRTMManager` detailing the instance-bound nature of the caching layers, advising developer reuse of instances.
+    -   **Performance Gains**: Benchmarks on a 100-point batch run demonstrate a **~75% reduction in execution time**.
+
+-   **Buildings Processing Engine Refactor (`GoogleMSBuildingsEngine`)**
+    -   **Hyper-Optimized Inner Loops**: Completely removed Pandas and GeoPandas overhead from `count_buildings_in_zones` and `nearest_buildings_to_pois`. The engine now exclusively consumes the lightweight `.npz` centroid caches.
+    -   **Vectorized Spatial Operations**: Replaced DataFrame-based spatial joins with pure C/Cython numerical computations, utilizing `scipy.spatial.cKDTree` for nearest-neighbor searches and vectorized `shapely.points()` for point-in-polygon evaluations.
+    -   **View Mapper Simplification**: Refactored `find_nearest_buildings` and `_find_nearest_building_globally` to seamlessly interface with the new centroid-aware engine, deprecating the legacy `source_filter` to streamline the mapping pipeline.
+    -   **Performance Impact**: Benchmarks for nearest-building searches show a massive **90-96% reduction in execution time** and an **80-90% reduction in peak memory** across both local and remote (ADLS) environments. For example, processing Mexico remotely (ADLS) dropped from ~32.5 minutes (7.5GB RAM) to ~1.4 minutes (1.3GB RAM).
+
+### Fixed
+
+-   **MSBuildingsReader**: 
+    -   Resolved a `TypeError` in `MSBuildingsReader` by adjusting the `read_ms_dataset` signature to accept `file_path` positionally and `data_store` as a keyword argument, matching the invocation pattern of `_load_tabular_data`.
+
 ## [v0.9.6] - 2026-06-11
 
 ### Added

@@ -50,7 +50,7 @@ class Config(BaseSettings):
     # Used for accessing NASA Earthdata services (e.g., SRTM elevation data)
     EARTHDATA_USERNAME: str = Field(default="", alias="EARTHDATA_USERNAME")
     EARTHDATA_PASSWORD: str = Field(default="", alias="EARTHDATA_PASSWORD")
-    
+
     # OpenCellID configuration
     # Used for accessing OpenCellID mobile network cell tower data
     OPENCELLID_ACCESS_TOKEN: str = Field(default="", alias="OPENCELLID_ACCESS_TOKEN")
@@ -152,19 +152,22 @@ class Config(BaseSettings):
         description="Mapping of data types to directory names",
     )
 
-    def get_logger(self, name="GigaSpatial", console_level=logging.INFO):
+    def get_logger(self, name="GigaSpatial", logger_level=logging.INFO, console_level=logging.INFO):
         logger = logging.getLogger(name)
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logger_level)
 
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(console_level)
-
-        LOG_FORMAT = "%(levelname) -10s  %(name) -10s %(asctime) " "-30s: %(message)s"
-
-        formatter = logging.Formatter(LOG_FORMAT)
-        console_handler.setFormatter(formatter)
+        # Prevent duplicate logs in Jupyter/Notebook environments
+        logger.propagate = False
 
         if not logger.hasHandlers():
+            console_handler = logging.StreamHandler()
+            # Set the specific handler level
+            console_handler.setLevel(console_level)
+
+            LOG_FORMAT = "%(levelname) -10s  %(name) -10s %(asctime) " "-30s: %(message)s"
+            formatter = logging.Formatter(LOG_FORMAT)
+            console_handler.setFormatter(formatter)
+
             logger.addHandler(console_handler)
 
         return logger

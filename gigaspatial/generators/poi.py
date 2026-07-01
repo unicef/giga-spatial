@@ -924,7 +924,7 @@ class PoiViewGenerator:
 
         self._update_view(final_mapped_df)
         return self.view
-    
+
     def map_aqueduct_flood_hazard(
         self,
         handler=None,
@@ -997,7 +997,9 @@ class PoiViewGenerator:
             return self.view
 
         # Determine column name
-        col = output_column or (h.config._get_filename().replace(".tif", "") + "_meters")
+        col = output_column or (
+            h.config._get_filename().replace(".tif", "") + "_meters"
+        )
 
         self.logger.info(f"Sampling flood depth into column: {col}")
         mapped = self.map_zonal_stats(
@@ -1131,7 +1133,6 @@ class PoiViewGenerator:
         self,
         country: str,
         search_radius: float = 1000,
-        source_filter: Literal["google", "microsoft"] = None,
         find_nearest_globally: bool = False,
         **kwargs,
     ) -> pd.DataFrame:
@@ -1140,7 +1141,6 @@ class PoiViewGenerator:
         Args:
             country: ISO country code for building data.
             search_radius: Maximum search distance in meters. Defaults to 1000.
-            source_filter: Optional filter for 'google' or 'microsoft' datasets.
             find_nearest_globally: If True, searches across all neighboring countries.
                 Defaults to False.
             **kwargs: Extra parameters for building handlers.
@@ -1149,20 +1149,13 @@ class PoiViewGenerator:
             A DataFrame with nearest building IDs and distances for each POI.
         """
 
-        # ---------------------------------------------------------
-        # 1. PARAMETER VALIDATION AND LOGGING
-        # ---------------------------------------------------------
-
         if find_nearest_globally:
             self.logger.info(
                 "Global nearest building search enabled. "
                 "This may be slower than radius-limited search."
             )
-            return self._find_nearest_building_globally(
-                country=country, source_filter=source_filter, **kwargs
-            )
+            return self._find_nearest_building_globally(country=country, **kwargs)
 
-        # Warn for large search radii
         if search_radius > 5000:
             self.logger.warning(
                 f"Large search radius ({search_radius}m) may impact performance. "
@@ -1170,12 +1163,8 @@ class PoiViewGenerator:
             )
 
         self.logger.info(
-            f"Mapping Google-Microsoft Buildings data to POIs within {search_radius}m"
+            f"Mapping combined buildings data to POIs within {search_radius}m"
         )
-
-        # ---------------------------------------------------------
-        # 2. LOAD BUILDING FILES
-        # ---------------------------------------------------------
 
         from gigaspatial.handlers.google_ms_combined_buildings import (
             GoogleMSBuildingsHandler,
@@ -1208,7 +1197,6 @@ class PoiViewGenerator:
             handler=handler,
             building_files=building_files,
             pois_gdf=self.points_gdf,
-            source_filter=source_filter,
             search_radius_m=search_radius,
             logger=self.logger,
         )
@@ -1223,14 +1211,12 @@ class PoiViewGenerator:
             }
         )
 
-        # Update the view and return
         self._update_view(result_df)
         return self.view
 
     def _find_nearest_building_globally(
         self,
         country: str,
-        source_filter: Literal["google", "microsoft"] = None,
         max_global_search: float = 10000,
         **kwargs,
     ) -> pd.DataFrame:
@@ -1265,7 +1251,6 @@ class PoiViewGenerator:
 
         building_files = handler.reader.resolve_source_paths(country, **kwargs)
 
-        # Single file: use optimized path
         if len(building_files) == 1:
             self.logger.info("Single file country: using single-file optimization.")
 
@@ -1273,7 +1258,6 @@ class PoiViewGenerator:
                 handler=handler,
                 building_files=building_files,
                 pois_gdf=self.points_gdf,
-                source_filter=source_filter,
                 search_radius_m=max_global_search,
                 logger=self.logger,
             )
@@ -1297,18 +1281,13 @@ class PoiViewGenerator:
             self._update_view(result_df)
             return self.view
 
-        # Partitioned case: progressive radius expansion
         self.logger.info(
             f"Partitioned country: progressive expansion up to {max_global_search}m"
         )
 
         radii = [350, 1000, 2500, 5000, max_global_search]
-
-        # FIX: Track POIs that still need searching (use set for efficiency)
         remaining_poi_ids = set(self.points_gdf.poi_id)
         global_results = pd.Series(np.inf, index=self.points_gdf.poi_id, dtype=float)
-
-        # FIX: Track processed tiles to avoid re-scanning
         processed_tiles = set()
 
         for radius in radii:
@@ -1320,45 +1299,37 @@ class PoiViewGenerator:
                 f"Searching radius {radius}m for {len(remaining_poi_ids)} POIs"
             )
 
-            # Create jobs for this radius
             jobs = GoogleMSBuildingsEngine.create_partitioned_jobs_for_pois(
                 self.points_gdf,
                 building_files,
                 search_radius_m=radius,
             )
 
-            # FIX: Only process tiles we haven't seen yet
             new_jobs = [(f, pois) for f, pois in jobs if f not in processed_tiles]
 
             if not new_jobs:
                 self.logger.debug(f"No new tiles at radius {radius}m")
                 continue
 
-            # Process new tiles (don't update the view inside the engine)
             temp_result = GoogleMSBuildingsEngine.nearest_buildings_to_pois(
                 handler=handler,
                 building_files=[f for f, _ in new_jobs],
                 pois_gdf=self.points_gdf,
-                source_filter=source_filter,
                 search_radius_m=radius,
                 logger=self.logger,
             )
             temp_min_dists = temp_result.distances_m
 
-            # Update global results and track found POIs
             found_in_this_iteration = set()
 
             for poi_id in remaining_poi_ids:
                 dist = temp_min_dists[poi_id]
                 if dist < global_results[poi_id]:
                     global_results[poi_id] = dist
-                    if dist <= radius:  # Found within this radius
+                    if dist <= radius:
                         found_in_this_iteration.add(poi_id)
 
-            # FIX: Remove found POIs from remaining set
             remaining_poi_ids -= found_in_this_iteration
-
-            # Mark these tiles as processed
             processed_tiles.update(f for f, _ in new_jobs)
 
             self.logger.info(
@@ -1366,7 +1337,6 @@ class PoiViewGenerator:
                 f"{len(remaining_poi_ids)} remaining."
             )
 
-        # Create final results
         result_df = pd.DataFrame(
             {
                 "poi_id": global_results.index,

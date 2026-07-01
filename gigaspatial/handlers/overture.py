@@ -29,7 +29,7 @@ from gigaspatial.handlers.boundaries import AdminBoundaries
 from gigaspatial.core.io.data_store import DataStore
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
 class OvertureAmenityFetcher:
     """
     Fetch and process amenity locations from the Overture Places theme.

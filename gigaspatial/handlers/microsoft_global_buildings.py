@@ -6,21 +6,18 @@ It manages location mapping between dataset identifiers and ISO country codes,
 resolves Bing Maps Quadkeys for spatial querying, and handles multi-threaded
 downloads of building footprints in compressed CSV format.
 """
+
 from dataclasses import field
 from pydantic.dataclasses import dataclass
 from pydantic import ConfigDict
 from pathlib import Path
-import functools
-import multiprocessing
-from typing import List, Optional, Tuple, Union, Dict, Iterable
+from typing import List, Optional, Union, Dict, Iterable
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 from difflib import SequenceMatcher
 import pycountry
 import requests
-from tqdm import tqdm
 import logging
 import geopandas as gpd
 
@@ -348,7 +345,6 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
             self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
             return None
 
-
     def download_by_country(
         self,
         country: str,
@@ -404,7 +400,7 @@ class MSBuildingsReader(BaseHandlerReader):
         from gigaspatial.core.io.readers import read_gzipped_json_or_csv
         from shapely.geometry import shape
 
-        def read_ms_dataset(data_store: DataStore, file_path: str):
+        def read_ms_dataset(file_path: str, data_store: DataStore = None):
             df = read_gzipped_json_or_csv(file_path=file_path, data_store=data_store)
             df["geometry"] = df["geometry"].apply(shape)
             return gpd.GeoDataFrame(df, crs=4326)

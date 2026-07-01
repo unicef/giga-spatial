@@ -34,6 +34,7 @@ EXTRAS = {
     "duckdb": ["duckdb==1.2.0"],
     "azure": ["azure-storage-blob>=12.22.0"],
     "unicef": ["unicefdata>=2.4.0"],
+    "elevation": ["itur>=0.4.0"],
 }
 
 # Generate 'all' extra
@@ -120,6 +121,7 @@ setup(
                 "SQLAlchemy",
                 "sqlalchemy",
                 "unicefdata",
+                "itur",
             ]
         )
     ],

@@ -1,16 +1,16 @@
-# gigaspatial/handlers/google_microsoft_combined/config.py
-
+import numpy as np
 import pandas as pd
 import geopandas as gpd
 from pydantic.dataclasses import dataclass
 from pydantic import Field, ConfigDict
+from collections import defaultdict
 from pathlib import Path
-from typing import Optional, Literal, List, Union
+from typing import Optional, Literal, List, Union, Dict
 import pyarrow.parquet as pq
+import shapely
 import logging
 import pycountry
 import requests
-from tqdm import tqdm
 import re
 
 from gigaspatial.core.io.data_store import DataStore
@@ -271,7 +271,6 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
         except Exception as e:
             self.logger.error(f"Error downloading unit {unit}: {e}")
             raise
-
 
     def _download_from_s3(self, s3_uri: str, save_path: Path) -> Path:
         """
@@ -689,3 +688,146 @@ class GoogleMSBuildingsHandler(BaseHandler):
     def get_cell_ids(self, source, **kwargs) -> List[int]:
         paths = self.reader.resolve_source_paths(source, **kwargs)
         return [int(p.stem) for p in paths]
+
+    def generate_centroid_cache(
+        self, source, force: bool = False, **kwargs
+    ) -> List[Path]:
+        """
+        Converts heavy building polygon parquet files into lightweight .npz
+        coordinate caches containing centroids, saving them to the datastore.
+        """
+        if not self.ensure_data_available(source, **kwargs):
+            raise RuntimeError("Could not ensure data availability for loading")
+
+        source_data_paths = self.reader.resolve_source_paths(source, **kwargs)
+        processed_paths = self.reader._pre_load_hook(source_data_paths, **kwargs)
+
+        cache_paths = []
+
+        for file_path in processed_paths:
+            file_path = Path(file_path)
+            cache_path = Path(str(file_path).replace(".parquet", "_centroids.npz"))
+
+            if not force and self.data_store.file_exists(cache_path):
+                self.logger.info(f"Centroid cache already exists: {cache_path}")
+                cache_paths.append(cache_path)
+                continue
+
+            self.logger.info(f"Generating centroid cache for {file_path}")
+
+            # 1. Open the local/remote parquet file using PyArrow directly to stream row groups
+            with self.data_store.open(file_path, "rb") as f:
+                parquet_file = pq.ParquetFile(f)
+
+                all_coords = []
+
+                # 2. Iterate over row groups to prevent OOM errors on large countries
+                for i in range(parquet_file.num_row_groups):
+                    # Read only geometry
+                    chunk_table = parquet_file.read_row_group(i, columns=["geometry"])
+
+                    # Convert WKB geometry to Shapely objects
+                    geoms = shapely.from_wkb(chunk_table.column("geometry"))
+
+                    # Compute centroids in C-backend
+                    centroids = shapely.centroid(geoms)
+
+                    # Extract x and y, and cast to float32 to halve memory usage
+                    coords = np.vstack(
+                        (shapely.get_x(centroids), shapely.get_y(centroids))
+                    ).T.astype(np.float32)
+
+                    all_coords.append(coords)
+
+            # 3. Concatenate all chunks
+            final_coords = np.vstack(all_coords)
+
+            # 4. Save to DataStore as compressed numpy array
+            save_kwargs = {"coords": final_coords}
+
+            with self.data_store.open(cache_path, "wb") as out_f:
+                np.savez_compressed(out_f, **save_kwargs)
+
+            self.logger.info(
+                f"Successfully cached {len(final_coords)} centroids to {cache_path}"
+            )
+            cache_paths.append(cache_path)
+
+        return cache_paths
+
+    def load_centroids(
+        self, source, force: bool = False, **kwargs
+    ) -> Dict[str, np.ndarray]:
+        """
+        Loads and concatenates the easy-access centroid caches for a given source.
+        Automatically generates the caches if they do not exist.
+
+        Args:
+            source: specification of the data to load (e.g., iso3 code, geometry).
+            force: If True, forces regeneration of the cache.
+            **kwargs: Additional parameters passed to the path resolver.
+
+        Returns:
+            Dictionary containing combined numpy arrays (e.g., {'coords': np.ndarray})
+        """
+        # 1. Resolve what the base parquet files *should* be for this source
+        source_data_paths = self.reader.resolve_source_paths(source, **kwargs)
+        processed_paths = self.reader._pre_load_hook(source_data_paths, **kwargs)
+
+        if not processed_paths:
+            self.logger.warning("No valid paths to load centroids from.")
+            return {"coords": np.array([])}
+
+        # 2. Determine expected cache paths
+        expected_cache_paths = [
+            Path(str(p).replace(".parquet", "_centroids.npz")) for p in processed_paths
+        ]
+
+        # 3. Check if all required caches exist
+        missing_caches = [
+            p for p in expected_cache_paths if not self.data_store.file_exists(p)
+        ]
+
+        # 4. Generate if missing or forced
+        if missing_caches or force:
+            if missing_caches:
+                self.logger.info(
+                    f"Missing {len(missing_caches)} centroid caches. Triggering generation..."
+                )
+
+            cache_paths = self.generate_centroid_cache(source, force=force, **kwargs)
+        else:
+            cache_paths = expected_cache_paths
+
+        # 5. Load and combine the arrays from all cache files
+        self.logger.info(f"Loading data from {len(cache_paths)} centroid caches...")
+
+        combined_data = defaultdict(list)
+
+        for cache_path in cache_paths:
+            with self.data_store.open(cache_path, "rb") as f:
+                # Load the .npz file
+                data = np.load(f)
+
+                # Dynamically append whatever keys are in the .npz file
+                # (Currently just 'coords', but safe if we add other fields like 'confidence' later)
+                for key in data.files:
+                    combined_data[key].append(data[key])
+
+        # 6. Stack the lists into final, unified Numpy arrays
+        final_result = {}
+        for key, arrays in combined_data.items():
+            if not arrays:
+                continue
+
+            # Coords are 2D (N x 2), so we vstack. 1D arrays (like a confidence score) use concatenate.
+            if arrays[0].ndim > 1:
+                final_result[key] = np.vstack(arrays)
+            else:
+                final_result[key] = np.concatenate(arrays)
+
+        self.logger.info(
+            f"Successfully loaded {len(final_result.get('coords', []))} total centroids."
+        )
+
+        return final_result

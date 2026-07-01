@@ -6,17 +6,16 @@ It supports searching for datasets, filtering specific resources (e.g., by count
 or file format), and downloading/loading diverse humanitarian datasets (CSV,
 GeoJSON, Excel, etc.) into vectorized or tabular formats.
 """
+
 import logging
-from tqdm import tqdm
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any, Iterable
+from typing import List, Optional, Union, Dict, Any
 import tempfile
 
 import geopandas as gpd
 from pydantic import Field, ConfigDict
 from pydantic.dataclasses import dataclass
 from shapely.geometry.base import BaseGeometry
-from shapely.geometry import Point
 import pycountry
 
 from hdx.api.configuration import Configuration
@@ -151,7 +150,9 @@ class HDXConfig(BaseHandlerConfig):
             self.logger.error(f"Error fetching HDX dataset: {str(e)}")
             raise
 
-    def _match_pattern(self, value: str, pattern: str, token_match: bool = False) -> bool:
+    def _match_pattern(
+        self, value: str, pattern: str, token_match: bool = False
+    ) -> bool:
         """Check if a value matches a pattern"""
         if isinstance(pattern, str):
             if token_match:
@@ -396,7 +397,7 @@ class HDXReader(BaseHandlerReader):
 
     def __init__(
         self,
-        config: Optional[HDXConfig] = None,
+        config: Union[HDXConfig, dict],
         data_store: Optional[DataStore] = None,
         logger: Optional[logging.Logger] = None,
     ):
