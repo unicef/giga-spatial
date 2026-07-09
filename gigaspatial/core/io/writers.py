@@ -2,6 +2,7 @@
 Module for writing datasets (DataFrames, GeoDataFrames, JSON) to a DataStore.
 Provides high-level utilities for serializing geospatial and tabular data.
 """
+
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
@@ -9,23 +10,25 @@ import json
 import io
 
 from .data_store import DataStore
+from .local_data_store import LocalDataStore
 
 
-def write_json(data, data_store: DataStore, path, **kwargs):
+def write_json(data, data_store: DataStore = None, path=None, **kwargs):
     """
     Write data to a JSON file in the data store.
 
     Args:
         data: Object to serialize to JSON.
-        data_store: DataStore instance to use for writing.
+        data_store: DataStore instance to use for writing. If None, local storage is used.
         path: Destination path in the data store.
         **kwargs: Additional arguments passed to json.dump.
     """
+    data_store = data_store or LocalDataStore()
     with data_store.open(path, "w") as f:
         json.dump(data, f, **kwargs)
 
 
-def write_dataset(data, data_store: DataStore, path, **kwargs):
+def write_dataset(data, data_store: DataStore = None, path=None, **kwargs):
     """
     Write DataFrame, GeoDataFrame, or a generic object to various file formats.
 
@@ -34,7 +37,7 @@ def write_dataset(data, data_store: DataStore, path, **kwargs):
 
     Args:
         data: The data to write. Can be pd.DataFrame, gpd.GeoDataFrame, or a JSON-serializable object.
-        data_store: Instance of DataStore for accessing data storage.
+        data_store: Instance of DataStore for accessing data storage. If None, local storage is used.
         path: Path where the file will be written.
         **kwargs: Additional arguments passed to the specific writer function (e.g., index=False).
 
@@ -43,6 +46,7 @@ def write_dataset(data, data_store: DataStore, path, **kwargs):
         TypeError: If input data type is incompatible with the file extension.
         RuntimeError: For unexpected errors during the write process.
     """
+    data_store = data_store or LocalDataStore()
 
     # Define supported file formats and their writers
     BINARY_FORMATS = {".shp", ".zip", ".parquet", ".gpkg", ".xlsx", ".xls"}
@@ -129,19 +133,20 @@ def write_dataset(data, data_store: DataStore, path, **kwargs):
         raise RuntimeError(f"Unexpected error writing dataset: {str(e)}")
 
 
-def write_datasets(data_dict, data_store: DataStore, **kwargs):
+def write_datasets(data_dict, data_store: DataStore = None, **kwargs):
     """
     Write multiple datasets to data storage at once.
 
     Args:
         data_dict: Dictionary mapping paths (str) to data objects.
-        data_store: DataStore instance.
+        data_store: DataStore instance. If None, local storage is used.
         **kwargs: Additional arguments passed to write_dataset for each item.
 
     Raises:
         ValueError: If one or more datasets fail to write, containing details of all errors.
     """
     errors = {}
+    data_store = data_store or LocalDataStore()
 
     for path, data in data_dict.items():
         try:

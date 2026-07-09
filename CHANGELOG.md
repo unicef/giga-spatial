@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.8] - 2026-07-XX
+
+### Changed
+
+-   **Optimized `is_dir` performance (`gigaspatial/core/io/adls_data_store.py`)**
+    -   Refactored `is_dir` to check for child directories/files using `list_files_iter` instead of `list_files`.
+    -   Avoids retrieving the complete list of blobs in a directory, significantly improving speed on large directories by checking at most 2 items.
+    
+-   **DataStore optionality for writers (`gigaspatial/core/io/writers.py`)**
+    -   Made `data_store` parameter optional in `write_json`, `write_dataset`, and `write_datasets` (defaulting to `None`).
+    -   Configured the functions to automatically assume and fall back to `LocalDataStore` if `data_store` is not explicitly provided, aligning with the pattern used in `readers.py`.
+
 ## [v0.9.7] - 2026-07-01
 
 ### Added
