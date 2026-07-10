@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 -   **Optimized `is_dir` performance (`gigaspatial/core/io/adls_data_store.py`)**
     -   Refactored `is_dir` to check for child directories/files using `list_files_iter` instead of `list_files`.
-    -   Avoids retrieving the complete list of blobs in a directory, significantly improving speed on large directories by checking at most 2 items.
+    -   Added a `results_per_page` parameter to `list_files_iter` and configured `is_dir` to query with `results_per_page=2` to ensure Azure only fetches the minimum required blobs rather than a full page (usually 5,000 items).
     
 -   **DataStore optionality for writers (`gigaspatial/core/io/writers.py`)**
     -   Made `data_store` parameter optional in `write_json`, `write_dataset`, and `write_datasets` (defaulting to `None`).
