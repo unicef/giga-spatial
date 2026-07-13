@@ -14,6 +14,14 @@ All notable changes to this project will be documented in this file.
     -   Made `data_store` parameter optional in `write_json`, `write_dataset`, and `write_datasets` (defaulting to `None`).
     -   Configured the functions to automatically assume and fall back to `LocalDataStore` if `data_store` is not explicitly provided, aligning with the pattern used in `readers.py`.
 
+### Fixed
+
+-   Resolved a `ModuleNotFoundError` during package import caused by the missing dependency in `processing.elevation.los_analyzer`.
+
+### Dependencies
+
+-   Added `plotly` to the project requirements to ensure graphical rendering capabilities are available for downstream visualization workflows.
+
 ## [v0.9.7] - 2026-07-01
 
 ### Added
