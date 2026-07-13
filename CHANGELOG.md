@@ -18,6 +18,14 @@ All notable changes to this project will be documented in this file.
 
 -   Resolved a `ModuleNotFoundError` during package import caused by the missing dependency in `processing.elevation.los_analyzer`.
 
+### Packaging & DevOps Modernization
+
+-   **Declarative Configuration Upgrade**: Fully migrated package setup blueprints out of legacy `setup.py` scripts and into a modern, unified `pyproject.toml` file adhering strictly to PEP 517, 621, and 639 specifications. 
+    -   **Eliminated Runtime Overhead**: Removed the fragile custom `requirements.txt` parsing function, allowing modern dependency resolvers (`pip`, `uv`) to parse package metadata efficiently without spinning up standalone setup subprocesses.
+    -   **Clean Version Management**: Configured dynamic version tracking via `tool.setuptools.dynamic` to directly link distribution distributions to your main source code anchor (`gigaspatial.__init__.__version__`).
+
+-   **Self-Referential Extra Targets**: Refactored the `all` optional dependency umbrella using clean, declarative PEP 508 self-references (`giga-spatial[gee]`, `giga-spatial[bq]`, etc.), removing imperative list-flattening logic entirely.
+
 ### Dependencies
 
 -   Added `plotly` to the project requirements to ensure graphical rendering capabilities are available for downstream visualization workflows.
