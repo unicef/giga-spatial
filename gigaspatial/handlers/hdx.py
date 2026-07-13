@@ -268,7 +268,11 @@ class HDXConfig(BaseHandlerConfig):
     def get_relevant_data_units_by_geometry(
         self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
     ) -> List[Resource]:
-        return self.get_dataset_resources(geometry, **kwargs)
+        return self.get_dataset_resources(
+            filter=geometry,
+            exact_match=kwargs.get("exact_match", False),
+            token_match=kwargs.get("token_match", False),
+        )
 
     def get_data_unit_path(self, unit: Resource, **kwargs) -> Path:
         """
@@ -297,7 +301,7 @@ class HDXConfig(BaseHandlerConfig):
             or self.data_store.file_exists(dataset_folder)
         ):
             raise FileNotFoundError(
-                f"HDX dataset not found at {dataset_folder}. "
+                f"HDX dataset not found at {dataset_folder}. \n"
                 "Download the data first using HDXDownloader."
             )
         return self.data_store.list_files(dataset_folder)
@@ -324,7 +328,7 @@ class HDXConfig(BaseHandlerConfig):
             return source
         else:
             raise ValueError(
-                f"Unsupported source type: {type(source)}"
+                f"Unsupported source type: {type(source)}. \n"
                 "Please use country-based (str) filtering or direct resource (dict) filtering instead."
             )
 
