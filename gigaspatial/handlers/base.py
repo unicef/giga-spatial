@@ -13,6 +13,7 @@ Standardizing these interfaces ensures consistency across various data sources
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pydantic.dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union, Tuple, Callable, Iterable
 import pandas as pd
@@ -46,7 +47,7 @@ class BaseHandlerConfig(ABC):
     """
 
     base_path: Path = None
-    n_workers: int = multiprocessing.cpu_count()
+    n_workers: int = field(default_factory=multiprocessing.cpu_count)
     data_store: DataStore = field(default_factory=LocalDataStore)
     logger: logging.Logger = field(default=None, repr=False)
 
@@ -323,7 +324,7 @@ class BaseHandlerDownloader(ABC):
         else:
             units_list = list(units) if not isinstance(units, list) else units
 
-        desc = kwargs.get("desc", "Downloading data units")
+        desc = kwargs.pop("desc", "Downloading data units")
         n_workers = getattr(self.config, "n_workers", 1)
 
         if n_workers > 1:
