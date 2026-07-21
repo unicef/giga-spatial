@@ -462,7 +462,6 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
     def map_buildings(
         self,
         country: str,
-        source_filter: Literal["google", "microsoft"] = None,
         output_column: str = "building_count",
         **kwargs,
     ):
@@ -480,12 +479,6 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         country : str
             ISO 3166-1 alpha-3 country code (e.g., 'USA', 'BRA', 'IND').
             Must match the country codes used in the building dataset.
-
-        source_filter : {'google', 'microsoft'}, optional
-            Filter buildings by data source. Options:
-            - 'google': Only count buildings from Google Open Buildings
-            - 'microsoft': Only count buildings from Microsoft Global Buildings
-            - None (default): Count buildings from both sources
 
         output_column : str, default='building_count'
             Name of the column to add to the view containing building counts.
@@ -540,24 +533,6 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         1  88...02             890
         2  88...03               0
 
-        Count only Google buildings with custom column name:
-
-        >>> zones.map_buildings(
-        ...     "BRA",
-        ...     source_filter="google",
-        ...     output_column="google_building_count"
-        ... )
-
-        Compare building counts from different sources:
-
-        >>> zones.map_buildings("IND", source_filter="google",
-        ...                     output_column="google_buildings")
-        >>> zones.map_buildings("IND", source_filter="microsoft",
-        ...                     output_column="ms_buildings")
-        >>> zones.view['total_buildings'] = (
-        ...     zones.view['google_buildings'] + zones.view['ms_buildings']
-        ... )
-
         See Also
         --------
         map_google_buildings : Map Google Open Buildings data only
@@ -576,7 +551,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             GoogleMSBuildingsHandler,
         )
 
-        handler = GoogleMSBuildingsHandler(partition_strategy="s2_grid")
+        handler = GoogleMSBuildingsHandler(
+            partition_strategy="s2_grid", data_store=self.data_store
+        )
 
         if self.config.ensure_available:
             if not handler.ensure_data_available(country, **kwargs):
@@ -588,7 +565,6 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             handler=handler,
             building_files=building_files,
             zones_gdf=self.zone_gdf,
-            source_filter=source_filter,
             logger=self.logger,
         )
 

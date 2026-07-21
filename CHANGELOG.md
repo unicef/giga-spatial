@@ -30,7 +30,15 @@ All notable changes to this project will be documented in this file.
     -   Made `data_store` parameter optional in `write_json`, `write_dataset`, and `write_datasets` (defaulting to `None`).
     -   Configured the functions to automatically assume and fall back to `LocalDataStore` if `data_store` is not explicitly provided, aligning with the pattern used in `readers.py`.
 
+-   **Building mapping defaults and cleanup (`gigaspatial/generators/zonal/`)**
+    -   Added `map_buildings()` overrides across spatial view generators (`AdminBoundariesViewGenerator`, `H3ViewGenerator`, `MercatorViewGenerator`, and `S2ViewGenerator`) to fallback to instance `_country` when `country` is omitted.
+    -   Propagated `data_store=self.data_store` into `GoogleMSBuildingsHandler` instantiation in `map_buildings()`.
+    -   Removed the `source_filter` parameter from `GeometryBasedZonalViewGenerator.map_buildings()`.
+
 ### Fixed
+
+-   **Admin Boundary Zone ID Column (`gigaspatial/generators/zonal/admin.py`)**
+    -   Fixed `zone_id_column` passed during `AdminBoundariesViewGenerator` initialization from `"id"` to `"boundary_id"`.
 
 -   **Robust Path Handling in `ensure_data_available` (`gigaspatial/handlers/base.py`)**
     -   Fixed a `ValueError` that occurred during `load_centroids` caching in the buildings engine when specific file paths were passed as data sources.

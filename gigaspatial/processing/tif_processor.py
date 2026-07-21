@@ -4,6 +4,7 @@ Provides comprehensive tools for TIF data handling, including merging,
 reprojection, clipping, graph conversion, and memory-efficient sampling.
 Supports single-band, RGB, RGBA, and multi-band rasters.
 """
+
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -634,7 +635,6 @@ class TifProcessor:
                 f"Please ensure the file is valid and matches the selected mode. "
                 f"Original error: {str(e)}"
             )
-
 
     def to_geodataframe(
         self,
@@ -1556,7 +1556,6 @@ class TifProcessor:
 
         return new_processor
 
-
     def _get_basic_statistics(self, approx_ok: bool = False) -> Dict[str, Any]:
         """
         Compute per-band statistics (min, max, mean, std, sum, count).
@@ -1897,10 +1896,10 @@ class TifProcessor:
         for row_start in range(0, self.height, chunk_size):
             row_end = min(row_start + chunk_size, self.height)
             window = rasterio.windows.Window(
-                0, # col_off
-                row_start, # row_off
-                self.width, # width
-                height=row_end - row_start,
+                0,  # col_off
+                row_start,  # row_off
+                self.width,  # width
+                row_end - row_start,  # height
             )
             windows.append(window)
 
