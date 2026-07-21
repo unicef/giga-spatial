@@ -7,11 +7,9 @@ along with generic table containers (EntityTable).
 
 from __future__ import annotations
 
-from functools import wraps
 from typing import (
     Tuple,
     List,
-    Set,
     Dict,
     Any,
     Type,
@@ -19,7 +17,6 @@ from typing import (
     Generic,
     Union,
     Optional,
-    ClassVar,
     cast,
 )
 from pathlib import Path
@@ -39,17 +36,9 @@ from shapely.geometry import Point, Polygon, MultiPolygon
 from shapely import wkt, wkb
 from scipy.spatial import cKDTree
 import networkx as nx
-import unicodedata
-import uuid
 from tqdm import tqdm
 
-from .shared import NULL_LIKE_VALUES, ENTITY_UUID_NAMESPACE
 from gigaspatial.processing.entity_processor import EntityProcessor
-from gigaspatial.processing.geo import (
-    detect_coordinate_columns,
-    convert_to_geodataframe,
-    annotate_with_admin_regions,
-)
 from gigaspatial.processing.algorithms import build_distance_graph
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
@@ -82,7 +71,7 @@ GEO_ENTITY_CONFIG = ConfigDict(
 
 # -------------------------------------------------------------------
 # Enum entity config — for point entities with enum fields
-# Used on: CellTower, Cell, TransmissionNode, School (future)
+# Used on: WirelessSite, WirelessAccessService, TransmissionNode, School (future)
 # -------------------------------------------------------------------
 ENUM_ENTITY_CONFIG = ConfigDict(
     populate_by_name=True,

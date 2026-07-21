@@ -71,12 +71,12 @@ class EntityProcessor:
 
     Example::
 
-        processor = CellTowerProcessor()
+        processor = WirelessSiteProcessor()
         processor.verbose = False          # suppress pipeline INFO logs
 
         df = pd.read_csv("bronze/ke/towers.csv")
         df = processor.process(df, country="KEN")
-        tower_table = CellTowerTable.from_dataframe(df)
+        tower_table = WirelessSiteTable.from_dataframe(df)
     """
 
     LOWERCASE_COLUMNS: ClassVar[List[str]] = []

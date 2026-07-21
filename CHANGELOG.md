@@ -13,6 +13,11 @@ All notable changes to this project will be documented in this file.
     -   Added source-column aliasing and normalization pipelines for common infrastructure dataset variations, including legacy cell/tower identifiers, operators, technologies, radio generations, frequency bands, service roles, statuses, capacity, and antenna-height fields.
     -   Added normalization for service-level technology collections, site-level radio-generation summaries, frequency-band lists, provider lists, boolean status values, backhaul aliases, and invalid negative constrained measurements.
 
+-   **Automatic latest-release resolution for Overture Places fetcher (`gigaspatial/handlers/overture.py`)**
+    -   Added `OvertureAmenityFetcher.get_latest_release()` classmethod to resolve the most recent Overture release by querying the official Overture STAC catalog (`stac.overturemaps.org`).
+    -   Changed default `release` value from a hardcoded release string to `"latest"`, so new instances automatically target the current Overture release at query time unless an explicit version is pinned.
+    -   Added fallback handling in `__post_init__` to gracefully degrade to a hardcoded default release with a logged warning if the STAC catalog is unreachable or returns an unexpected response, avoiding hard failures on instantiation.
+
 ### Changed
 
 -   **Replaced legacy `CellTower` and `Cell` schemas with physical-site and access-service models (`gigaspatial/core/schemas/`)**
@@ -34,6 +39,14 @@ All notable changes to this project will be documented in this file.
     -   Added `map_buildings()` overrides across spatial view generators (`AdminBoundariesViewGenerator`, `H3ViewGenerator`, `MercatorViewGenerator`, and `S2ViewGenerator`) to fallback to instance `_country` when `country` is omitted.
     -   Propagated `data_store=self.data_store` into `GoogleMSBuildingsHandler` instantiation in `map_buildings()`.
     -   Removed the `source_filter` parameter from `GeometryBasedZonalViewGenerator.map_buildings()`.
+
+-   **Overpass API Fetcher Reliability & Compliance (`gigaspatial/handlers/osm.py`)**
+    -   Configured explicit default HTTP headers (`User-Agent`, `Accept`, `Accept-Encoding`) to comply with Overpass API client identification policy and resolve HTTP 406 response rejections.
+    -   Updated Overpass base endpoint to HTTPS (`https://overpass-api.de/api/interpreter`).
+    -   Added automatic POST switching for query bodies exceeding 4000 characters to prevent URL truncation by proxies.
+    -   Added client request timeout buffers (`timeout + 30`) to avoid client-side drops before server query completion.
+    -   Configured immediate failure handling for non-retryable HTTP status codes (`400`, `406`).
+    -   Sequentialized node/relation and way query execution to strictly adhere to Overpass API fair-use guidelines and prevent IP blocks.
 
 ### Fixed
 
