@@ -20,6 +20,7 @@ from typing import (
     Union,
     Optional,
     ClassVar,
+    cast,
 )
 from pathlib import Path
 from pydantic import (
@@ -392,7 +393,9 @@ class EntityTable(BaseModel, Generic[E]):
         tqdm_stream = config.get_tqdm_logger_stream(logger)
         # Convert NaN to None so Pydantic handles missing Optional fields correctly.
         # Otherwise, np.nan triggers numeric validations (like ge=0) and fails.
-        records = df.replace({np.nan: None}).to_dict(orient="records")
+        records = cast(
+            List[Dict[str, Any]], df.replace({np.nan: None}).to_dict(orient="records")
+        )
 
         for row in tqdm(
             records,
@@ -819,6 +822,11 @@ class EntityTable(BaseModel, Generic[E]):
             self._cached_kdtree = cKDTree(coords)
         else:
             logger.warning("EntityTable is empty, skipping KDTree build.")
+
+    @staticmethod
+    def _enum_value(value: object) -> object:
+        """Return a primitive enum value when value is an enum instance."""
+        return getattr(value, "value", value)
 
     def clear_cache(self):
         """Clear the internal KDTree spatial index cache."""

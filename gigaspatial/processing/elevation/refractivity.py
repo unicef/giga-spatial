@@ -22,6 +22,14 @@ from gigaspatial.config import config
 
 logger = config.get_logger(__name__)
 
+try:
+    import itur
+    _HAS_ITUR = True
+except ImportError:
+    _HAS_ITUR = False
+    itur = None
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -175,12 +183,11 @@ def get_median_k_factor(lat: float, lon: float) -> float:
     float
         Estimated median k-factor (p=50%) for the location.
     """
-    try:
-        return _get_k_factor_itur(lat, lon)
-    except ImportError:
-        pass
-    except Exception as exc:
-        logger.debug("itur k-factor lookup failed (%s); using fallback LUT.", exc)
+    if _HAS_ITUR:
+        try:
+            return _get_k_factor_itur(lat, lon)
+        except Exception as exc:
+            logger.debug("itur k-factor lookup failed (%s); using fallback LUT.", exc)
 
     zone = classify_climate_zone(lat, lon)
     dn1 = _ZONE_DN1_MEDIAN[zone]
@@ -247,7 +254,11 @@ def _get_k_factor_itur(lat: float, lon: float) -> float:
     """
     Compute k-factor using the ``itur`` package (ITU-R P.453 digital maps).
     """
-    import itur  # noqa: PLC0415
+    if not _HAS_ITUR or itur is None:
+        raise ImportError(
+            "The 'itur' package is not installed. "
+            "Install it using: pip install 'giga-spatial[elevation]'"
+        )
 
     # p=50 -> median value
     dn1_quantity = itur.models.itu453.DN1(lat, lon, p=50)

@@ -1897,9 +1897,9 @@ class TifProcessor:
         for row_start in range(0, self.height, chunk_size):
             row_end = min(row_start + chunk_size, self.height)
             window = rasterio.windows.Window(
-                col_off=0,
-                row_off=row_start,
-                width=self.width,
+                0, # col_off
+                row_start, # row_off
+                self.width, # width
                 height=row_end - row_start,
             )
             windows.append(window)

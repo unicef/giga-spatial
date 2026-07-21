@@ -13,7 +13,6 @@ Standardizing these interfaces ensures consistency across various data sources
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from pydantic.dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union, Tuple, Callable, Iterable
 import pandas as pd
@@ -47,7 +46,7 @@ class BaseHandlerConfig(ABC):
     """
 
     base_path: Path = None
-    n_workers: int = field(default_factory=multiprocessing.cpu_count)
+    n_workers: int = multiprocessing.cpu_count()
     data_store: DataStore = field(default_factory=LocalDataStore)
     logger: logging.Logger = field(default=None, repr=False)
 
@@ -874,11 +873,27 @@ class BaseHandler(ABC):
             True if all required data is available in the DataStore, False otherwise.
         """
         try:
-            # Get relevant units (cached if already computed for this source)
-            data_units = self.config.get_relevant_data_units(
-                source, force_recompute=force_download, **kwargs
+            is_path_source = (
+                isinstance(source, Path)
+                or (
+                    isinstance(source, (list, tuple, set))
+                    and all(isinstance(p, (str, Path)) for p in source)
+                )
+                or (isinstance(source, str) and "." in source)
             )
-            data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
+
+            if is_path_source:
+                if isinstance(source, (str, Path)):
+                    data_paths = [Path(source)]
+                else:
+                    data_paths = [Path(p) for p in source]
+                data_units = data_paths
+            else:
+                # Get relevant units (cached if already computed for this source)
+                data_units = self.config.get_relevant_data_units(
+                    source, force_recompute=force_download, **kwargs
+                )
+                data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
 
             # Check if data exists (unless force download)
             if not force_download:
@@ -894,6 +909,13 @@ class BaseHandler(ABC):
             if not missing_paths:
                 self.logger.info("All required data is already available")
                 return True
+
+            if is_path_source:
+                self.logger.warning(
+                    f"Required explicit file paths are missing: {missing_paths}. "
+                    "Cannot automatically download them without an abstract source."
+                )
+                return False
 
             # Map units to paths (assumes correspondence order; adapt if needed)
             path_to_unit = dict(zip(data_paths, data_units))

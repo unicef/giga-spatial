@@ -664,6 +664,92 @@ class EntityProcessor:
 
         return df
 
+    def _normalize_enum_collection_column(
+        self,
+        df: pd.DataFrame,
+        column: str,
+        alias_map: Dict[str, str],
+        valid_values: Set[str],
+        separators: tuple[str, ...] = (",", ";", "|", "/"),
+        required: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Normalize a collection-valued enum column via an alias map.
+
+        The method accepts delimited strings and list-like values, normalizes each
+        item through ``alias_map``, removes unrecognized items, and stores
+        de-duplicated canonical values as lists. Empty or fully invalid collections
+        are stored as ``None`` so optional Pydantic ``Set[Enum]`` fields validate
+        consistently.
+
+        Args:
+            df: DataFrame containing the column to normalize.
+            column: Name of the collection-valued column to normalize.
+            alias_map: Mapping of normalized raw strings to canonical enum values.
+            valid_values: Complete set of accepted canonical enum values.
+            separators: Delimiters used to split string inputs. Defaults to comma,
+                semicolon, pipe, and slash.
+            required: If ``True``, log a ``WARNING`` when the column is absent;
+                otherwise log at ``DEBUG`` level. Defaults to ``False``.
+
+        Returns:
+            DataFrame with the collection column normalized in-place.
+        """
+        if column not in df.columns:
+            log = logger.warning if required else logger.debug
+            log("Column '%s' not found, skipping normalization.", column)
+            return df
+
+        def split_values(value: object) -> Optional[List[object]]:
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                return None
+
+            if isinstance(value, str):
+                normalized = value
+                for separator in separators[1:]:
+                    normalized = normalized.replace(separator, separators[0])
+                return normalized.split(separators[0])
+
+            if isinstance(value, (list, tuple, set)):
+                return list(value)
+
+            return [value]
+
+        def normalize(value: object) -> Optional[List[str]]:
+            values = split_values(value)
+            if values is None:
+                return None
+
+            normalized: List[str] = []
+            invalid: List[str] = []
+
+            for item in values:
+                if item is None or (isinstance(item, float) and pd.isna(item)):
+                    continue
+
+                raw_value = str(item).strip().lower()
+                if not raw_value:
+                    continue
+
+                canonical_value = alias_map.get(raw_value, raw_value)
+
+                if canonical_value in valid_values:
+                    normalized.append(canonical_value)
+                else:
+                    invalid.append(str(item))
+
+            if invalid:
+                logger.warning(
+                    "Unrecognized '%s' values omitted: %s.",
+                    column,
+                    list(dict.fromkeys(invalid)),
+                )
+
+            return list(dict.fromkeys(normalized)) or None
+
+        df[column] = df[column].apply(normalize)
+        return df
+
     def _annotate_with_admin_regions(
         self,
         df: pd.DataFrame,

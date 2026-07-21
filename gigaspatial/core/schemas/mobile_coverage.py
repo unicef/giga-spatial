@@ -13,9 +13,8 @@ import pandas as pd
 from pathlib import Path
 
 from gigaspatial.core.io.data_store import DataStore
-from .shared import DataConfidence, RadioType
+from .shared import DataConfidence, RadioType, RADIO_ALIAS_MAP
 from .entity import GEO_ENUM_ENTITY_CONFIG, GigaGeoEntity, EntityTable
-from .cell import RADIO_ALIAS_MAP
 from gigaspatial.processing.entity_processor import EntityProcessor
 from gigaspatial.config import config
 
@@ -154,8 +153,8 @@ class MobileCoverage(GigaGeoEntity):
         description="Coverage area as reported by the source in km². "
         "May differ from area computed from the actual geometry.",
     )
-    related_cell_sites: Optional[List[str]] = Field(
-        None, description="Cell site IDs contributing to this coverage area"
+    related_wireless_sites: Optional[List[str]] = Field(
+        None, description="Wireless site IDs contributing to this coverage area"
     )
     measurement_date: Optional[str] = Field(
         None, description="ISO 8601 date when coverage data was collected or modeled"
