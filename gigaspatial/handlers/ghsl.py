@@ -178,7 +178,7 @@ class GHSLDataConfig(BaseHandlerConfig):
         if self.year == 2018 and self.product in ["GHS_BUILT_V", "GHS_POP", "GHS_SMOD"]:
             raise ValueError(f"{self.product} product is not available for 2018")
 
-        if self.resolution == 10 and self.product != "GHS_BUILT_H":
+        if self.resolution == 10 and "GHS_BUILT_H" not in self.product:
             raise ValueError(
                 f"{self.product} product is not available at 10 (10m) resolution"
             )
@@ -261,7 +261,7 @@ class GHSLDataConfig(BaseHandlerConfig):
             )
 
         # Find intersecting tiles
-        mask = (tile_geom.intersects(geometry) for tile_geom in self.tiles_gdf.geometry)
+        mask = self.tiles_gdf.geometry.intersects(geometry)
 
         intersecting_tiles = self.tiles_gdf.loc[mask, "tile_id"].to_list()
 

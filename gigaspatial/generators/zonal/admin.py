@@ -62,7 +62,7 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
             zone_data=self._init_zone_data(
                 country, admin_level, data_store, admin_path
             ),
-            zone_id_column="id",
+            zone_id_column="boundary_id",
             config=config,
             data_store=data_store,
             logger=logger,
@@ -109,3 +109,14 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
             country = self._country
 
         return super().map_rwi(country, predicate, aggregation, output_column, **kwargs)
+
+    def map_buildings(
+        self,
+        country=None,
+        output_column: str = "building_count",
+        **kwargs,
+    ):
+        if hasattr(self, "_country") and country is None:
+            country = self._country
+
+        return super().map_buildings(country, output_column, **kwargs)

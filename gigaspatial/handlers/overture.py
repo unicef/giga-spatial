@@ -8,13 +8,17 @@ DuckDB's spatial and S3 extensions. It facilitates:
 - Category-based filtering for points of interest (POIs).
 - High-performance data acquisition without local mirroring.
 """
+
 import geopandas as gpd
-from typing import List, Optional, Union
+from typing import List, Optional, Union, ClassVar
 from pydantic.dataclasses import dataclass, Field
 from pydantic import ConfigDict
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.strtree import STRtree
 from pathlib import Path
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
+import json
 import pycountry
 
 try:
@@ -49,7 +53,10 @@ class OvertureAmenityFetcher:
     """
 
     # constants
-    release: Optional[str] = "2026-01-21.0"
+    _STAC_CATALOG_URL: ClassVar[str] = "https://stac.overturemaps.org/catalog.json"
+    _DEFAULT_RELEASE: ClassVar[str] = "2026-06-17.0"  # fallback if S3 listing fails
+
+    release: Optional[str] = "latest"  # "latest" triggers auto-detection
 
     base_url: Optional[str] = (
         "s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
@@ -72,15 +79,59 @@ class OvertureAmenityFetcher:
                 "OvertureAmenityFetcher requires 'duckdb'. "
                 "Install it with: pip install 'giga-spatial[duckdb]'"
             )
+
+        self.logger = config.get_logger(self.__class__.__name__)
+
         try:
             self.country = pycountry.countries.lookup(self.country).alpha_2
         except LookupError:
             raise ValueError(f"Invalid country code provided: {self.country}")
 
+        if self.release is None or self.release == "latest":
+            try:
+                self.release = self.get_latest_release()
+                self.logger.info(f"Resolved latest Overture release: {self.release}")
+            except RuntimeError as e:
+                self.logger.warning(
+                    f"Could not determine latest Overture release ({e}); "
+                    f"falling back to {self._DEFAULT_RELEASE}"
+                )
+                self.release = self._DEFAULT_RELEASE
+
         self.base_url = self.base_url.format(release=self.release)
-        self.logger = config.get_logger(self.__class__.__name__)
 
         self.connection = self._set_connection()
+
+    @classmethod
+    def get_latest_release(cls, timeout: int = 20) -> str:
+        """
+        Query the Overture STAC catalog for the most recent release.
+
+        Args:
+            timeout: Request timeout in seconds.
+
+        Returns:
+            The latest release string, e.g. "2026-06-17.0".
+
+        Raises:
+            RuntimeError: If the catalog can't be fetched, parsed, or does
+                not contain a "latest" release entry.
+        """
+        try:
+            with urlopen(cls._STAC_CATALOG_URL, timeout=timeout) as response:
+                catalog = json.load(response)
+        except (URLError, HTTPError) as e:
+            raise RuntimeError(f"Failed to fetch Overture STAC catalog: {e}")
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Failed to parse Overture STAC catalog: {e}")
+
+        release = catalog.get("latest")
+        if not release:
+            raise RuntimeError(
+                "Overture STAC catalog did not return a 'latest' release"
+            )
+
+        return release.rstrip("/")
 
     def _set_connection(self):
         """

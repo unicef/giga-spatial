@@ -2,6 +2,90 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.8] - 2026-07-21
+
+### Added
+
+-   **Wireless site and access-service infrastructure schemas (`gigaspatial/core/schemas/`)**
+    -   Added `WirelessSite`, `WirelessSiteProcessor`, and `WirelessSiteTable` to represent shared physical locations hosting wireless infrastructure, including towers, rooftops, masts, poles, relays, hubs, and customer-premises sites.
+    -   Added `WirelessAccessService`, `WirelessAccessServiceProcessor`, and `WirelessAccessServiceTable` to represent wireless access capabilities delivered from a `WirelessSite`, supporting `mobile`, `fixed_wireless`, `mixed`, and `unknown` access-service roles.
+    -   Added typed filtering, grouping, and retrieval helpers across both tables, including filtering by site, service type, operational status, provider, access technology, backhaul type, and capacity thresholds.
+    -   Added source-column aliasing and normalization pipelines for common infrastructure dataset variations, including legacy cell/tower identifiers, operators, technologies, radio generations, frequency bands, service roles, statuses, capacity, and antenna-height fields.
+    -   Added normalization for service-level technology collections, site-level radio-generation summaries, frequency-band lists, provider lists, boolean status values, backhaul aliases, and invalid negative constrained measurements.
+
+-   **Automatic latest-release resolution for Overture Places fetcher (`gigaspatial/handlers/overture.py`)**
+    -   Added `OvertureAmenityFetcher.get_latest_release()` classmethod to resolve the most recent Overture release by querying the official Overture STAC catalog (`stac.overturemaps.org`).
+    -   Changed default `release` value from a hardcoded release string to `"latest"`, so new instances automatically target the current Overture release at query time unless an explicit version is pinned.
+    -   Added fallback handling in `__post_init__` to gracefully degrade to a hardcoded default release with a logged warning if the STAC catalog is unreachable or returns an unexpected response, avoiding hard failures on instantiation.
+
+### Changed
+
+-   **Replaced legacy `CellTower` and `Cell` schemas with physical-site and access-service models (`gigaspatial/core/schemas/`)**
+    -   Removed `CellTower`, `Cell`, `CellTowerProcessor`, `CellProcessor`, `CellTowerTable`, and `CellTable`.
+    -   Replaced the former tower-centric model with `WirelessSite`, which represents shared physical-site infrastructure such as structure type, structure height, power, backhaul, ownership, providers, and upstream transport relationships.
+    -   Replaced the former cell-level model with `WirelessAccessService`, which represents the delivered access capability and stores service-specific technology, spectrum, frequency bands, provider, capacity, sector-count, and antenna-height information.
+    -   Moved frequency bands, sector counts, access capacity, and representative antenna heights from the former site/tower domain into `WirelessAccessService`, preventing shared-site records from incorrectly representing attributes that may differ across hosted services.
+    -   Retained `WirelessSite` summaries for access-service roles, access technologies, radio generations, highest hosted antenna height, and aggregate site backhaul capacity, allowing direct source reporting and service-derived enrichment.
+
+-   **Optimized `is_dir` performance (`gigaspatial/core/io/adls_data_store.py`)**
+    -   Refactored `is_dir` to check for child directories/files using `list_files_iter` instead of `list_files`.
+    -   Added a `results_per_page` parameter to `list_files_iter` and configured `is_dir` to query with `results_per_page=2` to ensure Azure only fetches the minimum required blobs rather than a full page (usually 5,000 items).
+    
+-   **DataStore optionality for writers (`gigaspatial/core/io/writers.py`)**
+    -   Made `data_store` parameter optional in `write_json`, `write_dataset`, and `write_datasets` (defaulting to `None`).
+    -   Configured the functions to automatically assume and fall back to `LocalDataStore` if `data_store` is not explicitly provided, aligning with the pattern used in `readers.py`.
+
+-   **Building mapping defaults and cleanup (`gigaspatial/generators/zonal/`)**
+    -   Added `map_buildings()` overrides across spatial view generators (`AdminBoundariesViewGenerator`, `H3ViewGenerator`, `MercatorViewGenerator`, and `S2ViewGenerator`) to fallback to instance `_country` when `country` is omitted.
+    -   Propagated `data_store=self.data_store` into `GoogleMSBuildingsHandler` instantiation in `map_buildings()`.
+    -   Removed the `source_filter` parameter from `GeometryBasedZonalViewGenerator.map_buildings()`.
+
+-   **Overpass API Fetcher Reliability & Compliance (`gigaspatial/handlers/osm.py`)**
+    -   Configured explicit default HTTP headers (`User-Agent`, `Accept`, `Accept-Encoding`) to comply with Overpass API client identification policy and resolve HTTP 406 response rejections.
+    -   Updated Overpass base endpoint to HTTPS (`https://overpass-api.de/api/interpreter`).
+    -   Added automatic POST switching for query bodies exceeding 4000 characters to prevent URL truncation by proxies.
+    -   Added client request timeout buffers (`timeout + 30`) to avoid client-side drops before server query completion.
+    -   Configured immediate failure handling for non-retryable HTTP status codes (`400`, `406`).
+    -   Sequentialized node/relation and way query execution to strictly adhere to Overpass API fair-use guidelines and prevent IP blocks.
+
+### Fixed
+
+-   **Admin Boundary Zone ID Column (`gigaspatial/generators/zonal/admin.py`)**
+    -   Fixed `zone_id_column` passed during `AdminBoundariesViewGenerator` initialization from `"id"` to `"boundary_id"`.
+
+-   **Robust Path Handling in `ensure_data_available` (`gigaspatial/handlers/base.py`)**
+    -   Fixed a `ValueError` that occurred during `load_centroids` caching in the buildings engine when specific file paths were passed as data sources.
+    -   Updated `ensure_data_available` in `BaseHandler` to natively support `Path` objects, bypassing abstract unit resolution (`get_relevant_data_units`) when explicit file paths are provided.
+
+-   Resolved a `ModuleNotFoundError` during package import caused by the missing dependency in `processing.elevation.los_analyzer`.
+
+### Packaging & DevOps Modernization
+
+-   **Declarative Configuration Upgrade**: Fully migrated package setup blueprints out of legacy `setup.py` scripts and into a modern, unified `pyproject.toml` file adhering strictly to PEP 517, 621, and 639 specifications. 
+    -   **Eliminated Runtime Overhead**: Removed the fragile custom `requirements.txt` parsing function, allowing modern dependency resolvers (`pip`, `uv`) to parse package metadata efficiently without spinning up standalone setup subprocesses.
+    -   **Clean Version Management**: Configured dynamic version tracking via `tool.setuptools.dynamic` to directly link distribution distributions to your main source code anchor (`gigaspatial.__init__.__version__`).
+
+-   **Self-Referential Extra Targets**: Refactored the `all` optional dependency umbrella using clean, declarative PEP 508 self-references (`giga-spatial[gee]`, `giga-spatial[bq]`, etc.), removing imperative list-flattening logic entirely.
+
+### Python 3.13 & 3.14 Runtime Support & Packaging Enhancements
+
+-   **Python 3.13 & 3.14 Ecosystem Readiness**: Added explicit support and build classifiers for **Python 3.13** and **Python 3.14**
+
+-   **C-Extension & Binary Wheel Flexibility**: Unpinned rigid exact-version constraints on C-bound packages (`rasterio>=1.3.10`, `pycountry>=24.6.1`, `mercantile>=1.2.1`). This allows package managers (`pip`, `uv`) to automatically pull compatible binary wheels or source builds on newer CPython runtime environments without installation collisions.
+
+-   **Modular Infrastructure Decoupling (`hdx` & `maxar`)**:
+    - **Lightweight Baseline Installation**: Decoupled specialized remote API clients from core dependencies, keeping standard spatial operations lean.
+    - **New Dedicated Extra Targets**:
+        - `maxar`: Isolated `OWSLib>=0.31.0` for web coverage/map service pipelines (`pip install "giga-spatial[maxar]"`).
+        - `hdx`: Isolated `hdx-python-api>=6.3.8` for Humanitarian Data Exchange dataset processing (`pip install "giga-spatial[hdx]"`).
+    - **PEP 508 Umbrella Alignment**: Added `giga-spatial[maxar]` and `giga-spatial[hdx]` to the `all` extra array, ensuring full-stack developer installs (`pip install "giga-spatial[all]"`) continue to bundle every supported driver seamlessly.
+
+### Dependencies
+
+-   Added `plotly` to the project requirements to ensure graphical rendering capabilities are available for downstream visualization workflows.
+
+-   Replaced the legacy PyPI wrapper placeholder `bs4==0.0.2` with the official canonical specification `beautifulsoup4>=4.12.0`.
+
 ## [v0.9.7] - 2026-07-01
 
 ### Added

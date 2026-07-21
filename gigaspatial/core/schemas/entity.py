@@ -7,11 +7,9 @@ along with generic table containers (EntityTable).
 
 from __future__ import annotations
 
-from functools import wraps
 from typing import (
     Tuple,
     List,
-    Set,
     Dict,
     Any,
     Type,
@@ -19,7 +17,7 @@ from typing import (
     Generic,
     Union,
     Optional,
-    ClassVar,
+    cast,
 )
 from pathlib import Path
 from pydantic import (
@@ -38,17 +36,9 @@ from shapely.geometry import Point, Polygon, MultiPolygon
 from shapely import wkt, wkb
 from scipy.spatial import cKDTree
 import networkx as nx
-import unicodedata
-import uuid
 from tqdm import tqdm
 
-from .shared import NULL_LIKE_VALUES, ENTITY_UUID_NAMESPACE
 from gigaspatial.processing.entity_processor import EntityProcessor
-from gigaspatial.processing.geo import (
-    detect_coordinate_columns,
-    convert_to_geodataframe,
-    annotate_with_admin_regions,
-)
 from gigaspatial.processing.algorithms import build_distance_graph
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
@@ -81,7 +71,7 @@ GEO_ENTITY_CONFIG = ConfigDict(
 
 # -------------------------------------------------------------------
 # Enum entity config — for point entities with enum fields
-# Used on: CellTower, Cell, TransmissionNode, School (future)
+# Used on: WirelessSite, WirelessAccessService, TransmissionNode, School (future)
 # -------------------------------------------------------------------
 ENUM_ENTITY_CONFIG = ConfigDict(
     populate_by_name=True,
@@ -392,7 +382,9 @@ class EntityTable(BaseModel, Generic[E]):
         tqdm_stream = config.get_tqdm_logger_stream(logger)
         # Convert NaN to None so Pydantic handles missing Optional fields correctly.
         # Otherwise, np.nan triggers numeric validations (like ge=0) and fails.
-        records = df.replace({np.nan: None}).to_dict(orient="records")
+        records = cast(
+            List[Dict[str, Any]], df.replace({np.nan: None}).to_dict(orient="records")
+        )
 
         for row in tqdm(
             records,
@@ -819,6 +811,11 @@ class EntityTable(BaseModel, Generic[E]):
             self._cached_kdtree = cKDTree(coords)
         else:
             logger.warning("EntityTable is empty, skipping KDTree build.")
+
+    @staticmethod
+    def _enum_value(value: object) -> object:
+        """Return a primitive enum value when value is an enum instance."""
+        return getattr(value, "value", value)
 
     def clear_cache(self):
         """Clear the internal KDTree spatial index cache."""

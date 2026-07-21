@@ -328,7 +328,9 @@ class ADLSDataStore(DataStore):
         prefix = self._to_blob_key(dir_path, ensure_dir=True)
         return list(self.container_client.list_blob_names(name_starts_with=prefix))
 
-    def list_files_iter(self, dir_path: Pathish) -> Iterator[str]:
+    def list_files_iter(
+        self, dir_path: Pathish, results_per_page: Optional[int] = None
+    ) -> Iterator[str]:
         """
         Iterate over files with lazy evaluation (memory efficient).
 
@@ -337,6 +339,7 @@ class ADLSDataStore(DataStore):
 
         Args:
             dir_path: Directory path
+            results_per_page: Number of results to request per page.
 
         Yields:
             File paths
@@ -348,7 +351,9 @@ class ADLSDataStore(DataStore):
                     break  # Early exit possible
         """
         prefix = self._to_blob_key(dir_path, ensure_dir=True)
-        return self.container_client.list_blob_names(name_starts_with=prefix)
+        return self.container_client.list_blob_names(
+            name_starts_with=prefix, results_per_page=results_per_page
+        )
 
     def has_files_with_extension(self, dir_path: Pathish, extension: str) -> bool:
         """
@@ -522,16 +527,17 @@ class ADLSDataStore(DataStore):
         """Checks if path is a directory."""
         dir_key = self._to_blob_key(path, ensure_dir=True)
 
-        existing_blobs = self.list_files(dir_key)
+        iterator = self.list_files_iter(dir_key, results_per_page=2)
+        try:
+            first_blob = next(iterator)
+        except StopIteration:
+            return False
 
-        if len(existing_blobs) > 1:
+        try:
+            next(iterator)
             return True
-        elif len(existing_blobs) == 1:
-            # Check if the single blob is not the path itself (indicating it's a file)
-            if existing_blobs[0] != self._to_blob_key(path):
-                return True
-
-        return False
+        except StopIteration:
+            return first_blob != self._to_blob_key(path)
 
     def rmdir(self, dir: Pathish) -> None:
         """Removes a directory."""
