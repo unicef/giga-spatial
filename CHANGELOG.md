@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.9] - 2026-XX-XX
+
+### Added
+
+-   **Multi-layer KMZ support (`gigaspatial/core/io/readers.py`)**
+    -   Enhanced `read_kmz()` to iterate over all KML files within a KMZ archive and merge them into a single GeoDataFrame.
+    -   Added support for the optional `layer` parameter to filter and load specific layers from the archive.
+    -   Included metadata columns `_kml_file` and `_layer_name` to identify the origin of each feature.
+
 ## [v0.9.8] - 2026-07-21
 
 ### Added

@@ -144,15 +144,19 @@ class Config(BaseSettings):
             "zonal": "zonal",
             "nasa_srtm": "nasa_srtm",
             "transmission_node": "transmission_node",
-            "cell_tower": "cell_tower",
-            "cell": "cell",
+            "wireless_site": "wireless_site",
+            "wireless_access_service": "wireless_access_service",
+            "cell_tower": "cell_tower",  # deprecated
+            "cell": "cell",  # deprecated
             "mobile_coverage": "mobile_coverage",
             "wri": "wri",
         },
         description="Mapping of data types to directory names",
     )
 
-    def get_logger(self, name="GigaSpatial", logger_level=logging.INFO, console_level=logging.INFO):
+    def get_logger(
+        self, name="GigaSpatial", logger_level=logging.INFO, console_level=logging.INFO
+    ):
         logger = logging.getLogger(name)
         logger.setLevel(logger_level)
 
@@ -164,7 +168,9 @@ class Config(BaseSettings):
             # Set the specific handler level
             console_handler.setLevel(console_level)
 
-            LOG_FORMAT = "%(levelname) -10s  %(name) -10s %(asctime) " "-30s: %(message)s"
+            LOG_FORMAT = (
+                "%(levelname) -10s  %(name) -10s %(asctime) " "-30s: %(message)s"
+            )
             formatter = logging.Formatter(LOG_FORMAT)
             console_handler.setFormatter(formatter)
 
