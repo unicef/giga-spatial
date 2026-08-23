@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+-   **LocalDataStore text encoding (`gigaspatial/core/io/local_data_store.py`)**
+    -   `open()` passed no `encoding`, so text reads used `locale.getpreferredencoding()` while `write_file()` encodes UTF-8. A file written through the store was unreadable through the store wherever the locale is not UTF-8, though the same call succeeds on the ADLS and Snowflake backends. Text modes now decode UTF-8; binary modes are unchanged.
+
 ## [v0.9.8] - 2026-07-21
 
 ### Added
