@@ -142,7 +142,8 @@ class LocalDataStore(DataStore):
         """
         full_path = self._resolve_path(path)
         self.mkdir(str(full_path.parent), exist_ok=True)
-        return open(full_path, mode)
+        encoding = None if "b" in mode else "utf-8"
+        return open(full_path, mode, encoding=encoding)
 
     def is_file(self, path: str) -> bool:
         """Checks if path is a file."""
