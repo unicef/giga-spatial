@@ -101,18 +101,6 @@ class DBConnection:
         self._add_event_listener()
 
     def _create_trino_engine(self, **kwargs) -> "Engine":
-        """
-        Create a Trino SQLAlchemy engine.
-
-        Args:
-            **kwargs: Additional arguments for create_engine.
-
-        Returns:
-            SQLAlchemy Engine.
-
-        Raises:
-            ImportError: If 'sqlalchemy-trino' is not installed.
-        """
         try:
             import trino
         except ImportError:
@@ -124,9 +112,14 @@ class DBConnection:
             f"trino://{self.user}:{self.password}@{self.host}:{self.port}/"
             f"{self.catalog}/{self.default_schema}"
         )
+
+        # Safely extract and merge connect_args
+        connect_args = kwargs.pop("connect_args", {})
+        connect_args.setdefault("http_scheme", self.http_scheme)
+
         return create_engine(
             self._connection_string,
-            connect_args={"http_scheme": self.http_scheme},
+            connect_args=connect_args,
             **kwargs,
         )
 

@@ -11,6 +11,17 @@ All notable changes to this project will be documented in this file.
     -   Added support for the optional `layer` parameter to filter and load specific layers from the archive.
     -   Included metadata columns `_kml_file` and `_layer_name` to identify the origin of each feature.
 
+### Changed
+
+-   **Trino Engine Configuration (`gigaspatial/core/io/database.py`)**
+    -   Made `connect_args` optional in `_create_trino_engine` by safely extracting it with `kwargs.pop()` to prevent `KeyError` exceptions when not explicitly passed.
+    -   Ensured default `http_scheme` settings are preserved when merging user-supplied arguments.
+
+-   **Bounding Box Pixel Calculation (`gigaspatial/processing/geo.py`)**
+    -   Refactored `calculate_pixels_at_location` into `calculate_bbox_pixel_size`.
+    -   Simplified Mercator scale distortion logic by removing redundant `pyproj` coordinate transformations and unused `crs` parameter.
+    -   Added support for non-Point geometries by automatically falling back to centroid coordinates (`centroid.y`).
+
 ## [v0.9.8] - 2026-07-21
 
 ### Added
