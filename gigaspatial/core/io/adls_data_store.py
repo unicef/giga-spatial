@@ -2,6 +2,7 @@
 Module for Azure Data Lake Storage (ADLS) DataStore implementation.
 Provides a consistent interface for interacting with blobs in Azure storage.
 """
+
 try:
     from azure.storage.blob import BlobServiceClient
 
@@ -16,7 +17,7 @@ import contextlib
 import logging
 import os
 from pathlib import PurePosixPath
-from typing import Union, Optional, Iterator
+from typing import Union, Optional, Iterator, IO
 
 from .data_store import DataStore
 from gigaspatial.config import config
@@ -134,13 +135,14 @@ class ADLSDataStore(DataStore):
         except Exception as e:
             raise IOError(f"Error reading file {path}: {e}")
 
-    def write_file(self, path: Pathish, data) -> None:
+    def write_file(self, path: Pathish, data, overwrite: bool = True) -> None:
         """
-        Write data (string or bytes) to a blob.
+            Write data (string, bytes, or readable binary stream) to a blob.
 
-        Args:
-            path: Destination path in blob storage.
-            data: Data to write (str or bytes).
+            Args:
+                path: Destination path in blob storage.
+                data: Data to write (str, bytes, or file-like object with a .read() method).
+                overwrite: Whether to overwrite existing blob content.
 
         Raises:
             ValueError: If data type is not supported.
@@ -152,12 +154,14 @@ class ADLSDataStore(DataStore):
 
         if isinstance(data, str):
             binary_data = data.encode()
-        elif isinstance(data, bytes):
+        elif isinstance(data, bytes) or hasattr(data, "read"):
             binary_data = data
         else:
-            raise ValueError(f'Unsupported data type. Only "bytes" or "string" accepted')
+            raise ValueError(
+                "Unsupported data type. Accepted: 'str', 'bytes', or a readable binary stream."
+            )
 
-        blob_client.upload_blob(binary_data, overwrite=True)
+        blob_client.upload_blob(binary_data, overwrite=overwrite)
 
     def upload_file(self, file_path: str, blob_path: Pathish):
         """Uploads a single file to Azure Blob Storage."""
@@ -496,6 +500,21 @@ class ADLSDataStore(DataStore):
             data = self.read_file(blob_key)
             file = io.BytesIO(data)
             yield file
+
+    @contextlib.contextmanager
+    def open_stream(self, path: Pathish) -> Iterator[IO[bytes]]:
+        """
+        Stream blob content from ADLS without loading it fully into memory.
+        Yields an object supporting .read(size); reads are fetched from
+        Azure lazily in chunks, not buffered up front.
+        """
+        blob_key = self._to_blob_key(path)
+        blob_client = self.container_client.get_blob_client(blob_key)
+        downloader = blob_client.download_blob()
+        try:
+            yield downloader
+        finally:
+            pass  # nothing to close; downloader holds no local resource
 
     def get_file_metadata(self, path: Pathish) -> dict:
         """
