@@ -135,17 +135,15 @@ class ADLSDataStore(DataStore):
         except Exception as e:
             raise IOError(f"Error reading file {path}: {e}")
 
-    def write_file(self, path: Pathish, data, overwrite: bool = True) -> None:
+    def write_file(
+        self,
+        path: Pathish,
+        data: Union[bytes, str, IO[bytes]],
+        overwrite: bool = True,
+        encoding: Optional[str] = None,
+    ) -> None:
         """
-            Write data (string, bytes, or readable binary stream) to a blob.
-
-            Args:
-                path: Destination path in blob storage.
-                data: Data to write (str, bytes, or file-like object with a .read() method).
-                overwrite: Whether to overwrite existing blob content.
-
-        Raises:
-            ValueError: If data type is not supported.
+        Write data (str, bytes, or a readable binary stream) to a blob.
         """
         blob_key = self._to_blob_key(path)
         blob_client = self.blob_service_client.get_blob_client(
@@ -153,7 +151,7 @@ class ADLSDataStore(DataStore):
         )
 
         if isinstance(data, str):
-            binary_data = data.encode()
+            binary_data = data.encode(encoding or self.DEFAULT_ENCODING)
         elif isinstance(data, bytes) or hasattr(data, "read"):
             binary_data = data
         else:
@@ -472,19 +470,14 @@ class ADLSDataStore(DataStore):
         return sorted(list(directories))
 
     @contextlib.contextmanager
-    def open(self, path: Pathish, mode: str = "r"):
-        """
-        Context manager for file operations with enhanced mode support.
-
-        :param path: File path in blob storage
-        :param mode: File open mode (r, rb, w, wb)
-        """
+    def open(self, path: Pathish, mode: str = "r", encoding: Optional[str] = None):
+        """Context manager for file operations with enhanced mode support."""
         blob_key = self._to_blob_key(path)
 
         if mode == "w":
             file = io.StringIO()
             yield file
-            self.write_file(blob_key, file.getvalue())
+            self.write_file(blob_key, file.getvalue(), encoding=encoding)
 
         elif mode == "wb":
             file = io.BytesIO()
@@ -492,7 +485,7 @@ class ADLSDataStore(DataStore):
             self.write_file(blob_key, file.getvalue())
 
         elif mode == "r":
-            data = self.read_file(blob_key, encoding="UTF-8")
+            data = self.read_file(blob_key, encoding=encoding or self.DEFAULT_ENCODING)
             file = io.StringIO(data)
             yield file
 
@@ -500,6 +493,9 @@ class ADLSDataStore(DataStore):
             data = self.read_file(blob_key)
             file = io.BytesIO(data)
             yield file
+
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
 
     @contextlib.contextmanager
     def open_stream(self, path: Pathish) -> Iterator[IO[bytes]]:

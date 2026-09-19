@@ -19,6 +19,7 @@ import contextlib
 import logging
 import threading
 from typing import Union, Optional, List, Generator, Tuple
+import shutil
 
 from .data_store import DataStore
 from gigaspatial.config import config
@@ -313,13 +314,19 @@ class SnowflakeDataStore(DataStore):
         finally:
             cursor.close()
 
-    def write_file(self, path: str, data: Union[bytes, str]) -> None:
+    def write_file(
+        self,
+        path: str,
+        data: Union[bytes, str],
+        encoding: Optional[str] = None,
+    ) -> None:
         """
         Write data (string or bytes) to a Snowflake stage.
 
         Args:
             path: Destination path in the stage.
             data: Data to write (str or bytes).
+            encoding: Optional string encoding.
 
         Raises:
             ValueError: If data type is unsupported.
@@ -331,13 +338,17 @@ class SnowflakeDataStore(DataStore):
         try:
             # Convert to bytes if string
             if isinstance(data, str):
-                binary_data = data.encode("utf-8")
+                binary_data = data.encode(encoding or self.DEFAULT_ENCODING)
+                with open(temp_file_path, "wb") as f:
+                    f.write(binary_data)
+            elif hasattr(data, "read"):
+                with open(temp_file_path, "wb") as f:
+                    shutil.copyfileobj(data, f)
             elif isinstance(data, bytes):
-                binary_data = data
+                with open(temp_file_path, "wb") as f:
+                    f.write(data)
             else:
-                raise ValueError(
-                    'Unsupported data type. Only "bytes" or "string" accepted'
-                )
+                raise ValueError('Unsupported data type. Only "bytes", "string", or a readable stream accepted')
 
             normalized_path = self._normalize_path(path)
 
@@ -799,13 +810,14 @@ class SnowflakeDataStore(DataStore):
         return sorted(list(directories))
 
     @contextlib.contextmanager
-    def open(self, path: str, mode: str = "r"):
+    def open(self, path: str, mode: str = "r", encoding: Optional[str] = None):
         """
         Context manager for opening files in Snowflake stage.
 
         Args:
             path: File path in stage.
             mode: File mode ('r', 'rb', 'w', 'wb').
+            encoding: Optional string encoding.
 
         Returns:
             Context manager yielding a file-like object.
@@ -816,7 +828,7 @@ class SnowflakeDataStore(DataStore):
         if mode == "w":
             file = io.StringIO()
             yield file
-            self.write_file(path, file.getvalue())
+            self.write_file(path, file.getvalue(), encoding=encoding)
 
         elif mode == "wb":
             file = io.BytesIO()
@@ -824,7 +836,7 @@ class SnowflakeDataStore(DataStore):
             self.write_file(path, file.getvalue())
 
         elif mode == "r":
-            data = self.read_file(path, encoding="UTF-8")
+            data = self.read_file(path, encoding=encoding or self.DEFAULT_ENCODING)
             file = io.StringIO(data)
             yield file
 
