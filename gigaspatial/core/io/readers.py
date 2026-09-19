@@ -11,7 +11,7 @@ import tempfile
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Union
+from typing import Any, Iterator, Optional, Union
 
 import geopandas as gpd
 import pandas as pd
@@ -21,6 +21,13 @@ from .local_data_store import LocalDataStore
 from gigaspatial.config import config
 
 logger = config.get_logger(__name__)
+
+try:
+    import orjson
+
+    _json_loads = orjson.loads
+except ImportError:
+    _json_loads = json.loads
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +120,52 @@ def read_gzipped_json_or_csv(
     except pd.errors.ParserError:
         logger.error("Could not parse '%s' as JSON lines or CSV.", file_path)
         return None
+
+
+def iter_field_from_gzipped_jsonl(
+    file_path: Union[str, Path],
+    field: str,
+    data_store: Optional[DataStore] = None,
+    default: Any = None,
+    ignore_missing: bool = False,
+) -> Iterator[Any]:
+    """
+    Stream a specific field line-by-line from a gzipped JSON Lines (.jsonl.gz) file.
+
+    Memory-efficient generator that iterates through records without loading
+    the entire dataset into memory.
+
+    Args:
+        file_path: Path to the .gz file in the DataStore.
+        field: Key to extract from each JSON object.
+        data_store: DataStore instance. If None, LocalDataStore is used.
+        default: Default value yielded when `field` is missing and `ignore_missing` is False.
+        ignore_missing: If True, skips records where `field` is not present.
+
+    Yields:
+        The extracted field value for each record.
+    """
+    data_store = data_store or LocalDataStore()
+
+    with data_store.open(file_path, "rb") as raw_f:
+        with gzip.GzipFile(fileobj=raw_f, mode="rb") as gz_f:
+            for line in gz_f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                record = _json_loads(line)
+
+                if field in record:
+                    yield record[field]
+                elif ignore_missing:
+                    continue
+                else:
+                    yield default
+
+
+# Alias for readability and backwards compatibility
+read_field_from_gzipped_jsonl = iter_field_from_gzipped_jsonl
 
 
 # ---------------------------------------------------------------------------
