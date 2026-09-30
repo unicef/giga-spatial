@@ -20,6 +20,7 @@ import pycountry
 import requests
 import logging
 import geopandas as gpd
+import re
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.grid.mercator_tiles import (
@@ -50,10 +51,14 @@ class MSBuildingsConfig(BaseHandlerConfig):
         LOCATION_MAPPING_FILE: Path to the cached location mapping JSON.
     """
 
-    TILE_URLS: str = (
-        "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
+    README_URL = (
+        "https://raw.githubusercontent.com/"
+        "microsoft/GlobalMLBuildingFootprints/main/README.md"
     )
+    MANIFEST_URL: Optional[str] = None
+
     MERCATOR_ZOOM_LEVEL: int = 9
+
     base_path: Path = global_config.get_path("microsoft_global_buildings", "bronze")
 
     LOCATION_MAPPING_FILE: Path = base_path / "location_mapping.json"
@@ -92,19 +97,83 @@ class MSBuildingsConfig(BaseHandlerConfig):
     def __post_init__(self):
         """Initialize the configuration, load tile URLs, and set up location mapping."""
         super().__post_init__()
-        self._load_tile_urls()
-        self.upload_date = self.df_tiles.upload_date[0]
+        manifest_url = (
+            self.MANIFEST_URL if self.MANIFEST_URL else self.get_latest_manifest_url()
+        )
+        self.MANIFEST_URL = manifest_url
+        self.manifest_date = self._get_manifest_date(manifest_url)
+
+        self._load_tile_urls(manifest_url)
         self._setup_location_mapping()
 
-    def _load_tile_urls(self):
-        """Loads dataset links from the remote CSV file.
+    @classmethod
+    def get_latest_manifest_url(cls) -> str:
+        """
+        Discover the latest Microsoft Global Buildings dataset manifest.
+
+        Returns:
+            URL of the latest ``dataset-links.csv`` manifest.
 
         Raises:
-            requests.exceptions.RequestException: If the remote file cannot be fetched.
+            RuntimeError: If no manifest URL can be found.
+            requests.HTTPError: If the README cannot be retrieved.
         """
+        response = requests.get(cls.README_URL, timeout=30)
+        response.raise_for_status()
+
+        pattern = re.compile(
+            r"https://bfppub\.blob\.core\.windows\.net/"
+            r"\%24web/(\d{4}-\d{2}-\d{2})/dataset-links\.csv"
+        )
+
+        matches = pattern.findall(response.text)
+
+        if not matches:
+            raise RuntimeError("No Microsoft Buildings dataset manifest found.")
+
+        latest_date = max(matches)
+
+        return (
+            "https://bfppub.blob.core.windows.net/"
+            f"$web/{latest_date}/dataset-links.csv"
+        )
+
+    @staticmethod
+    def _get_manifest_date(manifest_url: str) -> str:
+        """Extract the dataset manifest date from its URL.
+
+        Args:
+            manifest_url: URL of the Microsoft Buildings dataset manifest.
+
+        Returns:
+            Manifest date in ``YYYY-MM-DD`` format.
+
+        Raises:
+            ValueError: If the URL does not contain a valid manifest date.
+        """
+        match = re.search(
+            r"/(\d{4}-\d{2}-\d{2})/dataset-links\.csv(?:\?.*)?$",
+            manifest_url,
+        )
+
+        if not match:
+            raise ValueError(
+                f"Could not extract manifest date from URL: {manifest_url}"
+            )
+
+        return match.group(1)
+
+    def _load_tile_urls(self, url: str):
+        """Load dataset links from the remote manifest."""
         self.df_tiles = pd.read_csv(
-            self.TILE_URLS,
-            names=["location", "quadkey", "url", "size", "upload_date"],
+            url,
+            names=[
+                "location",
+                "quadkey",
+                "url",
+                "size",
+                "upload_date",
+            ],
             dtype={"quadkey": str},
             header=0,
         )
@@ -258,7 +327,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
         return (
             self.base_path
             / tile_location
-            / self.upload_date
+            / self.manifest_date
             / f'{unit["quadkey"]}.csv.gz'
         )
 
