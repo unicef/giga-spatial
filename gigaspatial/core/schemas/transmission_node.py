@@ -12,11 +12,11 @@ from enum import Enum
 from pathlib import Path
 
 from gigaspatial.core.io.data_store import DataStore
-from .shared import DataConfidence, PowerSource
+from .shared import DataConfidence, PowerSource, InfrastructureStatus
 from .entity import ENUM_ENTITY_CONFIG, GigaEntity, EntityTable
+from .wireless_site import BACKHAUL_ALIAS_MAP
 from gigaspatial.processing.entity_processor import EntityProcessor
 from gigaspatial.config import config
-from .cell_tower import BackhaulType, BACKHAUL_ALIAS_MAP
 
 logger = config.get_logger("TransmissionNodeManager")
 
@@ -54,19 +54,14 @@ class NodeType(str, Enum):
     ACCESS = "access"  # Direct connection to cell sites
 
 
-class NodeStatus(str, Enum):
-    """Enum for node operational status."""
-
-    PROPOSED = "proposed"
-    PLANNED = "planned"
-    UNDER_CONSTRUCTION = "underconstruction"
-    OPERATIONAL = "operational"
-    DECOMMISSIONED = "decommissioned"
-    INACTIVE = "inactive"
-
-
 class TransmissionNode(GigaEntity):
-    """Represents a transmission node in the network infrastructure."""
+    """
+    Represents a physical or logical node in the transport network.
+
+    The entity captures sites and logical aggregation points that switch,
+    aggregate, or transport traffic between access networks and upstream
+    backbone or metro networks.
+    """
 
     model_config = ENUM_ENTITY_CONFIG
 
@@ -85,7 +80,7 @@ class TransmissionNode(GigaEntity):
     node_type: Optional[NodeType] = Field(
         None, description="Hierarchical role of the node in the network"
     )
-    node_status: Optional[NodeStatus] = Field(
+    node_status: Optional[InfrastructureStatus] = Field(
         None, description="Current operational status of the node"
     )
     transmission_medium: Optional[TransmissionMedium] = Field(
@@ -103,10 +98,15 @@ class TransmissionNode(GigaEntity):
 
     # Ownership
     physical_infrastructure_provider: Optional[str] = Field(
-        None, max_length=100, description="Entity providing physical infrastructure"
+        None,
+        max_length=100,
+        description="Organization that owns, hosts, or provides the physical site or "
+        "passive infrastructure supporting this transmission node",
     )
     network_providers: Optional[List[str]] = Field(
-        None, description="Network service providers operating on this node"
+        None,
+        description="Mobile network operators, internet service providers, or other "
+        "network operators using or operating active equipment at this node",
     )
 
     # Capacity
@@ -384,7 +384,7 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
         )
 
     def filter_by_status(
-        self, status: Union[NodeStatus, str]
+        self, status: Union[InfrastructureStatus, str]
     ) -> "TransmissionNodeTable":
         """
         Filter nodes by operational status.
@@ -393,14 +393,18 @@ class TransmissionNodeTable(EntityTable[TransmissionNode]):
             status: A ``NodeStatus`` enum member or its string value
                 (e.g. ``"operational"``, ``"planned"``).
         """
-        value = NodeStatus(status).value if isinstance(status, str) else status.value
+        value = (
+            InfrastructureStatus(status).value
+            if isinstance(status, str)
+            else status.value
+        )
         return self.__class__(
             entities=[e for e in self.entities if e.node_status == value]
         )
 
     def filter_operational(self) -> "TransmissionNodeTable":
         """Return only operational nodes."""
-        return self.filter_by_status(NodeStatus.OPERATIONAL)
+        return self.filter_by_status(InfrastructureStatus.OPERATIONAL)
 
     def filter_by_medium(
         self, medium: Union[TransmissionMedium, str]

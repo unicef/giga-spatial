@@ -1,6 +1,6 @@
-site_name: 'Documentation'
-site_description: 'A powerful Python package for geospatial data analysis and processing'
-site_author: 'Utku Can Ozturk'
+site_name: "Documentation"
+site_description: "A powerful Python package for geospatial data analysis and processing"
+site_author: "Utku Can Ozturk"
 
 theme:
   name: material
@@ -13,7 +13,7 @@ theme:
 
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
-      scheme: default 
+      scheme: default
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
@@ -50,35 +50,35 @@ edit_uri: edit/main/docs/
 nav:
   - Home: index.md
   - Getting Started:
-    - Installation: getting-started/installation.md
-    - Quick Start: getting-started/quickstart.md
-    - Configuration: getting-started/configuration.md
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Configuration: getting-started/configuration.md
   - User Guide:
-    - Overview: user-guide/index.md
-    - School Proximity: user-guide/school-proximity.md
-    - Infrastructure Normalization: user-guide/infrastructure-normalization.md
-    - Settlement Characterization: user-guide/settlement-characterization.md
-    - Population Accessibility: user-guide/population-accessibility.md
-    - Zonal Statistics on Grids: user-guide/zonal-statistics-grids.md
+      - Overview: user-guide/index.md
+      - School Proximity: user-guide/school-proximity.md
+      - Infrastructure Normalization: user-guide/infrastructure-normalization.md
+      - Settlement Characterization: user-guide/settlement-characterization.md
+      - Population Accessibility: user-guide/population-accessibility.md
+      - Zonal Statistics on Grids: user-guide/zonal-statistics-grids.md
   - API Reference:
-    - Overview: api/index.md
-    - Handlers: api/handlers.md
-    - Processing: api/processing.md
-    - Core: api/core.md
-    - Generators: api/generators.md
-    - Grid: api/grid.md
+      - Overview: api/index.md
+      - Handlers: api/handlers.md
+      - Processing: api/processing.md
+      - Core: api/core.md
+      - Generators: api/generators.md
+      - Grid: api/grid.md
     #- Core Functions: api/core.md
     #- Utilities: api/utils.md
     #- Data Types: api/data-types.md
   - Examples:
-    - Overview: examples/index.md
+      - Overview: examples/index.md
   - Contributing:
-    - How to Contribute: contributing.md
+      - How to Contribute: contributing.md
     #- Development Setup: contributing/development-setup.md
     #- Code Style Guide: contributing/code-style.md
   - About:
-    - Changelog: changelog.md
-    - License: license.md
+      - Changelog: changelog.md
+      - License: license.md
     #- Credits: credits.md
 
 markdown_extensions:
@@ -130,7 +130,7 @@ plugins:
           options:
             show_submodules: true
           filters:
-              - "!^_" 
+            - "!^_"
           rendering:
             show_source: true
             show_category_heading: true
@@ -153,7 +153,7 @@ extra:
       link: https://pypi.org/project/giga-spatial/
   version:
     provider: mike
-  
+
   generator: false
 
 extra_css:

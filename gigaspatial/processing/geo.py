@@ -3,6 +3,7 @@ Geospatial processing utilities.
 Provides robust helpers for Coordinate Reference System (CRS) management,
 coordinate detection, spatial joins, buffering, and geometry simplification.
 """
+
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -785,7 +786,9 @@ def annotate_with_admin_regions(
         columns={"boundary_id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"},
         inplace=True,
     )
-    admin1_data = admin1_data[[f"admin1_id{admin_id_column_suffix}", "admin1", "geometry"]]
+    admin1_data = admin1_data[
+        [f"admin1_id{admin_id_column_suffix}", "admin1", "geometry"]
+    ]
 
     admin2_data = AdminBoundaries.create(
         country_code=country_code, admin_level=2, data_store=data_store
@@ -804,7 +807,7 @@ def annotate_with_admin_regions(
             f"admin2_id{admin_id_column_suffix}",
             "admin2",
             f"admin1_id{admin_id_column_suffix}",
-            "geometry"
+            "geometry",
         ]
     ]
 
@@ -1212,3 +1215,35 @@ def calculate_pixels_at_location(gdf, resolution, bbox_size=300, crs="EPSG:3857"
     pixels = bbox_size / effective_resolution
     return int(round(pixels))
 
+
+def calculate_bbox_pixel_size(gdf, resolution, bbox_size=300):
+    """
+    Calculate the number of pixels required to cover a bounding box,
+    accounting for Mercator scale distortion at the geometry's latitude.
+
+    Args:
+        gdf: GeoDataFrame with Point geometries (WGS84).
+        resolution: Target resolution in meters per pixel.
+        bbox_size: Bounding box side length in meters.
+
+    Returns:
+        Number of pixels per side (width and height).
+    """
+
+    # Safely get the average latitude, even if geometries are polygons
+    # (Assuming the gdf is in EPSG:4326 WGS84)
+    if gdf.geom_type.iloc[0] == "Point":
+        lat = gdf.geometry.y.mean()
+    else:
+        lat = gdf.geometry.centroid.y.mean()
+
+    # Calculate scale factor (distortion) at given latitude
+    scale_factor = np.cos(np.radians(lat))
+
+    # Adjust the effective resolution
+    effective_resolution = resolution * scale_factor
+
+    # Compute number of pixels per side
+    pixels = bbox_size / effective_resolution
+
+    return int(round(pixels))

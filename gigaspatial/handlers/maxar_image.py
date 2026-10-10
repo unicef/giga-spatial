@@ -10,8 +10,15 @@ import geopandas as gpd
 import pandas as pd
 import mercantile
 
-from owslib.wms import WebMapService
-from owslib.wfs import WebFeatureService
+try:
+    from owslib.wms import WebMapService
+    from owslib.wfs import WebFeatureService
+    _HAS_OWSLIB = True
+except ImportError:
+    _HAS_OWSLIB = False
+    WebMapService = None
+    WebFeatureService = None
+
 
 from gigaspatial.grid.mercator_tiles import MercatorTiles
 from gigaspatial.core.io.data_store import DataStore
@@ -173,6 +180,11 @@ class MaxarImageDownloader:
 
     def _initialize_wms(self):
         """Initialize WebMapService with updated authentication"""
+        if not _HAS_OWSLIB or WebMapService is None:
+            raise ImportError(
+                "Maxar Image Downloader requires 'OWSLib'. "
+                "Install it with: pip install 'giga-spatial[maxar]'"
+            )
         url = str(self.config.base_url)
 
         # Add API key as query param if using that method
@@ -188,6 +200,11 @@ class MaxarImageDownloader:
 
     def _initialize_wfs(self):
         """Initialize WebFeatureService with authentication"""
+        if not _HAS_OWSLIB or WebFeatureService is None:
+            raise ImportError(
+                "Maxar Image Downloader requires 'OWSLib'. "
+                "Install it with: pip install 'giga-spatial[maxar]'"
+            )
         # WFS uses same base URL pattern as WMS
         wfs_url = str(self.config.base_url).replace("/ogc/wms", "/ogc/wfs")
 
@@ -200,6 +217,7 @@ class MaxarImageDownloader:
             version="2.0.0",  # WFS 2.0.0 is the default and recommended
             headers=self.headers if self.headers else None,
         )
+
 
     def _download_single_image(self, bbox, output_path: Union[Path, str], size) -> bool:
         """Download a single image from bbox and pixel size"""

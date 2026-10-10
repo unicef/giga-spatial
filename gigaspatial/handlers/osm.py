@@ -8,6 +8,7 @@ This module provides the `OSMLocationFetcher` class for retrieving points of int
 - Historical change tracking (newer/changed filters)
 - Metadata extraction (timestamp, version, user)
 """
+
 import requests
 import pandas as pd
 from typing import List, Dict, Union, Optional, Literal
@@ -15,12 +16,32 @@ from pydantic.dataclasses import dataclass
 from pydantic import Field
 from time import sleep
 from concurrent.futures import ThreadPoolExecutor
-from requests.exceptions import RequestException
+from requests.exceptions import RequestException, HTTPError
 from shapely.geometry import Polygon, Point
 import pycountry
 from datetime import datetime
 
+from gigaspatial import __version__
 from gigaspatial.config import config
+
+# Overpass API now returns 406 Not Acceptable for requests that don't send a
+# descriptive User-Agent / Accept header (this started ~April 2026 on the
+# public overpass-api.de instance). Always identify ourselves and state what
+# we accept explicitly.
+DEFAULT_HEADERS = {
+    "User-Agent": f"gigaspatial/{__version__} (+https://github.com/unicef/giga-spatial)",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate, br",
+}
+
+# Requests with a query body longer than this are sent via POST instead of
+# GET, since very long querystrings can be truncated or rejected by
+# intermediate proxies before they ever reach Overpass.
+MAX_GET_QUERY_LENGTH = 4000
+
+# Status codes that indicate the request itself is malformed / not going to
+# succeed on retry (as opposed to transient server/network issues).
+NON_RETRYABLE_STATUS_CODES = {400, 406}
 
 
 @dataclass(kw_only=True)
@@ -37,7 +58,10 @@ class OSMLocationFetcher:
         admin_value: Name of the administrative area.
         location_types: Mapping of category keys (e.g., 'amenity') to values.
         base_url: Overpass API endpoint URL.
-        timeout: API request timeout in seconds.
+        timeout: Overpass server-side query timeout, in seconds. The actual
+            HTTP client timeout used for requests will be this value plus a
+            small buffer, so we don't give up locally right as the server
+            is about to respond.
         max_retries: Number of retry attempts for failed requests.
         retry_delay: Delay between retries in seconds.
     """
@@ -46,7 +70,7 @@ class OSMLocationFetcher:
     admin_level: Optional[int] = None
     admin_value: Optional[str] = None
     location_types: Union[List[str], Dict[str, List[str]]] = Field(...)
-    base_url: str = "http://overpass-api.de/api/interpreter"
+    base_url: str = "https://overpass-api.de/api/interpreter"
     timeout: int = 600
     max_retries: int = 3
     retry_delay: int = 5
@@ -69,6 +93,10 @@ class OSMLocationFetcher:
             )
 
         self.logger = config.get_logger(self.__class__.__name__)
+
+        # Small buffer on top of the server-side [timeout:N] so the client
+        # doesn't abort the connection right before the server finishes.
+        self.request_timeout = self.timeout + 30
 
         # Validate area selection
         if self.admin_level is not None and self.admin_value is not None:
@@ -126,8 +154,13 @@ class OSMLocationFetcher:
         out tags;
         """
 
-        url = "http://overpass-api.de/api/interpreter"
-        response = requests.get(url, params={"data": query}, timeout=timeout)
+        url = "https://overpass-api.de/api/interpreter"
+        response = requests.post(
+            url,
+            data={"data": query},
+            headers=DEFAULT_HEADERS,
+            timeout=timeout + 30,
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -171,8 +204,13 @@ class OSMLocationFetcher:
         out tags;
         """
 
-        url = "http://overpass-api.de/api/interpreter"
-        response = requests.get(url, params={"data": query}, timeout=timeout)
+        url = "https://overpass-api.de/api/interpreter"
+        response = requests.post(
+            url,
+            data={"data": query},
+            headers=DEFAULT_HEADERS,
+            timeout=timeout + 30,
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -223,6 +261,12 @@ class OSMLocationFetcher:
         """
         Execute an Overpass API request with a retry mechanism.
 
+        Uses POST for large query bodies to avoid URL-length issues with
+        intermediate proxies, always sends identifying headers (Overpass now
+        returns 406 Not Acceptable for generic/anonymous clients), and does
+        not waste retries on responses that indicate the request itself is
+        malformed (e.g. 400/406) rather than a transient failure.
+
         Args:
             query: The Overpass QL query string.
 
@@ -232,14 +276,46 @@ class OSMLocationFetcher:
         Raises:
             RuntimeError: If all retry attempts fail.
         """
+        use_post = len(query) > MAX_GET_QUERY_LENGTH
+
         for attempt in range(self.max_retries):
             try:
                 self.logger.debug(f"Executing query:\n{query}")
-                response = requests.get(
-                    self.base_url, params={"data": query}, timeout=self.timeout
-                )
+                if use_post:
+                    response = requests.post(
+                        self.base_url,
+                        data={"data": query},
+                        headers=DEFAULT_HEADERS,
+                        timeout=self.request_timeout,
+                    )
+                else:
+                    response = requests.get(
+                        self.base_url,
+                        params={"data": query},
+                        headers=DEFAULT_HEADERS,
+                        timeout=self.request_timeout,
+                    )
                 response.raise_for_status()
                 return response.json()
+            except HTTPError as e:
+                status_code = e.response.status_code if e.response is not None else None
+                if status_code in NON_RETRYABLE_STATUS_CODES:
+                    self.logger.error(
+                        f"Overpass request rejected with status {status_code} "
+                        f"({e.response.reason if e.response is not None else 'unknown'}). "
+                        "This usually means the request headers/query were rejected "
+                        "outright, not a transient issue, so it will not be retried."
+                    )
+                    raise RuntimeError(
+                        f"Overpass API rejected the request with status {status_code}"
+                    ) from e
+                self.logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+                if attempt < self.max_retries - 1:
+                    sleep(self.retry_delay)
+                else:
+                    raise RuntimeError(
+                        f"Failed to fetch data after {self.max_retries} attempts"
+                    ) from e
             except RequestException as e:
                 self.logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
                 if attempt < self.max_retries - 1:
@@ -543,7 +619,7 @@ class OSMLocationFetcher:
         )
 
         return self._execute_and_process_queries(queries, handle_duplicates)
-    
+
     def fetch_by_osmid(
         self,
         osmid: int,
@@ -607,6 +683,7 @@ class OSMLocationFetcher:
             tags = element.get("tags", {})
             if element_type == "way" and "geometry" in element:
                 from shapely.geometry import Polygon
+
                 polygon = Polygon([(p["lon"], p["lat"]) for p in element["geometry"]])
                 centroid = polygon.centroid
                 return {
@@ -687,11 +764,13 @@ class OSMLocationFetcher:
         """
         nodes_relations_query, ways_query = queries
 
-        # Fetch nodes and relations
+        # Fetch nodes and relations, then ways, sequentially. Overpass's fair-use
+        # policy asks clients to run one query after another rather than firing
+        # requests in parallel from the same host/IP; doing otherwise has been
+        # linked to blocked IP ranges on the public instance.
         nodes_relations_response = self._make_request(nodes_relations_query)
         nodes_relations = nodes_relations_response.get("elements", [])
 
-        # Fetch ways
         ways_response = self._make_request(ways_query)
         ways = ways_response.get("elements", [])
 

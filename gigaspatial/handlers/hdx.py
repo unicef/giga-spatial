@@ -18,9 +18,17 @@ from pydantic.dataclasses import dataclass
 from shapely.geometry.base import BaseGeometry
 import pycountry
 
-from hdx.api.configuration import Configuration
-from hdx.data.dataset import Dataset
-from hdx.data.resource import Resource
+try:
+    from hdx.api.configuration import Configuration
+    from hdx.data.dataset import Dataset
+    from hdx.data.resource import Resource
+    _HAS_HDX = True
+except ImportError:
+    _HAS_HDX = False
+    Configuration = None
+    Dataset = None
+    Resource = None
+
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.readers import read_dataset
@@ -88,6 +96,11 @@ class HDXConfig(BaseHandlerConfig):
         Returns:
             A list of matching dataset metadata dictionaries.
         """
+        if not _HAS_HDX or Configuration is None or Dataset is None:
+            raise ImportError(
+                "HDX operations require 'hdx-python-api'. "
+                "Install it with: pip install 'giga-spatial[hdx]'"
+            )
         try:
             Configuration.create(
                 hdx_site=hdx_site,
@@ -107,6 +120,11 @@ class HDXConfig(BaseHandlerConfig):
 
     def __post_init__(self):
         super().__post_init__()
+        if not _HAS_HDX or Configuration is None or Dataset is None:
+            raise ImportError(
+                "HDX operations require 'hdx-python-api'. "
+                "Install it with: pip install 'giga-spatial[hdx]'"
+            )
         try:
             Configuration.read()
             self._hdx_configured = True
@@ -122,6 +140,11 @@ class HDXConfig(BaseHandlerConfig):
 
     def configure_hdx(self):
         """Configure HDX API if not already configured"""
+        if not _HAS_HDX or Configuration is None:
+            raise ImportError(
+                "HDX operations require 'hdx-python-api'. "
+                "Install it with: pip install 'giga-spatial[hdx]'"
+            )
         if not self._hdx_configured:
             try:
                 Configuration.create(

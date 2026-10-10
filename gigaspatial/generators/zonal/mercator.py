@@ -136,3 +136,14 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
             country = self._country
 
         return super().map_rwi(country, predicate, aggregation, output_column, **kwargs)
+
+    def map_buildings(
+        self,
+        country=None,
+        output_column: str = "building_count",
+        **kwargs,
+    ):
+        if hasattr(self, "_country") and country is None:
+            country = self._country
+
+        return super().map_buildings(country, output_column, **kwargs)
