@@ -1,0 +1,352 @@
+"""Abstract reader for dataset handlers (`BaseHandlerReader`)."""
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any, List, Optional, Union, Tuple, Callable, Iterable
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point
+from shapely.geometry.base import BaseGeometry
+import logging
+from tqdm import tqdm
+
+from gigaspatial.config import config as global_config
+from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.core.io.readers import read_dataset
+from gigaspatial.processing.tif_processor import TifProcessor
+from gigaspatial.handlers.base.config import BaseHandlerConfig
+
+
+class BaseHandlerReader(ABC):
+    """
+    Abstract base class for data readers.
+
+    Provides high-level methods for resolving data paths and loading various
+    data types (raster, tabular) into memory. Standardizes the loading
+    interface across disparate datasets.
+
+    Attributes:
+        config: Handler configuration object.
+        data_store: Abstraction for file-system access.
+        logger: Logger instance for tracking data loading.
+    """
+
+    def __init__(
+        self,
+        config: Optional[BaseHandlerConfig] = None,
+        data_store: Optional[DataStore] = None,
+        logger: Optional[logging.Logger] = None,
+    ):
+        self.config = config
+        if data_store:
+            self.data_store = data_store
+        elif config and hasattr(config, "data_store"):
+            self.data_store = config.data_store
+        else:
+            self.data_store = LocalDataStore()
+
+        self.logger = (
+            logger
+            or (getattr(config, "logger", None) if config else None)
+            or global_config.get_logger(self.__class__.__name__)
+        )
+
+    def resolve_source_paths(
+        self,
+        source: Union[
+            str,
+            List[Union[Tuple[float, float], Point]],
+            BaseGeometry,
+            gpd.GeoDataFrame,
+            Path,
+            str,
+            List[Union[str, Path]],
+        ],
+        **kwargs,
+    ) -> List[Union[str, Path]]:
+        """
+        Identify data file paths corresponding to a specific source input.
+
+        Parses the input source (e.g., country code, geometry, or explicit
+        paths) and resolves them into a list of absolute paths within the
+        `DataStore`.
+
+        Args:
+            source: Source specification (country, geometry, points, or paths).
+            **kwargs: Additional parameters for resolving paths.
+
+        Returns:
+            A list of resolved file paths.
+        """
+        if (
+            isinstance(source, Path)
+            or (
+                isinstance(source, (list, tuple, set))
+                and all(isinstance(p, (str, Path)) for p in source)
+            )
+            or (isinstance(source, str) and "." in source)
+        ):
+            return self.resolve_by_paths(source)
+
+        data_units = self.config.get_relevant_data_units(source, **kwargs)
+        data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
+
+        self.logger.info(f"Resolved {len(data_paths)} paths!")
+        return data_paths
+
+    def resolve_by_paths(
+        self, paths: Union[Path, str, List[Union[str, Path]]], **kwargs
+    ) -> List[Union[str, Path]]:
+        """
+        Return explicit paths as a list.
+        """
+        if isinstance(paths, (str, Path)):
+            return [paths]
+        return list(paths)
+
+    def _pre_load_hook(self, source_data_path, **kwargs) -> Any:
+        """Hook called before loading data."""
+        if isinstance(source_data_path, (Path, str)):
+            source_data_path = [source_data_path]
+
+        if not source_data_path:
+            self.logger.warning("No paths found!")
+            return []
+
+        source_data_paths = [str(file_path) for file_path in source_data_path]
+
+        self.logger.info(
+            f"Pre-loading validation complete for {len(source_data_path)} files"
+        )
+        return source_data_paths
+
+    def _post_load_hook(self, data, **kwargs) -> Any:
+        """Hook called after loading data."""
+        if isinstance(data, Iterable):
+            if len(data) == 0:
+                self.logger.warning("No data was loaded from the source files")
+                return data
+
+            self.logger.info(f"{len(data)} valid data records.")
+
+        self.logger.info(f"Post-load processing complete.")
+
+        return data
+
+    def _check_file_exists(self, file_paths: List[Union[str, Path]]):
+        """
+        Validate that all specified files exist in the data store.
+
+        Args:
+            file_paths: List of file paths to check.
+
+        Raises:
+            RuntimeError: If any file does not exist in the configured data store.
+        """
+        for file_path in file_paths:
+            if not self.data_store.file_exists(str(file_path)):
+                raise RuntimeError(
+                    f"Source file does not exist in the data store: {file_path}"
+                )
+
+    def _load_raster_data(
+        self,
+        raster_paths: List[Union[str, Path]],
+        merge_rasters: bool = False,
+        **kwargs,
+    ) -> Union[List[TifProcessor], TifProcessor]:
+        """
+        Initialize TifProcessors for one or more raster files.
+
+        Args:
+            raster_paths: List of file paths to raster files.
+            merge_rasters: If True, combines all rasters into a single `TifProcessor`.
+            **kwargs: Additional parameters for TifProcessor initialization.
+
+        Returns:
+            Single TifProcessor (if merged) or list of TifProcessors.
+        """
+        if merge_rasters or len(raster_paths) == 1:
+            self.logger.info(
+                f"Merging {len(raster_paths)} rasters into a single TifProcessor."
+            )
+            return TifProcessor(raster_paths, self.data_store, **kwargs)
+        else:
+            return [
+                TifProcessor(data_path, self.data_store, **kwargs)
+                for data_path in raster_paths
+            ]
+
+    def _load_tabular_data(
+        self,
+        file_paths: List[Union[str, Path]],
+        read_function: Callable = read_dataset,
+        show_progress: bool = True,
+        progress_desc: Optional[str] = None,
+        **kwargs,
+    ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
+        """
+        Load and consolidate tabular data from multiple files.
+
+        Args:
+            file_paths: List of file paths to load.
+            read_function: Callable used to read individual files.
+            show_progress: If True, displays a progress bar.
+            progress_desc: Custom description for the progress bar.
+            **kwargs: Additional parameters for the read function.
+
+        Returns:
+            The concatenated DataFrame or GeoDataFrame.
+        """
+        all_data = []
+        iterator: Iterable = file_paths
+        if show_progress and file_paths:
+            iterator = tqdm(
+                file_paths,
+                desc=progress_desc or "Loading tabular data",
+                total=len(file_paths),
+            )
+
+        for file_path in iterator:
+            all_data.append(
+                read_function(file_path, data_store=self.data_store, **kwargs)
+            )
+
+        if not all_data:
+            return pd.DataFrame()
+        result = pd.concat(all_data, ignore_index=True)
+        return result
+
+    def crop_to_geometry(self, data, geometry, predicate="intersects", **kwargs):
+        """
+        Crop loaded data (raster or tabular) to a specific geometry.
+
+        Args:
+            data: The data object to crop (DataFrame, GDF, or TifProcessor).
+            geometry: The spatial filter geometry.
+            predicate: Spatial predicate for tabular filtering ('intersects', 'within', etc.).
+            **kwargs: Additional parameters for cropping (e.g., crs, crop).
+
+        Returns:
+            The cropped data object.
+        """
+
+        # Project geometry to the projection of the data if data has projection
+        geom_crs = kwargs.pop("crs", "EPSG:4326")
+        if hasattr(data, "crs") and data.crs != geom_crs:
+            geometry = (
+                gpd.GeoDataFrame(geometry=[geometry], crs=geom_crs)
+                .to_crs(data.crs)
+                .geometry[0]
+            )
+
+        # Tabular (GeoDataFrame) case
+        if isinstance(data, (pd.DataFrame, gpd.GeoDataFrame)):
+            if isinstance(data, pd.DataFrame):
+                from gigaspatial.processing.geo import convert_to_geodataframe
+
+                try:
+                    data = convert_to_geodataframe(data, **kwargs)
+                except:
+                    return data
+
+            # Clip to geometry
+            return data[getattr(data.geometry, predicate)(geometry)]
+
+        # Raster case
+        if isinstance(data, TifProcessor):
+            clip_kwargs = {
+                k: v
+                for k, v in kwargs.items()
+                if k
+                in (
+                    "crop",
+                    "all_touched",
+                    "invert",
+                    "nodata",
+                    "pad",
+                    "pad_width",
+                    "return_clipped_processor",
+                )
+            }
+            return data.clip_to_geometry(geometry=geometry, **clip_kwargs)
+
+        return data
+
+    @abstractmethod
+    def load_from_paths(
+        self, source_data_path: List[Union[str, Path]], **kwargs
+    ) -> Any:
+        """
+        Abstract method to load source data from paths.
+
+        Args:
+            source_data_path: List of source paths
+            **kwargs: Additional parameters for data loading
+
+        Returns:
+            Loaded data (DataFrame, GeoDataFrame, etc.)
+        """
+        pass
+
+    def load(
+        self,
+        source: Union[
+            str,
+            List[Union[Tuple[float, float], Point]],
+            BaseGeometry,
+            gpd.GeoDataFrame,
+            Path,
+            str,
+            List[Union[str, Path]],
+        ],
+        crop_to_source: bool = False,
+        **kwargs,
+    ) -> Any:
+        """
+        Orchestrate the resolution and loading of data from a source.
+
+        Standardizes the workflow: Resolve Paths -> Pre-load Hook -> Load ->
+        Post-load Hook -> Optional Crop.
+
+        Args:
+            source: specification of the data to load.
+            crop_to_source: If True, the data is spatially cropped to the source.
+            **kwargs: Additional parameters for loading.
+
+        Returns:
+            The loaded data object.
+        """
+        source_data_paths = self.resolve_source_paths(source, **kwargs)
+        if not source_data_paths:
+            self.logger.warning(
+                "No source data paths resolved. There's no matching data to load!"
+            )
+            return None
+        processed_paths = self._pre_load_hook(source_data_paths, **kwargs)
+        if not processed_paths:
+            self.logger.warning("No valid paths to load data from.")
+            return None
+
+        loaded_data = self.load_from_paths(processed_paths, **kwargs)
+        loaded_data = self._post_load_hook(loaded_data, **kwargs)
+
+        # Apply cropping if requested
+        if crop_to_source and loaded_data is not None:
+            search_geometry = self.config.get_cached_search_geometry(source)
+            geom_crs = getattr(self.config, "crs", "EPSG:4326")
+            if search_geometry is not None and isinstance(
+                search_geometry, BaseGeometry
+            ):
+                loaded_data = self.crop_to_geometry(
+                    loaded_data, search_geometry, crs=geom_crs
+                )
+            else:
+                # If no cached geometry, compute it
+                search_geometry = self.config.extract_search_geometry(source, **kwargs)
+                if isinstance(search_geometry, BaseGeometry):
+                    loaded_data = self.crop_to_geometry(
+                        loaded_data, search_geometry, crs=geom_crs
+                    )
+
+        return loaded_data
