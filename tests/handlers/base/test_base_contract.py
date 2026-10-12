@@ -14,9 +14,10 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import pytest
-from shapely.geometry import box
+from shapely.geometry import Point, box
 
-from _fakes import TILES, FakeHandler, tile_rows
+from _fakes import TILES, FakeConfig, FakeHandler, tile_rows
+from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 # Intersects only tile t00 and contains only its lower-left point.
 SMALL_AOI = box(0.0, 0.0, 0.5, 0.5)
@@ -49,6 +50,42 @@ def fake_country(monkeypatch):
         return _Boundary()
 
     monkeypatch.setattr(boundaries.AdminBoundaries, "create", staticmethod(_create))
+
+
+@pytest.fixture
+def small_country(monkeypatch):
+    """Make 'FAK' resolve to a boundary holding only t00's lower-left point."""
+    from gigaspatial.handlers import boundaries
+
+    class _Boundary:
+        def to_geoms(self):
+            return [SMALL_AOI]
+
+    monkeypatch.setattr(
+        boundaries.AdminBoundaries,
+        "create",
+        staticmethod(lambda country_code=None, **kwargs: _Boundary()),
+    )
+
+
+class CountryFileConfig(FakeConfig):
+    units_match_country = True
+
+
+class FilterConfig(FakeConfig):
+    """Resolves a ``{"tiles": [...]}`` filter dict, which has no geometry."""
+
+    def get_search_key(self, source, **kwargs):
+        return source["tiles"]
+
+    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+        return list(search_key)
+
+
+class MercatorConfig(FakeConfig):
+    @property
+    def crs(self) -> str:
+        return "EPSG:3857"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,6 +258,92 @@ def test_crop_reprojects_geodataframe_source(handler):
     data = handler.load_data(gdf, crop_to_source=True, crs="EPSG:4326")
 
     assert len(data) == 1
+
+
+def test_crop_reads_bare_geometry_in_crs_option(handler):
+    aoi_3857 = gpd.GeoSeries([SMALL_AOI], crs=4326).to_crs(3857).iloc[0]
+
+    data = handler.load_data(aoi_3857, crop_to_source=True, crs="EPSG:3857")
+
+    assert list(data["tile_id"]) == ["t00"]
+    assert data.iloc[0]["latitude"] == pytest.approx(0.1)
+
+
+def test_crop_country_source(handler, small_country):
+    data = handler.load_data("FAK", crop_to_source=True)
+
+    assert len(data) == 1
+
+
+def test_crop_skips_country_source_when_units_match_country(tmp_path, small_country):
+    config = CountryFileConfig(base_path=tmp_path / "fake")
+    handler = FakeHandler(base_path=tmp_path / "fake", config=config)
+
+    data = handler.load_data("FAK", crop_to_source=True)
+
+    assert len(data) == 2
+
+
+def test_crop_skips_path_source(handler):
+    handler.ensure_data_available(SMALL_AOI)
+    path = handler.config.get_data_unit_path("t00")
+
+    data = handler.load_data(path, crop_to_source=True)
+
+    assert len(data) == 2
+
+
+def test_crop_raises_for_source_without_geometry(tmp_path):
+    handler = FakeHandler(
+        base_path=tmp_path / "fake", config=FilterConfig(base_path=tmp_path / "fake")
+    )
+
+    assert len(handler.load_data({"tiles": ["t00"]})) == 2
+    with pytest.raises(ValueError, match="needs a source with a geometry"):
+        handler.load_data({"tiles": ["t00"]}, crop_to_source=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Search key and search geometry
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_search_geometry_is_in_config_crs(tmp_path):
+    config = MercatorConfig(base_path=tmp_path)
+    expected = gpd.GeoSeries([SMALL_AOI], crs=4326).to_crs(3857).iloc[0]
+
+    geometry = config.extract_search_geometry(SMALL_AOI)
+
+    assert geometry.equals_exact(expected, tolerance=1e-6)
+
+
+def test_search_key_defaults_to_search_geometry(handler):
+    assert handler.config.get_search_key(SMALL_AOI).equals(SMALL_AOI)
+
+
+def test_extract_search_geometry_rejects_sources_without_geometry(handler):
+    with pytest.raises(ValueError, match="Unsupported source type"):
+        handler.config.extract_search_geometry({"tiles": ["t00"]})
+
+
+@pytest.mark.parametrize(
+    "source, kind",
+    [
+        ("KEN", SourceKind.COUNTRY),
+        ("St. Lucia", SourceKind.COUNTRY),
+        ("t00.csv", SourceKind.PATHS),
+        ("data/t00", SourceKind.PATHS),
+        (Path("t00"), SourceKind.PATHS),
+        (["a.tif", Path("b.tif")], SourceKind.PATHS),
+        ([(0.1, 0.1), Point(0.2, 0.2)], SourceKind.POINTS),
+        (SMALL_AOI, SourceKind.GEOMETRY),
+        (gpd.GeoDataFrame(geometry=[SMALL_AOI]), SourceKind.GEODATAFRAME),
+        (pd.DataFrame({"latitude": [0.1], "longitude": [0.1]}), SourceKind.DATAFRAME),
+        ({"url": ["KEN"]}, SourceKind.OTHER),
+    ],
+)
+def test_classify_source(source, kind):
+    assert classify_source(source) is kind
 
 
 # ─────────────────────────────────────────────────────────────────────────────

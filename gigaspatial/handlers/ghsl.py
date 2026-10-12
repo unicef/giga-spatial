@@ -238,20 +238,16 @@ class GHSLDataConfig(BaseHandlerConfig):
         """
         return "EPSG:4326" if self.coord_system == CoordSystem.WGS84 else "ESRI:54009"
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> List[dict]:
+    def get_relevant_data_units_by_key(
+        self, search_key: BaseGeometry, **kwargs
+    ) -> List[str]:
         """
-        Return intersecting tiles for a given geometry or GeoDataFrame.
+        Return the IDs of the tiles intersecting a search geometry.
 
-        Notes
-        -----
-        - The input ``geometry`` is expected to already be in the GHSL CRS
-          (see :meth:`extract_search_geometry`), i.e. ``self.crs``.
-        - Callers should normally use :meth:`get_relevant_data_units`, which
-          routes through ``extract_search_geometry`` and ensures CRS
-          normalization, instead of calling this method directly.
+        The search geometry is in ``self.crs`` (see
+        :meth:`BaseHandlerConfig.extract_search_geometry`).
         """
+        geometry = search_key
         # Defensive: if tiles have a CRS different from the GHSL config CRS,
         # reproject the input geometry to the tiles CRS.
         tiles_crs = getattr(self.tiles_gdf, "crs", None)
@@ -284,56 +280,6 @@ class GHSLDataConfig(BaseHandlerConfig):
         )
 
         return tile_path
-
-    def extract_search_geometry(self, source, **kwargs):
-        """
-        Extract a canonical search geometry for GHSL and normalize it to
-        the GHSL grid CRS.
-
-        Parameters
-        ----------
-        source :
-            Any supported source type from ``BaseHandlerConfig``:
-            country code (str), GeoDataFrame, shapely geometry, or iterable
-            of points.
-        crs : str, optional
-            CRS of the input coordinates when the source itself does not
-            carry CRS information (e.g. bare shapely geometry or list of
-            points). For GeoDataFrames, ``source.crs`` is preferred.
-
-        Returns
-        -------
-        shapely.geometry.base.BaseGeometry
-            Geometry normalized to the GHSL CRS (``self.crs``).
-        """
-        # Treat any passed ``crs`` as the *source* CRS for CRS-less inputs.
-        source_crs = kwargs.pop("crs", None)
-
-        # Determine the CRS of the input coordinates before we lose that
-        # information in the base implementation (which returns a bare
-        # shapely geometry without CRS metadata).
-        #
-        # - If the source is a GeoDataFrame, trust its .crs
-        # - Else, fall back to the explicitly provided source_crs
-        # - If neither is available, assume WGS84 for raw lon/lat coords
-        if isinstance(source, gpd.GeoDataFrame) and source.crs is not None:
-            geom_crs = source.crs
-        else:
-            geom_crs = source_crs or "EPSG:4326"
-
-        # Let the base class build a single geometry (union, etc.) in the
-        # same coordinate space; we will reproject afterwards if needed.
-        geometry = super().extract_search_geometry(source, **kwargs)
-
-        # Normalize into the GHSL CRS if needed.
-        if geom_crs != self.crs:
-            geometry = (
-                gpd.GeoDataFrame(geometry=[geometry], crs=geom_crs)
-                .to_crs(self.crs)
-                .geometry[0]
-            )
-
-        return geometry
 
     def compute_dataset_url(self, tile_id=None) -> str:
         """Compute the download URL for a GHSL dataset."""

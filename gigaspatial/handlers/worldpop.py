@@ -854,6 +854,7 @@ class WPPopulationConfig(BaseHandlerConfig):
     """
 
     client = WorldPopRestClient()
+    units_match_country = True
 
     # ── Module-level constants re-exported as class attributes ───────────────
     AVAILABLE_YEARS_GR1: List[int] = Field(
@@ -968,14 +969,14 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     # ── Path resolution ───────────────────────────────────────────────────────
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: str, **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: str, **kwargs
     ) -> List[Dict[str, Any]]:
         """
-        Identify relevant WorldPop datasets for a given geographic area.
+        Identify relevant WorldPop datasets for a country.
 
         Args:
-            geometry: ISO 3166-1 alpha-3 country code.
+            search_key: ISO 3166-1 alpha-3 country code.
             **kwargs: Additional filtering context.
 
         Returns:
@@ -985,12 +986,12 @@ class WPPopulationConfig(BaseHandlerConfig):
             "dug" if self.project == "degree_of_urbanization" else self.project
         )
         datasets = self.client.search_datasets(
-            api_dataset_type, self.dataset_category, geometry, self.year
+            api_dataset_type, self.dataset_category, search_key, self.year
         )
 
         if not datasets:
             raise RuntimeError(
-                f"No WorldPop datasets found for country: {geometry}, "
+                f"No WorldPop datasets found for country: {search_key}, "
                 f"project: {self.project}, category: {self.dataset_category}, year: {self.year}. "
                 "Please check the configuration parameters."
             )
@@ -1124,9 +1125,9 @@ class WPPopulationConfig(BaseHandlerConfig):
             _logger=self.logger,
         )
 
-    # ── Geometry extraction ───────────────────────────────────────────────────
+    # ── Search key ────────────────────────────────────────────────────────────
 
-    def extract_search_geometry(self, source, **kwargs) -> str:
+    def get_search_key(self, source, **kwargs) -> str:
         """
         Identify the country code from a geographic source for dataset search.
 

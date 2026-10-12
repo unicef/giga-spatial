@@ -33,6 +33,7 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandler,
 )
+from gigaspatial.handlers.base.source import SourceKind, classify_source
 from gigaspatial.config import config as global_config
 
 
@@ -58,6 +59,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
     MANIFEST_URL: Optional[str] = None
 
     MERCATOR_ZOOM_LEVEL: int = 9
+    units_match_country = True
 
     base_path: Path = global_config.get_path("microsoft_global_buildings", "bronze")
 
@@ -268,30 +270,24 @@ class MSBuildingsConfig(BaseHandlerConfig):
 
         return location_mapping
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: Union[str, BaseGeometry], **kwargs
     ) -> List[dict]:
         """
-        Find Microsoft Building tiles intersecting a geographic area.
+        Find Microsoft Building tiles for a country or a geographic area.
 
-        If the source is a country code, it first attempts to look up tiles
-        via the location mapping. Otherwise, it uses Mercator quadkey overlaps.
+        A country is looked up in the location mapping first. Otherwise, and
+        for geometries, tiles are found by Mercator quadkey overlap.
 
         Args:
-            geometry: Spatial area of interest (geometry, GDF, or country code).
+            search_key: ISO 3166-1 alpha-3 country code, or a search geometry.
             **kwargs: Additional filtering parameters.
 
         Returns:
             List of tile records containing quadkey, URL, and country metadata.
         """
-        source = geometry
-
-        if isinstance(source, str):
-            try:
-                country_code = pycountry.countries.lookup(source).alpha_3
-            except:
-                raise ValueError("Invalid`country` value!")
-
+        if isinstance(search_key, str):
+            country_code = search_key
             mask = self.df_tiles["country"] == country_code
 
             if any(mask):
@@ -309,7 +305,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
             )
         else:
             source_tiles = MercatorTiles.from_spatial(
-                source=source, zoom_level=self.MERCATOR_ZOOM_LEVEL
+                source=search_key, zoom_level=self.MERCATOR_ZOOM_LEVEL
             )
 
         filtered_tiles = source_tiles.filter_quadkeys(self.df_tiles.quadkey)
@@ -338,9 +334,17 @@ class MSBuildingsConfig(BaseHandlerConfig):
             return [self.get_data_unit_path(row) for _, row in units.iterrows()]
         return super().get_data_unit_paths(units)
 
-    def extract_search_geometry(self, source, **kwargs):
-        """Override the method since geometry will be extracted by MercatorTiles"""
-        return source
+    def get_search_key(self, source, **kwargs) -> Union[str, BaseGeometry]:
+        """
+        Return the ISO 3166-1 alpha-3 code of a country source, so its tiles
+        can be looked up by country; other sources use the search geometry.
+        """
+        if classify_source(source) is SourceKind.COUNTRY:
+            try:
+                return pycountry.countries.lookup(source).alpha_3
+            except LookupError:
+                raise ValueError(f"Invalid country: {source}")
+        return self.extract_search_geometry(source, **kwargs)
 
 
 class MSBuildingsDownloader(BaseHandlerDownloader):

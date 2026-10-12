@@ -46,7 +46,9 @@ class OpenCellIDConfig(BaseHandlerConfig):
     api_token: str = Field(default=global_config.OPENCELLID_ACCESS_TOKEN)
     download_url: str = "https://opencellid.org/downloads.php?token="
 
-    def extract_search_geometry(self, source, **kwargs) -> str:
+    units_match_country = True
+
+    def get_search_key(self, source, **kwargs) -> str:
         """
         Identify the country alpha-2 code from a geographic source.
 
@@ -68,21 +70,21 @@ class OpenCellIDConfig(BaseHandlerConfig):
         except LookupError:
             raise ValueError(f"Invalid country provided: {source}")
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: str, **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: str, **kwargs
     ) -> List[dict]:
         """
         Discover download links for a specific country by screen-scraping.
 
         Args:
-            geometry: ISO 3166-1 alpha-2 country code.
+            search_key: ISO 3166-1 alpha-2 country code.
             **kwargs: Additional parameters.
 
         Returns:
             A list of dictionaries containing 'url' and 'country'.
         """
         url = f"{self.download_url}{self.api_token}"
-        country_alpha2 = geometry.upper()
+        country_alpha2 = search_key.upper()
 
         try:
             self.logger.info(f"Fetching download links for country: {country_alpha2}")

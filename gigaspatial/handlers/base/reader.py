@@ -15,6 +15,7 @@ from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.processing.tif_processor import TifProcessor
 from gigaspatial.handlers.base.config import BaseHandlerConfig
+from gigaspatial.handlers.base.source import SourceKind, classify_source, is_path_source
 
 
 class BaseHandlerReader(ABC):
@@ -78,14 +79,7 @@ class BaseHandlerReader(ABC):
         Returns:
             A list of resolved file paths.
         """
-        if (
-            isinstance(source, Path)
-            or (
-                isinstance(source, (list, tuple, set))
-                and all(isinstance(p, (str, Path)) for p in source)
-            )
-            or (isinstance(source, str) and "." in source)
-        ):
+        if is_path_source(source):
             return self.resolve_by_paths(source)
 
         data_units = self.config.get_relevant_data_units(source, **kwargs)
@@ -311,11 +305,17 @@ class BaseHandlerReader(ABC):
 
         Args:
             source: specification of the data to load.
-            crop_to_source: If True, the data is spatially cropped to the source.
+            crop_to_source: If True, the data is cropped to the search geometry
+                of the source. Path sources are never cropped, and neither are
+                country sources when ``config.units_match_country`` is True.
             **kwargs: Additional parameters for loading.
 
         Returns:
             The loaded data object.
+
+        Raises:
+            ValueError: If cropping is requested for a source with no
+                geometry, such as a filter dict.
         """
         source_data_paths = self.resolve_source_paths(source, **kwargs)
         if not source_data_paths:
@@ -331,22 +331,24 @@ class BaseHandlerReader(ABC):
         loaded_data = self.load_from_paths(processed_paths, **kwargs)
         loaded_data = self._post_load_hook(loaded_data, **kwargs)
 
-        # Apply cropping if requested
         if crop_to_source and loaded_data is not None:
-            search_geometry = self.config.get_cached_search_geometry(source)
-            geom_crs = getattr(self.config, "crs", "EPSG:4326")
-            if search_geometry is not None and isinstance(
-                search_geometry, BaseGeometry
-            ):
-                loaded_data = self.crop_to_geometry(
-                    loaded_data, search_geometry, crs=geom_crs
-                )
-            else:
-                # If no cached geometry, compute it
-                search_geometry = self.config.extract_search_geometry(source, **kwargs)
-                if isinstance(search_geometry, BaseGeometry):
-                    loaded_data = self.crop_to_geometry(
-                        loaded_data, search_geometry, crs=geom_crs
-                    )
+            loaded_data = self._crop_to_source(loaded_data, source, **kwargs)
 
         return loaded_data
+
+    def _crop_to_source(self, data, source, **kwargs):
+        kind = classify_source(source)
+        if kind is SourceKind.PATHS:
+            self.logger.debug("Path source: data is returned uncropped")
+            return data
+        if kind is SourceKind.COUNTRY and self.config.units_match_country:
+            self.logger.debug("Data units already match the country: no crop")
+            return data
+
+        if kind is SourceKind.OTHER:
+            raise ValueError(
+                f"crop_to_source=True needs a source with a geometry, got {type(source)}"
+            )
+
+        geometry = self.config.get_search_geometry(source, **kwargs)
+        return self.crop_to_geometry(data, geometry, crs=self.config.crs)

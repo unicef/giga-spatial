@@ -108,6 +108,8 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
         "s3://us-west-2.opendata.source.coop/vida/google-microsoft-open-buildings"
     )
 
+    units_match_country = True
+
     # Metadata
     dataset_name: str = "Google-Microsoft Combined Buildings"
     dataset_id: str = "google_microsoft_combined_buildings"
@@ -128,16 +130,17 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
             f"partition_strategy={self.partition_strategy}"
         )
 
-    def get_relevant_data_units_by_geometry(self, geometry, **kwargs):
+    def get_relevant_data_units_by_key(self, search_key: str, **kwargs):
         """
-        Get relevant data partitions (by country or S2 grid) that intersect geometry.
+        Get the data partitions (whole country or its S2 grid cells) of a country.
 
         Args:
-            geometry: Shapely geometry object
+            search_key: ISO 3166-1 alpha-3 country code.
 
         Returns:
-            List of partition identifiers (ISO codes or S2 grid IDs)
+            List of partition URLs/URIs.
         """
+        iso3 = search_key
 
         access_uri = (
             self.storage_url if self.download_strategy == "https" else self.cloud_uri
@@ -145,10 +148,10 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
 
         if self.partition_strategy == "s2_grid":
             s2_tiles = get_available_s2_files(
-                iso3=geometry, data_format=self.data_format
+                iso3=iso3, data_format=self.data_format
             )
             return [
-                f"{access_uri}/{self.data_format}/by_country_s2/country_iso={geometry}/{tile}"
+                f"{access_uri}/{self.data_format}/by_country_s2/country_iso={iso3}/{tile}"
                 for tile in s2_tiles
             ]
 
@@ -161,7 +164,7 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
                 file_ext = ".pmtiles"
 
         return [
-            f"{access_uri}/{self.data_format}/by_country/country_iso={geometry}/{geometry}{file_ext}"
+            f"{access_uri}/{self.data_format}/by_country/country_iso={iso3}/{iso3}{file_ext}"
         ]
 
     def get_available_units(self, iso3: str = None) -> List[str]:
@@ -177,7 +180,7 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
 
         if iso3:
             # Get units for specific country
-            return self.get_relevant_data_units_by_geometry(iso3)
+            return self.get_relevant_data_units_by_key(iso3)
         else:
             # Get all available countries
             available_iso3s = get_available_iso3s(data_format=self.config.data_format)
@@ -185,7 +188,7 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
 
             all_units = []
             for country_iso3 in available_iso3s:
-                units = self.get_relevant_data_units_by_geometry(country_iso3)
+                units = self.get_relevant_data_units_by_key(country_iso3)
                 all_units.extend(units)
 
             return all_units
@@ -195,10 +198,10 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
             1
         ].replace("country_iso=", "")
 
-    def extract_search_geometry(self, source, **kwargs):
+    def get_search_key(self, source, **kwargs) -> str:
         """
-        Override the method since geometry extraction does not apply.
-        Returns country iso3 for url extraction
+        Return the ISO 3166-1 alpha-3 code of a country source; the data is
+        partitioned by country.
         """
         if not isinstance(source, str):
             raise ValueError(

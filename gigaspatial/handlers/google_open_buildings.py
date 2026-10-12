@@ -62,36 +62,20 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
             response.json()["features"], crs="EPSG:4326"
         )
 
-    def get_relevant_data_units(self, source, force_recompute: bool = False, **kwargs):
-        """
-        Identify data units (tiles) relevant to a specific source.
-
-        Args:
-            source: Input source identifier (country, geometry, points, or GDF).
-            force_recompute: If True, bypasses the internal cache.
-            **kwargs: Additional resolution context.
-
-        Returns:
-            A list of intersecting tile information dictionaries.
-        """
-        return super().get_relevant_data_units(
-            source, force_recompute, **{**kwargs, "crs": "EPSG:4326"}
-        )
-
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: BaseGeometry, **kwargs
     ) -> List[dict]:
         """
-        Identify S2 tiles intersecting a given geometry.
+        Identify S2 tiles intersecting a search geometry.
 
         Args:
-            geometry: The spatial filter to find relevant tiles for.
+            search_key: The search geometry, in EPSG:4326.
             **kwargs: Additional filtering parameters.
 
         Returns:
             A list of dictionaries containing tile metadata (ID, URL, Size).
         """
-        mask = (tile_geom.intersects(geometry) for tile_geom in self.tiles_gdf.geometry)
+        mask = self.tiles_gdf.geometry.intersects(search_key)
         return self.tiles_gdf.loc[mask, ["tile_id", "tile_url", "size_mb"]].to_dict(
             "records"
         )

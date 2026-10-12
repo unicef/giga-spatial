@@ -47,9 +47,9 @@ class FakeConfig(BaseHandlerConfig):
         super().__post_init__()
         self.lookups = 0
 
-    def get_relevant_data_units_by_geometry(self, geometry, **kwargs) -> List[str]:
+    def get_relevant_data_units_by_key(self, search_key, **kwargs) -> List[str]:
         self.lookups += 1
-        return [tid for tid, geom in TILES.items() if geom.intersects(geometry)]
+        return [tid for tid, geom in TILES.items() if geom.intersects(search_key)]
 
     def get_data_unit_path(self, unit: str, **kwargs) -> Path:
         return self.base_path / f"{unit}.csv"

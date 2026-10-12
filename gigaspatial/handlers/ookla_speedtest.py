@@ -136,14 +136,12 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
         """
         return [self.DATASET_URL]
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame] = None, **kwargs
-    ) -> List[str]:
+    def get_relevant_data_units_by_key(self, search_key=None, **kwargs) -> List[str]:
         """
-        Identify relevant data units by geometry.
+        Return the dataset URL; the dataset is a single global file.
 
         Args:
-            geometry: Boundary to filter by.
+            search_key: Ignored.
             **kwargs: Additional parameters.
 
         Returns:

@@ -121,15 +121,10 @@ class NasaSRTMConfig(BaseHandlerConfig):
         ew = "E" if lon >= 0 else "W"
         return f"{ns}{abs(lat):02d}{ew}{abs(lon):03d}"
 
-    def get_relevant_data_units(self, source, force_recompute: bool = False, **kwargs):
-        return super().get_relevant_data_units(
-            source, force_recompute, **{**kwargs, "crs": "EPSG:4326"}
-        )
-
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: BaseGeometry, **kwargs
     ) -> List[dict]:
-        mask = self.tile_tree.query(geometry, predicate="intersects")
+        mask = self.tile_tree.query(search_key, predicate="intersects")
         filtered_grid = [self.grid_records[i] for i in mask]
 
         return gpd.GeoDataFrame(filtered_grid, crs="EPSG:4326").to_dict("records")

@@ -2,9 +2,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Union, Tuple, Iterable
-import pandas as pd
+from typing import Any, ClassVar, List, Union, Tuple, Iterable
 import geopandas as gpd
+from pyproj import CRS
 from shapely.geometry import Point, MultiPoint
 from shapely.geometry.base import BaseGeometry
 import multiprocessing
@@ -13,6 +13,7 @@ import logging
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 
 @dataclass
@@ -23,12 +24,23 @@ class BaseHandlerConfig(ABC):
     Standardizes common fields used across all handlers, such as file paths,
     worker counts, and data store abstractions.
 
+    A source is resolved in two steps. ``get_search_key`` turns it into the
+    value the dataset's own lookup understands (by default the search
+    geometry), and ``get_relevant_data_units_by_key`` turns that key into data
+    units. The search geometry, the area used for cropping, is always built
+    by ``extract_search_geometry`` in ``crs``.
+
     Attributes:
         base_path: Root directory for the dataset's files.
         n_workers: Number of parallel workers for processing or downloading.
         data_store: Abstraction for file-system access (local or cloud).
         logger: Logger instance for tracking handler operations.
+        units_match_country: True when the dataset is published per country,
+            so data loaded for a country source already covers exactly that
+            country and is not cropped.
     """
+
+    units_match_country: ClassVar[bool] = False
 
     base_path: Path = None
     n_workers: int = multiprocessing.cpu_count()
@@ -48,13 +60,14 @@ class BaseHandlerConfig(ABC):
 
     def _cache_key(self, source, **kwargs):
         """Create a canonical cache key from source."""
-        if isinstance(source, str):
-            return ("country", source)
-        if isinstance(source, BaseGeometry):
+        kind = classify_source(source)
+        if kind in (SourceKind.COUNTRY, SourceKind.PATHS):
+            return (kind.value, str(source))
+        if kind is SourceKind.GEOMETRY:
             return ("geometry", source.wkt)
-        if isinstance(source, gpd.GeoDataFrame):
-            return ("geometry", str(source.geometry.unary_union.wkt))
-        if isinstance(source, pd.DataFrame) and not isinstance(source, gpd.GeoDataFrame):
+        if kind is SourceKind.GEODATAFRAME:
+            return ("geometry", str(source.geometry.union_all().wkt))
+        if kind is SourceKind.DATAFRAME:
             from gigaspatial.processing.geo import detect_coordinate_columns
 
             try:
@@ -66,9 +79,7 @@ class BaseHandlerConfig(ABC):
             except (ValueError, TypeError):
                 pass
             return ("dataframe", str(id(source)))
-        if isinstance(source, Iterable) and all(
-            isinstance(p, (Point, tuple)) for p in source
-        ):
+        if kind is SourceKind.POINTS:
             pt_str = tuple(
                 (p.x, p.y) if isinstance(p, Point) else tuple(p) for p in source
             )
@@ -109,23 +120,35 @@ class BaseHandlerConfig(ABC):
             units, _ = self._unit_cache[key]  # Unpack tuple, only return units
             return units
 
-        # Convert source to geometry and compute units
-        geometry = self.extract_search_geometry(source, **kwargs)
-        units = self.get_relevant_data_units_by_geometry(geometry, **kwargs)
+        search_key = self.get_search_key(source, **kwargs)
+        units = self.get_relevant_data_units_by_key(search_key, **kwargs)
 
-        # Cache both units and geometry as tuple
-        self._unit_cache[key] = (units, geometry)
+        self._unit_cache[key] = (units, search_key)
         return units
 
-    @abstractmethod
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> Any:
+    def get_search_key(self, source, **kwargs) -> Any:
         """
-        Identify data units associated with a specific geometry.
+        Turn a source into the value the dataset's unit lookup understands.
+
+        Override for datasets indexed by something other than area, such as a
+        country code. The default is the search geometry.
 
         Args:
-            geometry: The spatial filter to find relevant units for.
+            source: Input source (country, geometry, points, DataFrame or GDF).
+            **kwargs: Additional parameters (e.g., ``crs`` of the source).
+
+        Returns:
+            The search key passed to ``get_relevant_data_units_by_key``.
+        """
+        return self.extract_search_geometry(source, **kwargs)
+
+    @abstractmethod
+    def get_relevant_data_units_by_key(self, search_key: Any, **kwargs) -> Any:
+        """
+        Identify data units associated with a search key.
+
+        Args:
+            search_key: The value returned by ``get_search_key``.
             **kwargs: Additional filtering parameters.
 
         Returns:
@@ -166,60 +189,71 @@ class BaseHandlerConfig(ABC):
 
         return [self.get_data_unit_path(unit=unit, **kwargs) for unit in units]
 
-    def extract_search_geometry(self, source, **kwargs):
+    def extract_search_geometry(self, source, **kwargs) -> BaseGeometry:
         """
-        Extract a canonical geometry representation from various input types.
+        Build the search geometry of a source, in ``self.crs``.
 
-        Supports ISO-2 country codes, GeoDataFrames, Shapely geometries,
-        and lists of point coordinates.
+        The input coordinates are read in the GeoDataFrame's own CRS, else in
+        the ``crs`` option, else in EPSG:4326, and reprojected to ``self.crs``.
+        Country sources use the country's admin boundary.
 
         Args:
-            source: Input source to convert to geometry.
-            **kwargs: Additional parameters (e.g., crs for reprojection).
+            source: Country code or name, GeoDataFrame, shapely geometry,
+                DataFrame with coordinate columns, or iterable of
+                ``(lat, lon)`` pairs or ``Point`` objects.
+            **kwargs: ``crs`` is the CRS of a source that carries none.
+                Country sources forward the remaining keys to
+                ``AdminBoundaries.create``.
 
         Returns:
-            A unified Shapely geometry object representing the source.
+            A single shapely geometry in ``self.crs``.
 
         Raises:
-            ValueError: If the source type is unsupported or missing CRS.
+            ValueError: If the source has no geometry (e.g. a path or a filter
+                dict).
         """
-        if isinstance(source, str):
-            # Use the admin boundary as geometry
+        source_crs = kwargs.pop("crs", None) or "EPSG:4326"
+        kind = classify_source(source)
+
+        if kind is SourceKind.COUNTRY:
             from gigaspatial.handlers.boundaries import AdminBoundaries
 
-            return AdminBoundaries.create(country_code=source, **kwargs).to_geoms()[0]
-        elif isinstance(source, gpd.GeoDataFrame):
-            if crs := kwargs.get("crs", None):
-
-                if not source.crs:
-                    raise ValueError(
-                        "Cannot extract search geometry. Please set a crs on the source object first."
-                    )
-
-                if source.crs != crs:
-                    source = source.to_crs(crs)
-
-            return source.geometry.union_all()
-        elif isinstance(
-            source,
-            BaseGeometry,
-        ):
-            return source
-        elif isinstance(source, pd.DataFrame) and not isinstance(source, gpd.GeoDataFrame):
+            geometry = AdminBoundaries.create(
+                country_code=source, **kwargs
+            ).to_geoms()[0]
+            source_crs = "EPSG:4326"
+        elif kind is SourceKind.GEODATAFRAME:
+            if source.crs is not None:
+                source_crs = source.crs
+            geometry = source.geometry.union_all()
+        elif kind is SourceKind.GEOMETRY:
+            geometry = source
+        elif kind is SourceKind.DATAFRAME:
             from gigaspatial.processing.geo import convert_to_geodataframe
 
-            crs = kwargs.get("crs", "EPSG:4326")
-            gdf = convert_to_geodataframe(source, crs=crs)
-            return gdf.geometry.union_all()
-        elif (
-            not isinstance(source, (str, pd.DataFrame))
-            and isinstance(source, Iterable)
-            and all(isinstance(p, (Point, Iterable)) for p in source)
-        ):
-            points = [p if isinstance(p, Point) else Point(p[1], p[0]) for p in source]
-            return MultiPoint(points)
+            geometry = convert_to_geodataframe(source, crs=source_crs).geometry.union_all()
+        elif kind is SourceKind.POINTS:
+            geometry = MultiPoint(
+                [p if isinstance(p, Point) else Point(p[1], p[0]) for p in source]
+            )
         else:
             raise ValueError(f"Unsupported source type: {type(source)}")
+
+        if CRS.from_user_input(source_crs) != CRS.from_user_input(self.crs):
+            geometry = (
+                gpd.GeoSeries([geometry], crs=source_crs).to_crs(self.crs).iloc[0]
+            )
+        return geometry
+
+    def get_search_geometry(self, source, **kwargs) -> BaseGeometry:
+        """
+        Return the search geometry of a source, reusing a cached one if the
+        search key of this source is already a geometry.
+        """
+        cached = self.get_cached_search_geometry(source)
+        if isinstance(cached, BaseGeometry):
+            return cached
+        return self.extract_search_geometry(source, **kwargs)
 
     def get_cached_search_geometry(self, source):
         key = self._cache_key(source)

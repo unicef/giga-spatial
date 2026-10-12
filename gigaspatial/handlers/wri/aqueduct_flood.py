@@ -428,17 +428,13 @@ class AqueductFloodConfig(BaseHandlerConfig):
         """
         return [self.DATASET_URL]
 
-    def get_relevant_data_units_by_geometry(
-        self,
-        geometry: Union[BaseGeometry, gpd.GeoDataFrame],
-        **kwargs,
-    ) -> List[str]:
+    def get_relevant_data_units_by_key(self, search_key=None, **kwargs) -> List[str]:
         """Return the S3 download URL for the configured dataset.
 
-        Aqueduct rasters are global; geometry does not filter the units.
+        Aqueduct rasters are global; the search key does not filter the units.
 
         Args:
-            geometry: Ignored; present for interface compatibility.
+            search_key: Ignored; present for interface compatibility.
 
         Returns:
             Single-element list containing the S3 URL.

@@ -46,7 +46,6 @@ class _FakeResponse:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@breaks("step 3", "GeoDataFrame source is only reprojected when crs= is passed")
 def test_crop_reprojects_geodataframe_source_without_crs_option(tmp_path):
     from _fakes import FakeHandler
 
@@ -299,7 +298,6 @@ def test_ghsl_stored_tif_counts_as_available_without_file_ext(tmp_path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@breaks("step 3", "extract_search_geometry returns the raw source, so a GeoDataFrame is never cropped")
 def test_ms_buildings_crops_geodataframe_source(tmp_path, monkeypatch):
     from gigaspatial.grid.mercator_tiles import MercatorTiles
     from gigaspatial.handlers.microsoft_global_buildings import (

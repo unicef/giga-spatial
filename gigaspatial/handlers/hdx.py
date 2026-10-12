@@ -12,10 +12,8 @@ from pathlib import Path
 from typing import List, Optional, Union, Dict, Any
 import tempfile
 
-import geopandas as gpd
 from pydantic import Field, ConfigDict
 from pydantic.dataclasses import dataclass
-from shapely.geometry.base import BaseGeometry
 import pycountry
 
 try:
@@ -70,6 +68,8 @@ class HDXConfig(BaseHandlerConfig):
         default="gigaspatial", description="User agent for HDX API requests"
     )
     hdx_site: str = Field(default="prod", description="HDX site to use (prod or test)")
+
+    units_match_country = True
 
     # Internal state
     _hdx_configured: bool = Field(default=False, init=False)
@@ -288,11 +288,11 @@ class HDXConfig(BaseHandlerConfig):
             self.logger.error(f"Error getting dataset resources: {str(e)}")
             raise
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: Dict[str, Any], **kwargs
     ) -> List[Resource]:
         return self.get_dataset_resources(
-            filter=geometry,
+            filter=search_key,
             exact_match=kwargs.get("exact_match", False),
             token_match=kwargs.get("token_match", False),
         )
@@ -329,7 +329,7 @@ class HDXConfig(BaseHandlerConfig):
             )
         return self.data_store.list_files(dataset_folder)
 
-    def extract_search_geometry(self, source, **kwargs):
+    def get_search_key(self, source, **kwargs) -> Dict[str, Any]:
         """
         Identify filter criteria from a geographic or structural source.
 

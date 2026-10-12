@@ -13,6 +13,7 @@ from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.handlers.base.config import BaseHandlerConfig
 from gigaspatial.handlers.base.downloader import BaseHandlerDownloader
 from gigaspatial.handlers.base.reader import BaseHandlerReader
+from gigaspatial.handlers.base.source import is_path_source
 
 
 class BaseHandler(ABC):
@@ -185,16 +186,9 @@ class BaseHandler(ABC):
                 downloading. Other download errors are logged, and the
                 availability check that follows decides the return value.
         """
-        is_path_source = (
-            isinstance(source, Path)
-            or (
-                isinstance(source, (list, tuple, set))
-                and all(isinstance(p, (str, Path)) for p in source)
-            )
-            or (isinstance(source, str) and "." in source)
-        )
+        path_source = is_path_source(source)
 
-        if is_path_source:
+        if path_source:
             if isinstance(source, (str, Path)):
                 data_paths = [Path(source)]
             else:
@@ -222,7 +216,7 @@ class BaseHandler(ABC):
             self.logger.info("All required data is already available")
             return True
 
-        if is_path_source:
+        if path_source:
             self.logger.warning(
                 f"Required explicit file paths are missing: {missing_paths}. "
                 "Cannot automatically download them without an abstract source."
