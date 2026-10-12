@@ -397,11 +397,13 @@ class OoklaSpeedtestHandler(BaseHandler):
             )
         ):
             # If no source or source is a direct path, load without filtering
-            result = super().load_data(source, ensure_available, **kwargs)
+            result = super().load_data(
+                source, ensure_available=ensure_available, **kwargs
+            )
         else:
             # Load the entire dataset and then apply Mercator tile filtering
             full_dataset = super().load_data(
-                None, ensure_available, **kwargs
+                None, ensure_available=ensure_available, **kwargs
             )  # Load the full dataset (uses DATASET_URL)
 
             key = self.config._cache_key(source, **kwargs)

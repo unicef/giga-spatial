@@ -65,7 +65,7 @@ class RWIConfig(HDXConfig):
         key = self._cache_key(source, **kwargs)
         # Use token_match=True to prevent 'af' matching 'caf'
         resources = super().get_relevant_data_units(
-            source, force_recompute, token_match=True, **kwargs
+            source, force_recompute, **{"token_match": True, **kwargs}
         )
 
         if self.latest_only and len(resources) > 1:

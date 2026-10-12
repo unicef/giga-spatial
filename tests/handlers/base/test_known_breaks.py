@@ -90,17 +90,14 @@ def ookla(tmp_path):
     return SimpleNamespace(handler=handler, config=config, path=path)
 
 
-@breaks("step 2", "load_data passes ensure_available positionally into crop_to_source")
 def test_ookla_load_data_defaults_returns_full_dataset(ookla):
     assert len(ookla.handler.load_data()) == 2
 
 
-@breaks("step 2", "load_data passes ensure_available positionally into crop_to_source")
 def test_ookla_load_data_from_path(ookla):
     assert len(ookla.handler.load_data(ookla.path)) == 2
 
 
-@breaks("step 2", "ensure_available=False is bound to crop_to_source and ignored")
 def test_ookla_ensure_available_false_skips_availability_check(ookla, monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -125,7 +122,6 @@ def test_ookla_filtering_keeps_unit_cache_readable(ookla):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@breaks("step 2", "download_data_unit(self, unit) rejects forwarded kwargs")
 def test_google_ms_download_accepts_forwarded_kwargs(tmp_path, monkeypatch):
     from gigaspatial.handlers.google_ms_combined_buildings import (
         GoogleMSBuildingsConfig,
@@ -180,7 +176,6 @@ def google_open_buildings(tmp_path, monkeypatch):
     return gob.GoogleOpenBuildingsDownloader(config=config)
 
 
-@breaks("step 2", "download_data_unit(tile_info, data_type) rejects forwarded kwargs")
 def test_google_open_buildings_download_accepts_forwarded_kwargs(
     google_open_buildings,
 ):
@@ -189,9 +184,82 @@ def test_google_open_buildings_download_accepts_forwarded_kwargs(
     assert google_open_buildings.download_data_units([unit], merge_rasters=False)
 
 
-@breaks("step 2", "download_by_country forwards data_store/path into download_data_unit")
 def test_google_open_buildings_download_by_country(google_open_buildings):
     assert google_open_buildings.download_by_country("FAK")
+
+
+def test_google_open_buildings_accepts_caller_crs(google_open_buildings):
+    units = google_open_buildings.config.get_relevant_data_units(
+        box(0.2, 0.2, 0.4, 0.4), crs="EPSG:4326"
+    )
+
+    assert [u["tile_id"] for u in units] == ["abc"]
+
+
+def test_srtm_accepts_caller_crs(tmp_path):
+    from gigaspatial.handlers.nasa.srtm import NasaSRTMConfig
+
+    config = NasaSRTMConfig(
+        base_path=tmp_path, earthdata_username="u", earthdata_password="p"
+    )
+
+    units = config.get_relevant_data_units(box(36.2, -1.8, 36.4, -1.6), crs="EPSG:4326")
+
+    assert [u["tile_id"] for u in units] == ["S02E036"]
+
+
+def test_rwi_caller_can_override_token_match(monkeypatch):
+    pytest.importorskip("hdx")
+    from gigaspatial.handlers.hdx import HDXConfig
+    from gigaspatial.handlers.rwi import RWIConfig
+
+    monkeypatch.setattr(HDXConfig, "configure_hdx", lambda self: None)
+    monkeypatch.setattr(HDXConfig, "fetch_dataset", lambda self: None)
+    seen = {}
+
+    def _resources(self, filter=None, exact_match=False, token_match=False):
+        seen["token_match"] = token_match
+        return []
+
+    monkeypatch.setattr(HDXConfig, "get_dataset_resources", _resources)
+    config = RWIConfig()
+
+    config.get_relevant_data_units("KEN")
+    assert seen["token_match"] is True
+
+    config.get_relevant_data_units("KEN", force_recompute=True, token_match=False)
+    assert seen["token_match"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GHSL validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_ghsl_built_s_accepted_at_10m(tmp_path):
+    from gigaspatial.handlers.ghsl import CoordSystem, GHSLDataConfig
+
+    tiles = gpd.GeoDataFrame(
+        {"tile_id": ["R1_C1"]}, geometry=[box(0, 0, 10, 10)], crs="ESRI:54009"
+    )
+    (tmp_path / "cache").mkdir()
+    tiles.to_file(tmp_path / "cache" / "tiles_54009.geojson", driver="GeoJSON")
+
+    config = GHSLDataConfig(
+        product="GHS_BUILT_S",
+        resolution=10,
+        base_path=tmp_path,
+        data_store=LocalDataStore(),
+    )
+
+    assert (config.year, config.coord_system) == (2018, CoordSystem.Mollweide)
+
+
+def test_ghsl_rejects_10m_for_products_without_it(tmp_path):
+    from gigaspatial.handlers.ghsl import GHSLDataConfig
+
+    with pytest.raises(ValueError, match="not available at 10"):
+        GHSLDataConfig(product="GHS_POP", resolution=10, base_path=tmp_path)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

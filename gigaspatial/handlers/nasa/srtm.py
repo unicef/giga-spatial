@@ -123,7 +123,7 @@ class NasaSRTMConfig(BaseHandlerConfig):
 
     def get_relevant_data_units(self, source, force_recompute: bool = False, **kwargs):
         return super().get_relevant_data_units(
-            source, force_recompute, crs="EPSG:4326", **kwargs
+            source, force_recompute, **{**kwargs, "crs": "EPSG:4326"}
         )
 
     def get_relevant_data_units_by_geometry(

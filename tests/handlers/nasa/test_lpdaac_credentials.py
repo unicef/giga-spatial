@@ -36,7 +36,7 @@ def test_fetch_credentials_uses_basic_auth_get_flow():
     creds_resp = MagicMock()
     creds_resp.json.return_value = SAMPLE_CREDS
 
-    with patch("gigaspatial.handlers.srtm.utils.EarthdataSession") as mock_session_cls:
+    with patch("gigaspatial.handlers.nasa.utils.EarthdataSession") as mock_session_cls:
         session = mock_session_cls.return_value
         session.get.side_effect = [login_resp, creds_resp]
 
@@ -57,7 +57,7 @@ def test_fetch_credentials_raises_on_missing_redirect_location():
     login_resp = MagicMock()
     login_resp.headers = {}
 
-    with patch("gigaspatial.handlers.srtm.utils.EarthdataSession") as mock_session_cls:
+    with patch("gigaspatial.handlers.nasa.utils.EarthdataSession") as mock_session_cls:
         session = mock_session_cls.return_value
         session.get.return_value = login_resp
 
@@ -74,7 +74,7 @@ def test_fetch_credentials_raises_on_missing_response_fields():
     creds_resp = MagicMock()
     creds_resp.json.return_value = {"accessKeyId": "only-key"}
 
-    with patch("gigaspatial.handlers.srtm.utils.EarthdataSession") as mock_session_cls:
+    with patch("gigaspatial.handlers.nasa.utils.EarthdataSession") as mock_session_cls:
         session = mock_session_cls.return_value
         session.get.side_effect = [login_resp, creds_resp]
 
@@ -94,7 +94,7 @@ def test_fetch_credentials_raises_helpful_message_on_401():
     login_resp.headers = {"Location": OAUTH_URL}
     login_resp.raise_for_status.side_effect = http_error
 
-    with patch("gigaspatial.handlers.srtm.utils.EarthdataSession") as mock_session_cls:
+    with patch("gigaspatial.handlers.nasa.utils.EarthdataSession") as mock_session_cls:
         session = mock_session_cls.return_value
         session.get.return_value = login_resp
 

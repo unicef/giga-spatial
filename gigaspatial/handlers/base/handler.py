@@ -175,88 +175,97 @@ class BaseHandler(ABC):
             **kwargs: Additional parameters for unit resolution or download.
 
         Returns:
-            True if all required data is available in the DataStore, False otherwise.
+            True if all required data is available in the DataStore, False if
+            some files are still missing after the download attempt.
+
+        Raises:
+            Exception: Errors raised while resolving the source into data units
+                or paths propagate unchanged, as do programming errors
+                (``TypeError``, ``AttributeError``, ``NameError``) raised while
+                downloading. Other download errors are logged, and the
+                availability check that follows decides the return value.
         """
-        try:
-            is_path_source = (
-                isinstance(source, Path)
-                or (
-                    isinstance(source, (list, tuple, set))
-                    and all(isinstance(p, (str, Path)) for p in source)
-                )
-                or (isinstance(source, str) and "." in source)
+        is_path_source = (
+            isinstance(source, Path)
+            or (
+                isinstance(source, (list, tuple, set))
+                and all(isinstance(p, (str, Path)) for p in source)
             )
+            or (isinstance(source, str) and "." in source)
+        )
 
-            if is_path_source:
-                if isinstance(source, (str, Path)):
-                    data_paths = [Path(source)]
-                else:
-                    data_paths = [Path(p) for p in source]
-                data_units = data_paths
+        if is_path_source:
+            if isinstance(source, (str, Path)):
+                data_paths = [Path(source)]
             else:
-                # Get relevant units (cached if already computed for this source)
-                data_units = self.config.get_relevant_data_units(
-                    source, force_recompute=force_download, **kwargs
-                )
-                data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
+                data_paths = [Path(p) for p in source]
+            data_units = data_paths
+        else:
+            # Get relevant units (cached if already computed for this source)
+            data_units = self.config.get_relevant_data_units(
+                source, force_recompute=force_download, **kwargs
+            )
+            data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
 
-            # Check if data exists (unless force download)
-            if not force_download:
-                missing_paths = [
-                    path
-                    for path in data_paths
-                    if not self.data_store.file_exists(str(path))
-                ]
-            else:
-                # If force_download, treat all as missing
-                missing_paths = data_paths
+        # Check if data exists (unless force download)
+        if not force_download:
+            missing_paths = [
+                path
+                for path in data_paths
+                if not self.data_store.file_exists(str(path))
+            ]
+        else:
+            # If force_download, treat all as missing
+            missing_paths = data_paths
 
-            if not missing_paths:
-                self.logger.info("All required data is already available")
-                return True
+        if not missing_paths:
+            self.logger.info("All required data is already available")
+            return True
 
-            if is_path_source:
-                self.logger.warning(
-                    f"Required explicit file paths are missing: {missing_paths}. "
-                    "Cannot automatically download them without an abstract source."
-                )
-                return False
+        if is_path_source:
+            self.logger.warning(
+                f"Required explicit file paths are missing: {missing_paths}. "
+                "Cannot automatically download them without an abstract source."
+            )
+            return False
 
-            # Map units to paths (assumes correspondence order; adapt if needed)
-            path_to_unit = dict(zip(data_paths, data_units))
-            if force_download:
-                units_to_download = data_units
-            else:
-                units_to_download = [
-                    path_to_unit[p] for p in missing_paths if p in path_to_unit
-                ]
+        # Map units to paths (assumes correspondence order; adapt if needed)
+        path_to_unit = dict(zip(data_paths, data_units))
+        if force_download:
+            units_to_download = data_units
+        else:
+            units_to_download = [
+                path_to_unit[p] for p in missing_paths if p in path_to_unit
+            ]
 
+        try:
             if units_to_download:
                 self.downloader.download_data_units(units_to_download, **kwargs)
             else:
                 # Fallback - download by source if unit mapping isn't available
                 self.downloader.download(source, **kwargs)
+        except (TypeError, AttributeError, NameError):
+            raise
+        except Exception:
+            self.logger.error("Download failed", exc_info=True)
 
-            # After attempted download, refresh data paths in case the mapping
-            # from units to local files has changed (e.g. ZIP → extracted .tif files)
-            data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
+        # After attempted download, refresh data paths in case the mapping
+        # from units to local files has changed (e.g. ZIP → extracted .tif files)
+        data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
 
-            # After attempted download, check again
-            remaining_missing = [
-                path
-                for path in data_paths
-                if not self.data_store.file_exists(str(path))
-            ]
-            if remaining_missing:
-                self.logger.error(
-                    f"Some data still missing after download: {remaining_missing}"
-                )
-                return False
-
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to ensure data availability: {e}")
+        # After attempted download, check again
+        remaining_missing = [
+            path
+            for path in data_paths
+            if not self.data_store.file_exists(str(path))
+        ]
+        if remaining_missing:
+            self.logger.error(
+                f"Some data still missing after download: {remaining_missing}"
+            )
             return False
+
+        return True
 
     def load_data(
         self,

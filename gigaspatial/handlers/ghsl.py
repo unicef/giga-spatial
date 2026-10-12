@@ -178,7 +178,9 @@ class GHSLDataConfig(BaseHandlerConfig):
         if self.year == 2018 and self.product in ["GHS_BUILT_V", "GHS_POP", "GHS_SMOD"]:
             raise ValueError(f"{self.product} product is not available for 2018")
 
-        if self.resolution == 10 and "GHS_BUILT_H" not in self.product:
+        if self.resolution == 10 and not (
+            "GHS_BUILT_H" in self.product or self.product == "GHS_BUILT_S"
+        ):
             raise ValueError(
                 f"{self.product} product is not available at 10 (10m) resolution"
             )

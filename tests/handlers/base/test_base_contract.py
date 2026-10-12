@@ -88,6 +88,30 @@ def test_force_download_refetches_stored_units(handler):
     assert handler.downloader.downloaded == ["t00"]
 
 
+def test_ensure_propagates_resolution_errors(handler):
+    with pytest.raises(ValueError, match="Unsupported source type"):
+        handler.ensure_data_available(object())
+
+
+def test_ensure_returns_false_when_download_fails(handler):
+    def _fail(unit, **kwargs):
+        raise ConnectionError("network down")
+
+    handler.downloader.download_data_unit = _fail
+
+    assert handler.ensure_data_available(SMALL_AOI) is False
+
+
+def test_ensure_propagates_programming_errors_from_download(handler):
+    def _bad_signature(unit):
+        return None
+
+    handler.downloader.download_data_unit = _bad_signature
+
+    with pytest.raises(TypeError):
+        handler.ensure_data_available(SMALL_AOI, merge_rasters=True)
+
+
 def test_parallel_download_stores_every_unit(tmp_path):
     handler = FakeHandler(base_path=tmp_path / "fake", n_workers=2)
 

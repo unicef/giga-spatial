@@ -249,12 +249,13 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
             f"download_strategy={config.download_strategy}"
         )
 
-    def download_data_unit(self, unit: str) -> Path:
+    def download_data_unit(self, unit: str, **kwargs) -> Path:
         """
         Download a single data unit (partition file).
 
         Args:
             unit: Full URL/URI to the data unit (from get_relevant_data_units)
+            **kwargs: Ignored.
 
         Returns:
             Path to the downloaded file

@@ -75,7 +75,7 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
             A list of intersecting tile information dictionaries.
         """
         return super().get_relevant_data_units(
-            source, force_recompute, crs="EPSG:4326", **kwargs
+            source, force_recompute, **{**kwargs, "crs": "EPSG:4326"}
         )
 
     def get_relevant_data_units_by_geometry(
@@ -177,6 +177,7 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
         self,
         tile_info: Union[pd.Series, dict],
         data_type: Literal["polygons", "points"] = "polygons",
+        **kwargs,
     ) -> Optional[str]:
         """
         Download a single building data file for a specific tile.
@@ -184,6 +185,7 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
         Args:
             tile_info: Metadata dictionary or Series containing 'tile_url' and 'tile_id'.
             data_type: Geometry format ('polygons' or 'points').
+            **kwargs: Ignored.
 
         Returns:
             The local file path on success, or None if the download failed.
