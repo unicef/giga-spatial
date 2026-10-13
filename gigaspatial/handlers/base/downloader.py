@@ -1,5 +1,6 @@
 """Abstract downloader for dataset handlers (`BaseHandlerDownloader`)."""
 from abc import ABC, abstractmethod
+import functools
 from typing import Any, ClassVar, List, Optional, Iterable, Type
 import pandas as pd
 import logging
@@ -9,12 +10,7 @@ from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.handlers.base.config import BaseHandlerConfig
-from gigaspatial.handlers.base.options import (
-    DownloadOptions,
-    call_with_options,
-    option_value,
-    sort_options,
-)
+from gigaspatial.handlers.base.options import DownloadOptions, sort_options
 
 
 class BaseHandlerDownloader(ABC):
@@ -30,11 +26,10 @@ class BaseHandlerDownloader(ABC):
         data_store: Abstraction for file-system access.
         logger: Logger instance for tracking download progress.
         options_type: The `DownloadOptions` subclass ``download_data_unit``
-            takes, or None for a downloader that still takes raw keyword
-            arguments.
+            takes.
     """
 
-    options_type: ClassVar[Optional[Type[DownloadOptions]]] = None
+    options_type: ClassVar[Type[DownloadOptions]] = DownloadOptions
 
     def __init__(
         self,
@@ -62,8 +57,7 @@ class BaseHandlerDownloader(ABC):
         Download a single data unit.
 
         Must be implemented by subclasses to define the specific download
-        logic for the dataset. Downloaders without an ``options_type``
-        receive raw keyword arguments instead of ``options``.
+        logic for the dataset.
 
         Args:
             unit: Data unit identifier.
@@ -105,17 +99,16 @@ class BaseHandlerDownloader(ABC):
 
         progress = {
             "desc": "Downloading data units",
-            "disable": not option_value(options, "show_progress", True),
+            "disable": not options.show_progress,
         }
         n_workers = getattr(self.config, "n_workers", 1)
 
         if n_workers > 1:
             import multiprocessing
-            import functools
 
             with multiprocessing.Pool(n_workers) as pool:
                 download_func = functools.partial(
-                    call_with_options, self.download_data_unit, options=options
+                    self.download_data_unit, options=options
                 )
                 results = list(
                     tqdm(
@@ -126,7 +119,7 @@ class BaseHandlerDownloader(ABC):
                 )
         else:
             results = [
-                call_with_options(self.download_data_unit, unit, options=options)
+                self.download_data_unit(unit, options)
                 for unit in tqdm(units_list, **progress)
             ]
 

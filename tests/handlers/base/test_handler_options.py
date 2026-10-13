@@ -220,9 +220,45 @@ def opencellid(tmp_path):
     return OpenCellIDHandler(config=config, data_store=store)
 
 
+@pytest.fixture
+def hdx(tmp_path, monkeypatch):
+    pytest.importorskip("hdx")
+    from gigaspatial.handlers.hdx import HDXConfig, HDXHandler
+
+    seen = {}
+
+    def _resources(self, filter=None, exact_match=False, token_match=False):
+        seen.update(filter=filter, exact_match=exact_match, token_match=token_match)
+        return [{"name": "ken.csv"}]
+
+    monkeypatch.setattr(HDXConfig, "configure_hdx", lambda self: None)
+    monkeypatch.setattr(HDXConfig, "fetch_dataset", lambda self: None)
+    monkeypatch.setattr(HDXConfig, "get_dataset_resources", _resources)
+    store = LocalDataStore()
+    config = HDXConfig(dataset_name="fake", base_path=tmp_path, data_store=store)
+    handler = HDXHandler(dataset_name="fake", config=config, data_store=store)
+    handler.seen = seen
+    return handler
+
+
+@pytest.fixture
+def rwi(tmp_path, monkeypatch):
+    pytest.importorskip("hdx")
+    from gigaspatial.handlers.hdx import HDXConfig
+    from gigaspatial.handlers.rwi import RWIConfig, RWIHandler
+
+    monkeypatch.setattr(HDXConfig, "configure_hdx", lambda self: None)
+    monkeypatch.setattr(HDXConfig, "fetch_dataset", lambda self: None)
+    store = LocalDataStore()
+    config = RWIConfig(base_path=tmp_path, data_store=store)
+    return RWIHandler(config=config, data_store=store)
+
+
 @pytest.mark.parametrize(
     "name",
     [
+        "hdx",
+        "rwi",
         "ghsl",
         "worldpop",
         "srtm",
@@ -560,3 +596,34 @@ def test_opencellid_read_options_reach_the_reader(opencellid, tmp_path):
     assert not isinstance(everything, gpd.GeoDataFrame)
     assert isinstance(recent, gpd.GeoDataFrame)
     assert list(recent["lon"]) == [11.0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HDX
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_hdx_resolve_options_shape_the_resource_filter(hdx):
+    hdx.config.get_relevant_data_units("KEN", key="name", exact_match=True)
+
+    assert hdx.seen == {
+        "filter": {"name": ["KEN", "KE", "Kenya"]},
+        "exact_match": True,
+        "token_match": False,
+    }
+
+
+def test_hdx_matching_options_are_part_of_the_cache_key(hdx):
+    hdx.config.get_relevant_data_units("KEN")
+    hdx.config.get_relevant_data_units("KEN", token_match=True)
+
+    assert hdx.seen["token_match"] is True
+
+
+def test_hdx_read_kwargs_reach_read_dataset(hdx, tmp_path):
+    path = tmp_path / "data.csv"
+    path.write_text("a;b\n1;2\n")
+
+    data = hdx.load_data([str(path)], read_kwargs={"sep": ";"})
+
+    assert list(data.columns) == ["a", "b"]

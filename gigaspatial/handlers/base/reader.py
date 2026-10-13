@@ -15,7 +15,7 @@ from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.processing.tif_processor import TifProcessor
 from gigaspatial.handlers.base.config import BaseHandlerConfig
-from gigaspatial.handlers.base.options import ReadOptions, call_with_options, sort_options
+from gigaspatial.handlers.base.options import ReadOptions, sort_options
 from gigaspatial.handlers.base.source import SourceKind, classify_source, is_path_source
 
 
@@ -31,11 +31,10 @@ class BaseHandlerReader(ABC):
         config: Handler configuration object.
         data_store: Abstraction for file-system access.
         logger: Logger instance for tracking data loading.
-        options_type: The `ReadOptions` subclass ``load_from_paths`` takes, or
-            None for a reader that still takes raw keyword arguments.
+        options_type: The `ReadOptions` subclass ``load_from_paths`` takes.
     """
 
-    options_type: ClassVar[Optional[Type[ReadOptions]]] = None
+    options_type: ClassVar[Type[ReadOptions]] = ReadOptions
 
     def __init__(
         self,
@@ -284,9 +283,6 @@ class BaseHandlerReader(ABC):
         """
         Abstract method to load source data from paths.
 
-        Readers without an ``options_type`` receive raw keyword arguments
-        instead of ``options``.
-
         Args:
             source_data_path: List of source paths
             options: The read options.
@@ -346,7 +342,7 @@ class BaseHandlerReader(ABC):
             self.logger.warning("No valid paths to load data from.")
             return None
 
-        loaded_data = call_with_options(self.load_from_paths, processed_paths, options=read)
+        loaded_data = self.load_from_paths(processed_paths, read)
         loaded_data = self._post_load_hook(loaded_data)
 
         if crop_to_source and loaded_data is not None:

@@ -5,7 +5,9 @@ These walk the real handler classes rather than run them, so they need no
 data or network access.
 """
 
+import dataclasses
 import importlib
+import inspect
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,9 @@ from gigaspatial.handlers.base import (
     BaseHandlerConfig,
     BaseHandlerDownloader,
     BaseHandlerReader,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 
 HANDLER_MODULES = [
@@ -109,3 +114,52 @@ def test_handlers_do_not_touch_the_unit_cache(module_name):
     source = Path(module.__file__).read_text()
 
     assert not [name for name in CACHE_INTERNALS if f".{name}" in source]
+
+
+OPTION_HOOKS = {
+    BaseHandlerConfig: (
+        ResolveOptions,
+        (
+            "get_search_key",
+            "get_relevant_data_units_by_key",
+            "get_data_unit_path",
+            "get_stored_paths",
+        ),
+    ),
+    BaseHandlerDownloader: (DownloadOptions, ("download_data_unit",)),
+    BaseHandlerReader: (ReadOptions, ("load_from_paths",)),
+}
+OPTION_COMPONENTS = _handler_subclasses(*OPTION_HOOKS)
+
+
+def _role(cls):
+    return next(base for base in OPTION_HOOKS if issubclass(cls, base))
+
+
+@pytest.mark.parametrize("cls", OPTION_COMPONENTS, ids=lambda c: c.__qualname__)
+def test_component_declares_frozen_options(cls):
+    options_base, _ = OPTION_HOOKS[_role(cls)]
+
+    assert issubclass(cls.options_type, options_base)
+    assert cls.options_type.__dataclass_params__.frozen
+
+
+@pytest.mark.parametrize("cls", OPTION_COMPONENTS, ids=lambda c: c.__qualname__)
+def test_option_hooks_take_no_raw_kwargs(cls):
+    _, hooks = OPTION_HOOKS[_role(cls)]
+    leaky = [
+        name
+        for name in hooks
+        if name in vars(cls)
+        and any(
+            p.kind is inspect.Parameter.VAR_KEYWORD
+            for p in inspect.signature(getattr(cls, name)).parameters.values()
+        )
+    ]
+
+    assert not leaky
+
+
+@pytest.mark.parametrize("cls", HANDLER_CONFIGS, ids=lambda c: c.__qualname__)
+def test_default_resolve_options_are_hashable(cls):
+    hash(cls.options_type())

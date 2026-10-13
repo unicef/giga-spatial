@@ -8,14 +8,10 @@ entry point (``load_data``, ``reader.load``, ``downloader.download``, ...)
 sorts its keyword arguments into one options object per component with
 `sort_options` and raises ``TypeError`` for keys no component declares. Below
 the entry point only options objects are passed around.
-
-A component whose ``options_type`` is None has not been migrated yet. It gets
-the raw keyword arguments as a `LegacyKwargs` mapping, and the handler accepts
-any key. This compatibility path is removed once every handler is migrated.
 """
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, Callable, Dict, FrozenSet, Optional, Tuple, Union
+from typing import Any, Dict, FrozenSet, Optional, Tuple, Union
 
 
 @dataclass(frozen=True)
@@ -67,24 +63,14 @@ class RasterReadOptions(ReadOptions):
     merge_rasters: bool = False
 
 
-class LegacyKwargs(dict):
-    """Raw keyword arguments for a component that declares no ``options_type``."""
-
-
-def option_keys(component) -> Optional[FrozenSet[str]]:
-    """Return the option names a component accepts, or None for any key."""
-    options_type = getattr(component, "options_type", None)
-    if options_type is None:
-        return None
-    return frozenset(f.name for f in fields(options_type))
+def option_keys(component) -> FrozenSet[str]:
+    """Return the option names a component accepts."""
+    return frozenset(f.name for f in fields(component.options_type))
 
 
 def select_kwargs(kwargs: Dict[str, Any], *components) -> Dict[str, Any]:
     """Return the keyword arguments that at least one of the components accepts."""
-    keysets = [option_keys(c) for c in components]
-    if any(keys is None for keys in keysets):
-        return dict(kwargs)
-    accepted = frozenset().union(*keysets)
+    accepted = frozenset().union(*(option_keys(c) for c in components))
     return {k: v for k, v in kwargs.items() if k in accepted}
 
 
@@ -121,22 +107,5 @@ def sort_options(kwargs: Dict[str, Any], *components, entry: str) -> Tuple[Any, 
 
 
 def _build(component, kwargs: Dict[str, Any]):
-    options_type = getattr(component, "options_type", None)
-    if options_type is None:
-        return LegacyKwargs(kwargs)
     keys = option_keys(component)
-    return options_type(**{k: v for k, v in kwargs.items() if k in keys})
-
-
-def option_value(options, name: str, default: Any = None) -> Any:
-    """Read one option from an options object or a `LegacyKwargs` mapping."""
-    if isinstance(options, LegacyKwargs):
-        return options.get(name, default)
-    return getattr(options, name, default)
-
-
-def call_with_options(fn: Callable, *args, options):
-    """Call a component hook with its options, or with raw kwargs if unmigrated."""
-    if isinstance(options, LegacyKwargs):
-        return fn(*args, **options)
-    return fn(*args, options)
+    return component.options_type(**{k: v for k, v in kwargs.items() if k in keys})

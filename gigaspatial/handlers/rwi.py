@@ -8,6 +8,7 @@ Index datasets hosted on HDX. It extends the HDX handler to support:
 - Seamless conversion to geospatial tiles.
 """
 
+import dataclasses
 import logging
 from typing import Optional, Union, Literal
 from pydantic.dataclasses import dataclass
@@ -16,8 +17,21 @@ from datetime import datetime
 from pydantic import Field, ConfigDict
 
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
+from gigaspatial.handlers.hdx import (
+    HDXConfig,
+    HDXDownloader,
+    HDXReader,
+    HDXHandler,
+    HDXResolveOptions,
+)
 from gigaspatial.grid.mercator_tiles import MercatorTiles
+
+
+@dataclasses.dataclass(frozen=True)
+class RWIResolveOptions(HDXResolveOptions):
+    """HDX resolve options matching whole tokens by default."""
+
+    token_match: bool = True
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -45,10 +59,12 @@ class RWIConfig(HDXConfig):
         description="If True, only get the latest resource for each country",
     )
 
+    options_type = RWIResolveOptions
+
     def __post_init__(self):
         super().__post_init__()
 
-    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+    def get_relevant_data_units_by_key(self, search_key, options: RWIResolveOptions):
         """
         Identify the RWI resources on HDX matching a resource filter.
 
@@ -57,14 +73,12 @@ class RWIConfig(HDXConfig):
 
         Args:
             search_key: Resource filter built by ``get_search_key``.
-            **kwargs: Additional filtering parameters.
+            options: The resource matching options.
 
         Returns:
             A list of matching HDX Resource objects.
         """
-        resources = super().get_relevant_data_units_by_key(
-            search_key, **{"token_match": True, **kwargs}
-        )
+        resources = super().get_relevant_data_units_by_key(search_key, options)
 
         if self.latest_only and len(resources) > 1:
             # Find the resource with the latest creation date

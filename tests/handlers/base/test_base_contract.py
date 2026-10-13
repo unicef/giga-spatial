@@ -164,51 +164,6 @@ class MercatorConfig(FakeConfig):
         return "EPSG:3857"
 
 
-class LegacyConfig(FakeConfig):
-    """A config not yet migrated to typed options."""
-
-    options_type = None
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.received = []
-
-    def get_relevant_data_units_by_key(self, search_key, **kwargs):
-        self.received.append(kwargs)
-        return super().get_relevant_data_units_by_key(search_key, FakeResolveOptions())
-
-    def get_data_unit_path(self, unit, **kwargs):
-        return self.base_path / f"{unit}.csv"
-
-
-class LegacyDownloader(FakeDownloader):
-    options_type = None
-
-    def download_data_unit(self, unit, **kwargs):
-        return super().download_data_unit(unit, kwargs)
-
-
-class LegacyReader(FakeReader):
-    options_type = None
-
-    def load_from_paths(self, source_data_path, **kwargs):
-        self.received.append(kwargs)
-        return self._load_tabular_data(file_paths=source_data_path, show_progress=False)
-
-
-class LegacyHandler(FakeHandler):
-    def create_config(self, data_store, logger, **kwargs):
-        return LegacyConfig(
-            base_path=self._base_path, data_store=data_store, logger=logger
-        )
-
-    def create_downloader(self, config, data_store, logger, **kwargs):
-        return LegacyDownloader(config=config, data_store=data_store, logger=logger)
-
-    def create_reader(self, config, data_store, logger, **kwargs):
-        return LegacyReader(config=config, data_store=data_store, logger=logger)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Availability and download
 # ─────────────────────────────────────────────────────────────────────────────
@@ -509,7 +464,9 @@ def test_search_geometry_is_in_config_crs(tmp_path):
 
 
 def test_search_key_defaults_to_search_geometry(handler):
-    assert handler.config.get_search_key(SMALL_AOI).equals(SMALL_AOI)
+    options = handler.config.options_type()
+
+    assert handler.config.get_search_key(SMALL_AOI, options).equals(SMALL_AOI)
 
 
 def test_extract_search_geometry_rejects_sources_without_geometry(handler):
@@ -672,18 +629,6 @@ def test_options_reach_parallel_downloads(tmp_path):
 
     assert handler.ensure_data_available(box(0, 0, 2, 2), show_progress=False)
     assert all(stored(handler, unit) for unit in TILES)
-
-
-def test_unmigrated_components_still_receive_raw_kwargs(tmp_path):
-    handler = LegacyHandler(base_path=tmp_path / "fake")
-    raw = {"colour": "red", "crs": "EPSG:4326"}
-
-    data = handler.load_data(SMALL_AOI, **raw)
-
-    assert len(data) == 2
-    assert handler.config.received == [raw]
-    assert handler.downloader.received == [raw]
-    assert handler.reader.received == [raw]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

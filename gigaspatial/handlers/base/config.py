@@ -14,12 +14,7 @@ import logging
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.base.options import (
-    LegacyKwargs,
-    ResolveOptions,
-    call_with_options,
-    sort_options,
-)
+from gigaspatial.handlers.base.options import ResolveOptions, sort_options
 from gigaspatial.handlers.base.resolution import UnitCache, UnitResolution
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
@@ -46,12 +41,11 @@ class BaseHandlerConfig(ABC):
         units_match_country: True when the dataset is published per country,
             so data loaded for a country source already covers exactly that
             country and is not cropped.
-        options_type: The `ResolveOptions` subclass this config's hooks take,
-            or None for a config whose hooks still take raw keyword arguments.
+        options_type: The `ResolveOptions` subclass this config's hooks take.
     """
 
     units_match_country: ClassVar[bool] = False
-    options_type: ClassVar[Optional[Type[ResolveOptions]]] = None
+    options_type: ClassVar[Type[ResolveOptions]] = ResolveOptions
 
     base_path: Path = None
     n_workers: int = multiprocessing.cpu_count()
@@ -71,9 +65,6 @@ class BaseHandlerConfig(ABC):
 
     def _cache_key(self, source, options):
         """Create a canonical cache key from the source and its resolve options."""
-        if isinstance(options, LegacyKwargs):
-            crs = options.get("crs")
-            return (*self._source_key(source), None if crs is None else str(crs))
         return (*self._source_key(source), options)
 
     @staticmethod
@@ -149,15 +140,13 @@ class BaseHandlerConfig(ABC):
             self.logger.debug(f"Using cached units for {key[0]}: {str(key[1])[:50]}...")
             return cached.units
 
-        search_key = call_with_options(self.get_search_key, source, options=options)
-        units = call_with_options(
-            self.get_relevant_data_units_by_key, search_key, options=options
-        )
+        search_key = self.get_search_key(source, options)
+        units = self.get_relevant_data_units_by_key(search_key, options)
 
         self._units.put(key, UnitResolution(units=units, search_key=search_key))
         return units
 
-    def get_search_key(self, source, options=None, **kwargs) -> Any:
+    def get_search_key(self, source, options: ResolveOptions) -> Any:
         """
         Turn a source into the value the dataset's unit lookup understands.
 
@@ -169,20 +158,16 @@ class BaseHandlerConfig(ABC):
         Args:
             source: Input source (country, geometry, points, DataFrame or GDF).
             options: The resolve options.
-            **kwargs: Raw options, for configs without an ``options_type``.
 
         Returns:
             The search key passed to ``get_relevant_data_units_by_key``.
         """
-        return self.extract_search_geometry(source, options, **kwargs)
+        return self.extract_search_geometry(source, options)
 
     @abstractmethod
     def get_relevant_data_units_by_key(self, search_key: Any, options) -> Any:
         """
         Identify data units associated with a search key.
-
-        Configs without an ``options_type`` receive raw keyword arguments
-        instead of ``options``.
 
         Args:
             search_key: The value returned by ``get_search_key``.
@@ -193,7 +178,7 @@ class BaseHandlerConfig(ABC):
         """
         pass
 
-    def get_data_unit_path(self, unit: Any, options=None, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: Any, options: Optional[ResolveOptions] = None) -> Path:
         """
         Resolve a data unit to its single stored file.
 
@@ -202,8 +187,7 @@ class BaseHandlerConfig(ABC):
 
         Args:
             unit: The data unit identifier (e.g., a filename or tile ID).
-            options: The resolve options.
-            **kwargs: Raw options, for configs without an ``options_type``.
+            options: The resolve options; None when called outside resolution.
 
         Returns:
             The path of the unit's stored file in the data store.
@@ -212,7 +196,9 @@ class BaseHandlerConfig(ABC):
             f"{type(self).__name__} must implement get_data_unit_path or get_stored_paths"
         )
 
-    def get_stored_paths(self, unit: Any, options=None, **kwargs) -> List[Path]:
+    def get_stored_paths(
+        self, unit: Any, options: Optional[ResolveOptions] = None
+    ) -> List[Path]:
         """
         Return the files a data unit is stored as in the data store.
 
@@ -222,15 +208,12 @@ class BaseHandlerConfig(ABC):
 
         Args:
             unit: The data unit identifier.
-            options: The resolve options.
-            **kwargs: Raw options, for configs without an ``options_type``.
+            options: The resolve options; None when called outside resolution.
 
         Returns:
             The unit's stored file paths.
         """
-        if options is None:
-            options = LegacyKwargs(kwargs)
-        return [call_with_options(self.get_data_unit_path, unit, options=options)]
+        return [self.get_data_unit_path(unit, options)]
 
     def is_unit_available(self, unit: Any, paths: List[Path]) -> bool:
         """
@@ -271,9 +254,11 @@ class BaseHandlerConfig(ABC):
         return [path for unit in units for path in self._stored_paths(unit, options)]
 
     def _stored_paths(self, unit, options) -> List[Path]:
-        return call_with_options(self.get_stored_paths, unit, options=options)
+        return self.get_stored_paths(unit, options)
 
-    def extract_search_geometry(self, source, options=None, **kwargs) -> BaseGeometry:
+    def extract_search_geometry(
+        self, source, options: Optional[ResolveOptions] = None
+    ) -> BaseGeometry:
         """
         Build the search geometry of a source, in ``self.crs``.
 
@@ -288,9 +273,6 @@ class BaseHandlerConfig(ABC):
             options: The resolve options; ``crs`` is the CRS of a source that
                 carries none, and country sources read their boundary from
                 ``country_geom_path`` / ``country_data_store`` when given.
-            **kwargs: Raw options, for configs without an ``options_type``.
-                Country sources forward the keys other than ``crs`` to
-                ``AdminBoundaries.create``.
 
         Returns:
             A single shapely geometry in ``self.crs``.
@@ -299,20 +281,16 @@ class BaseHandlerConfig(ABC):
             ValueError: If the source has no geometry (e.g. a path or a filter
                 dict).
         """
-        if options is None or isinstance(options, LegacyKwargs):
-            boundary_kwargs = {**(options or {}), **kwargs}
-            source_crs = boundary_kwargs.pop("crs", None)
-        else:
-            boundary_kwargs = {
-                key: value
-                for key, value in (
-                    ("path", options.country_geom_path),
-                    ("data_store", options.country_data_store),
-                )
-                if value is not None
-            }
-            source_crs = options.crs
-        source_crs = source_crs or "EPSG:4326"
+        options = options or ResolveOptions()
+        boundary_kwargs = {
+            key: value
+            for key, value in (
+                ("path", options.country_geom_path),
+                ("data_store", options.country_data_store),
+            )
+            if value is not None
+        }
+        source_crs = options.crs or "EPSG:4326"
         kind = classify_source(source)
 
         if kind is SourceKind.COUNTRY:

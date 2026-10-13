@@ -7,9 +7,10 @@ or file format), and downloading/loading diverse humanitarian datasets (CSV,
 GeoJSON, Excel, etc.) into vectorized or tabular formats.
 """
 
+import dataclasses
 import logging
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Mapping, Optional, Union, Dict, Any
 import tempfile
 
 from pydantic import Field, ConfigDict
@@ -36,7 +37,40 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class HDXResolveOptions(ResolveOptions):
+    """
+    Resolve options of HDX datasets.
+
+    Attributes:
+        key: Resource metadata field a country source is matched against.
+        exact_match: If True, filter values must equal the metadata value.
+        token_match: If True, a filter value must match a whole token of the
+            metadata value (so 'af' does not match 'caf').
+    """
+
+    key: str = "url"
+    exact_match: bool = False
+    token_match: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class HDXReadOptions(ReadOptions):
+    """
+    Read options of HDX datasets.
+
+    Attributes:
+        read_kwargs: Keyword arguments for `read_dataset` (e.g. ``sheet_name``
+            or ``encoding``), since HDX resources come in many formats.
+    """
+
+    read_kwargs: Optional[Mapping[str, Any]] = None
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -70,6 +104,7 @@ class HDXConfig(BaseHandlerConfig):
     hdx_site: str = Field(default="prod", description="HDX site to use (prod or test)")
 
     units_match_country = True
+    options_type = HDXResolveOptions
 
     # Internal state
     _hdx_configured: bool = Field(default=False, init=False)
@@ -289,21 +324,21 @@ class HDXConfig(BaseHandlerConfig):
             raise
 
     def get_relevant_data_units_by_key(
-        self, search_key: Dict[str, Any], **kwargs
+        self, search_key: Dict[str, Any], options: HDXResolveOptions
     ) -> List[Resource]:
         return self.get_dataset_resources(
             filter=search_key,
-            exact_match=kwargs.get("exact_match", False),
-            token_match=kwargs.get("token_match", False),
+            exact_match=options.exact_match,
+            token_match=options.token_match,
         )
 
-    def get_data_unit_path(self, unit: Resource, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: Resource, options=None) -> Path:
         """
         Resolve an HDX resource to its local storage path.
 
         Args:
             unit: HDX Resource object.
-            **kwargs: Additional resolution context.
+            options: The resolve options (unused).
 
         Returns:
             Absolute local path for the resource file.
@@ -329,13 +364,13 @@ class HDXConfig(BaseHandlerConfig):
             )
         return self.data_store.list_files(dataset_folder)
 
-    def get_search_key(self, source, **kwargs) -> Dict[str, Any]:
+    def get_search_key(self, source, options: HDXResolveOptions) -> Dict[str, Any]:
         """
         Identify filter criteria from a geographic or structural source.
 
         Args:
             source: Country name/code, or a direct filter dictionary.
-            **kwargs: Resolution parameters (e.g., 'key' to filter on).
+            options: ``key`` is the resource field a country is matched on.
 
         Returns:
             A dictionary for resource filtering.
@@ -343,10 +378,7 @@ class HDXConfig(BaseHandlerConfig):
         if isinstance(source, str):
             country = pycountry.countries.lookup(source)
             values = [country.alpha_3, country.alpha_2, country.name]
-            key = kwargs.get(
-                "key", "url"
-            )  # The key to filter on in the resource data. Defaults to `url`
-            return {key: values}
+            return {options.key: values}
         elif isinstance(source, dict):
             return source
         else:
@@ -374,6 +406,8 @@ class HDXDownloader(BaseHandlerDownloader):
     temporary storage and DataStore abstraction for final persistence.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Union[HDXConfig, dict],
@@ -383,13 +417,13 @@ class HDXDownloader(BaseHandlerDownloader):
         config = config if isinstance(config, HDXConfig) else HDXConfig(**config)
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, resource: Resource, **kwargs) -> str:
+    def download_data_unit(self, resource: Resource, options: DownloadOptions) -> str:
         """
         Download a specific HDX resource.
 
         Args:
             resource: HDX Resource object to download.
-            **kwargs: Additional parameters.
+            options: The download options.
 
         Returns:
             Local path to the downloaded resource on success, or None on failure.
@@ -422,6 +456,8 @@ class HDXReader(BaseHandlerReader):
     Python objects or dataframes.
     """
 
+    options_type = HDXReadOptions
+
     def __init__(
         self,
         config: Union[HDXConfig, dict],
@@ -432,18 +468,21 @@ class HDXReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self,
+        source_data_path: List[Union[str, Path]],
+        options: Optional[HDXReadOptions] = None,
     ) -> Any:
         """
         Load data from one or more local HDX resource paths.
 
         Args:
             source_data_path: List of local paths to resource files.
-            **kwargs: Parameters passed to `read_dataset`.
+            options: ``read_kwargs`` are passed to `read_dataset`.
 
         Returns:
             Aggregated data contents (typically a dict or single DataFrame).
         """
+        kwargs = dict((options and options.read_kwargs) or {})
         if len(source_data_path) == 1:
             return read_dataset(
                 source_data_path[0], data_store=self.data_store, **kwargs
