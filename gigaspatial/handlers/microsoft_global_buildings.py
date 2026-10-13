@@ -41,7 +41,7 @@ from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class MSBuildingsConfig(BaseHandlerConfig):
     """
     Configuration for Microsoft Global Buildings dataset.

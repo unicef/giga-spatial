@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, List, Optional, Union
 import geopandas as gpd
+from pydantic import ValidationError
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 import logging
@@ -36,6 +37,7 @@ class BaseHandler(ABC):
         reader: Optional[BaseHandlerReader] = None,
         data_store: Optional[DataStore] = None,
         logger: Optional[logging.Logger] = None,
+        **config_kwargs,
     ):
         """
         Initialize the BaseHandler with optional components.
@@ -46,7 +48,20 @@ class BaseHandler(ABC):
             reader: Reader instance. If None, will be created via create_reader()
             data_store: Data store instance. Defaults to LocalDataStore if not provided
             logger: Logger instance. If not provided, creates one based on class name
+            **config_kwargs: Config fields (e.g. ``base_path``, ``n_workers``)
+                passed to create_config().
+
+        Raises:
+            TypeError: If config fields are given together with ``config``, or
+                a field is not one the config defines.
         """
+        if config is not None and config_kwargs:
+            names = ", ".join(repr(k) for k in sorted(config_kwargs))
+            raise TypeError(
+                f"{type(self).__name__}() got config fields ({names}) together "
+                "with config=; set them on the config instead"
+            )
+
         # Initialize data store first as it's used by other components
         self.data_store = data_store or LocalDataStore()
 
@@ -56,9 +71,22 @@ class BaseHandler(ABC):
         # Initialize or create config
         self._config = config
         if self._config is None:
-            self._config = self.create_config(
-                data_store=self.data_store, logger=self.logger
-            )
+            try:
+                self._config = self.create_config(
+                    data_store=self.data_store, logger=self.logger, **config_kwargs
+                )
+            except ValidationError as error:
+                unknown = [
+                    ".".join(map(str, e["loc"]))
+                    for e in error.errors()
+                    if e["type"] == "unexpected_keyword_argument"
+                ]
+                if not unknown:
+                    raise
+                names = ", ".join(repr(k) for k in unknown)
+                raise TypeError(
+                    f"{type(self).__name__}() got unexpected config field(s): {names}"
+                ) from error
 
         # Initialize or create downloader
         self._downloader = downloader

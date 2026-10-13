@@ -74,7 +74,7 @@ class HDXReadOptions(ReadOptions):
     read_kwargs: Optional[Mapping[str, Any]] = None
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class HDXConfig(BaseHandlerConfig):
     """
     Configuration for HDX dataset access.

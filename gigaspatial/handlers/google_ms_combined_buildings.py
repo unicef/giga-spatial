@@ -101,7 +101,7 @@ def get_available_s2_files(
     return sorted(list(s2_file_names))
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class GoogleMSBuildingsConfig(BaseHandlerConfig):
     """
     Configuration for Google-Microsoft Combined Buildings Handler.
@@ -207,7 +207,7 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
             return self.get_relevant_data_units_by_key(iso3)
         else:
             # Get all available countries
-            available_iso3s = get_available_iso3s(data_format=self.config.data_format)
+            available_iso3s = get_available_iso3s(data_format=self.data_format)
             self.logger.info(f"Found {len(available_iso3s)} available countries")
 
             all_units = []
@@ -598,6 +598,7 @@ class GoogleMSBuildingsHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     def create_config(

@@ -7,9 +7,11 @@ import numpy as np
 from pydantic.dataclasses import dataclass
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
+from urllib3.exceptions import InsecureRequestWarning
 from enum import Enum
 import requests
 import tempfile
+import warnings
 from pydantic import (
     HttpUrl,
     Field,
@@ -46,7 +48,7 @@ class CoordSystem(int, Enum):
     Mollweide = 54009
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"), kw_only=True)
 class GHSLDataConfig(BaseHandlerConfig):
     options_type = ResolveOptions
 
@@ -77,86 +79,64 @@ class GHSLDataConfig(BaseHandlerConfig):
     resolution: int = Field(
         default=100, description="Resolution in meters (10, 100, or 1000)"
     )
+    verify_tiles_ssl: bool = Field(
+        default=True,
+        description=(
+            "Verify the certificate when downloading the tile grid. Set False "
+            "only behind a proxy that re-signs HTTPS traffic; it affects that "
+            "one request."
+        ),
+    )
     tiles_gdf: Optional[gpd.GeoDataFrame] = Field(default=None, init=False)
 
     def __post_init__(self):
         super().__post_init__()
 
     def _load_tiles(self):
-        """Load GHSL tiles from tiles shapefile."""
-        # Check cache first
-        cache_dir = self.base_path / "cache"
-        tiles_cache = cache_dir / f"tiles_{self.coord_system.value}.geojson"
-
-        if self.data_store.file_exists(str(tiles_cache)):
-
-            try:
-                self.tiles_gdf = gpd.read_file(tiles_cache)
-                self.logger.info(f"Loaded tiles from cache")
-                return
-            except Exception:
-                self.logger.warning("Cache invalid, re-downloading")
-
-        import shutil
-        import ssl
-        import warnings
+        """Load the GHSL tile grid, from its cache in the data store when present."""
+        from gigaspatial.core.io.readers import read_dataset
         from gigaspatial.core.io.writers import write_dataset
 
-        temp_dir = None
-
-        try:
-            # Try with SSL verification first
+        tiles_cache = str(
+            self.base_path / "cache" / f"tiles_{self.coord_system.value}.geojson"
+        )
+        if self.data_store.file_exists(tiles_cache):
             try:
-                self.logger.info(
-                    "Attempting download GHSL tile grid with SSL verification"
+                self.tiles_gdf = read_dataset(tiles_cache, data_store=self.data_store)
+                self.logger.info("Loaded GHSL tile grid from cache")
+                return
+            except Exception:
+                self.logger.warning("Cached GHSL tile grid is unreadable, downloading it again")
+
+        if not self.verify_tiles_ssl:
+            self.logger.warning(
+                f"Downloading the GHSL tile grid without certificate verification: {self.TILES_URL}"
+            )
+        try:
+            with warnings.catch_warnings():
+                if not self.verify_tiles_ssl:
+                    warnings.simplefilter("ignore", InsecureRequestWarning)
+                response = requests.get(
+                    self.TILES_URL, timeout=60, verify=self.verify_tiles_ssl
                 )
-                # Set up SSL context before any requests
-                ssl._create_default_https_context = ssl._create_unverified_context
-                self.tiles_gdf = gpd.read_file(self.TILES_URL)
-                self.logger.info("Download successful with SSL verification")
-
-            except Exception as e:
-                # Fall back to requests with SSL verification
-                self.logger.warning(
-                    f"Geopandas download with SSL verification failed ({type(e).__name__}): {e}"
-                )
-                self.logger.warning(
-                    "Retrying GHSL tile grid download with requests and without SSL verification"
-                )
-
-                # Download tiles with requests
-                temp_dir = Path(tempfile.mkdtemp())
-                zip_path = temp_dir / "tiles.zip"
-
-                # Suppress SSL warnings when using verify=False
-                from urllib3.exceptions import InsecureRequestWarning
-
-                warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-
-                response = requests.get(self.TILES_URL, verify=False)
-                response.raise_for_status()
-                self.logger.info("Download successful without SSL verification")
-
-                # Write downloaded content to file
-                with open(zip_path, "wb") as f:
-                    f.write(response.content)
-
-                # Read the shapefile from the zip
-                self.tiles_gdf = gpd.read_file(zip_path)
-
-            # Cache it
-            write_dataset(self.tiles_gdf, self.data_store, str(tiles_cache))
-            self.logger.info("Tiles cached successfully")
-
+            response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download tiles: {e}")
+            hint = (
+                " If a proxy re-signs HTTPS traffic, set verify_tiles_ssl=False."
+                if isinstance(e, requests.exceptions.SSLError)
+                else ""
+            )
             raise ValueError(
-                f"Could not download GHSL tiles from {self.TILES_URL}"
+                f"Could not download the GHSL tile grid from {self.TILES_URL}.{hint}"
             ) from e
-        finally:
-            # Cleanup temp directory if it was created
-            if temp_dir is not None and temp_dir.exists():
-                shutil.rmtree(temp_dir)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = Path(temp_dir) / "tiles.zip"
+            zip_path.write_bytes(response.content)
+            self.tiles_gdf = gpd.read_file(zip_path)
+
+        write_dataset(self.tiles_gdf, self.data_store, tiles_cache)
+        self.logger.info("GHSL tile grid cached")
 
     @field_validator("year")
     def validate_year(cls, value: str) -> int:
@@ -540,6 +520,7 @@ class GHSLDataHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     @property

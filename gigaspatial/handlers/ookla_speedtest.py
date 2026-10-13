@@ -34,7 +34,7 @@ from gigaspatial.handlers.base.fetch import stream_to_store
 import logging
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"), kw_only=True)
 class OoklaSpeedtestConfig(BaseHandlerConfig):
     """
     Configuration for Ookla Speedtest dataset access.
@@ -319,6 +319,7 @@ class OoklaSpeedtestHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     def create_config(

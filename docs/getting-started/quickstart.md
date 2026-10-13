@@ -126,6 +126,8 @@ Handler-specific options include WorldPop's `sex`, `ages`, `min_age` and `max_ag
 
 With `crop_to_source=True`, the loaded data is cropped to the source's geometry. Path sources are returned as loaded. Country sources on datasets published per country (WorldPop, OpenCellID, Google-MS combined, Microsoft Buildings, HDX and RWI) are not cropped, since the files already cover that country.
 
+Config fields such as `base_path` or `n_workers` can be passed to the handler's constructor, for example `GHSLDataHandler(product="GHS_POP", base_path="/data/ghsl", n_workers=4)`. A field the config doesn't define raises a `TypeError`.
+
 Downloads run in `config.n_workers` threads. A data unit that fails to download is logged and skipped while the others continue; `ensure_data_available` then returns `False`, and `load_data` raises a `RuntimeError`.
 
 ## Storing Geospatial Data

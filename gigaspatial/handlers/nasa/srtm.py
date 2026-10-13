@@ -29,7 +29,7 @@ from gigaspatial.processing.elevation.srtm_parser import SRTMParser
 from gigaspatial.handlers.nasa.utils import EarthdataSession, LPDAACS3CredentialProvider
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class NasaSRTMConfig(BaseHandlerConfig):
     """
     Configuration for NASA SRTM .hgt tiles (30m or 90m).

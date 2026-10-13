@@ -155,7 +155,7 @@ _HADGEM2_2080_MISSING_RPS: frozenset[str] = frozenset({"rp00500", "rp01000"})
 # ---------------------------------------------------------------------------
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class AqueductFloodConfig(BaseHandlerConfig):
     """Configuration for WRI Aqueduct flood hazard raster access.
 
@@ -651,6 +651,7 @@ class AqueductFloodHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------

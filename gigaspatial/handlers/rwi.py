@@ -34,7 +34,7 @@ class RWIResolveOptions(HDXResolveOptions):
     token_match: bool = True
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class RWIConfig(HDXConfig):
     """
     Configuration for Relative Wealth Index (RWI) data access.

@@ -866,7 +866,7 @@ def resolve_dataset_category(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"), kw_only=True)
 class WPPopulationConfig(BaseHandlerConfig):
     """
     Configuration for WorldPop dataset retrieval.
@@ -1346,6 +1346,7 @@ class WPPopulationHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     def create_config(

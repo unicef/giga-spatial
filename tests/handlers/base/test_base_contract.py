@@ -26,7 +26,7 @@ from _fakes import (
     FakeResolveOptions,
     tile_rows,
 )
-from gigaspatial.handlers.base import BaseHandlerConfig, DownloadOptions
+from gigaspatial.handlers.base import BaseHandler, BaseHandlerConfig, DownloadOptions
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 # Intersects only tile t00 and contains only its lower-left point.
@@ -162,6 +162,40 @@ class MercatorConfig(FakeConfig):
     @property
     def crs(self) -> str:
         return "EPSG:3857"
+
+
+class ForwardingHandler(FakeHandler):
+    """A handler whose config is built from the constructor's config fields."""
+
+    def __init__(self, **kwargs):
+        BaseHandler.__init__(self, **kwargs)
+
+    def create_config(self, data_store, logger, **kwargs) -> FakeConfig:
+        return FakeConfig(data_store=data_store, logger=logger, **kwargs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Construction
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_config_fields_reach_create_config(tmp_path):
+    handler = ForwardingHandler(base_path=tmp_path / "fake", n_workers=3)
+
+    assert handler.config.base_path == tmp_path / "fake"
+    assert handler.config.n_workers == 3
+
+
+def test_misspelled_config_field_raises(tmp_path):
+    with pytest.raises(TypeError, match="n_worker"):
+        ForwardingHandler(base_path=tmp_path / "fake", n_worker=3)
+
+
+def test_config_fields_with_a_config_raise(tmp_path):
+    config = FakeConfig(base_path=tmp_path / "fake")
+
+    with pytest.raises(TypeError, match="'n_workers'"):
+        ForwardingHandler(config=config, n_workers=3)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

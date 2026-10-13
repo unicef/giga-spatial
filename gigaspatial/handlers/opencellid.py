@@ -55,7 +55,7 @@ class OpenCellIDReadOptions(ReadOptions):
     as_geodataframe: bool = False
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class OpenCellIDConfig(BaseHandlerConfig):
     """
     Configuration for OpenCellID dataset access.

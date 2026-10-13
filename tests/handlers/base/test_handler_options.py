@@ -290,6 +290,158 @@ def _zip_with(name: str) -> bytes:
     return archive.getvalue()
 
 
+def _tile_grid_zip(tmp_path) -> bytes:
+    grid_dir = tmp_path / "grid"
+    grid_dir.mkdir()
+    gpd.GeoDataFrame(
+        {"tile_id": ["R1_C1"]}, geometry=[box(0, 0, 10, 10)], crs="EPSG:4326"
+    ).to_file(grid_dir / "tiles.shp")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for part in grid_dir.iterdir():
+            archive.write(part, part.name)
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def ghsl_tile_requests(tmp_path, monkeypatch):
+    import requests
+
+    calls = []
+    content = _tile_grid_zip(tmp_path)
+
+    def _get(url, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(content=content, raise_for_status=lambda: None)
+
+    monkeypatch.setattr(requests, "get", _get)
+    return calls
+
+
+def _ghsl_config(base_path, **kwargs):
+    from gigaspatial.handlers.ghsl import GHSLDataConfig
+
+    return GHSLDataConfig(
+        product="GHS_POP", base_path=base_path, data_store=LocalDataStore(), **kwargs
+    )
+
+
+def test_ghsl_tile_grid_download_verifies_certificates(tmp_path, ghsl_tile_requests):
+    import ssl
+    import warnings
+
+    context, filters = ssl._create_default_https_context, list(warnings.filters)
+
+    config = _ghsl_config(tmp_path / "data")
+
+    assert list(config.tiles_gdf["tile_id"]) == ["R1_C1"]
+    assert ghsl_tile_requests[0]["verify"] is True
+    assert ghsl_tile_requests[0]["timeout"]
+    assert ssl._create_default_https_context is context
+    assert warnings.filters == filters
+    assert (tmp_path / "data" / "cache" / "tiles_4326.geojson").exists()
+
+
+def test_ghsl_tile_grid_skips_verification_only_when_asked(
+    tmp_path, ghsl_tile_requests
+):
+    import warnings
+
+    filters = list(warnings.filters)
+
+    config = _ghsl_config(tmp_path / "data", verify_tiles_ssl=False)
+
+    assert list(config.tiles_gdf["tile_id"]) == ["R1_C1"]
+    assert ghsl_tile_requests[0]["verify"] is False
+    assert warnings.filters == filters
+
+
+def test_ghsl_tile_grid_certificate_failure_names_the_opt_out(tmp_path, monkeypatch):
+    import requests
+
+    def _get(url, **kwargs):
+        raise requests.exceptions.SSLError("certificate verify failed")
+
+    monkeypatch.setattr(requests, "get", _get)
+
+    with pytest.raises(ValueError, match="verify_tiles_ssl=False"):
+        _ghsl_config(tmp_path / "data")
+
+
+def _build_handler(name, **config_fields):
+    if name == "ghsl":
+        from gigaspatial.handlers.ghsl import GHSLDataHandler
+
+        return GHSLDataHandler(product="GHS_POP", **config_fields)
+    if name == "ookla":
+        from gigaspatial.handlers.ookla_speedtest import OoklaSpeedtestHandler
+
+        return OoklaSpeedtestHandler(type="fixed", year=2023, quarter=1, **config_fields)
+    if name == "aqueduct":
+        from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
+
+        return AqueductFloodHandler(**config_fields)
+    if name == "worldpop":
+        from gigaspatial.handlers.worldpop import WPPopulationHandler
+
+        return WPPopulationHandler(**config_fields)
+    if name == "google_ms":
+        from gigaspatial.handlers.google_ms_combined_buildings import (
+            GoogleMSBuildingsHandler,
+        )
+
+        return GoogleMSBuildingsHandler(**config_fields)
+    if name == "hdx":
+        from gigaspatial.handlers.hdx import HDXHandler
+
+        return HDXHandler(dataset_name="fake", **config_fields)
+    if name == "rwi":
+        from gigaspatial.handlers.rwi import RWIHandler
+
+        return RWIHandler(**config_fields)
+
+
+CONFIG_FIELD_HANDLERS = ["ghsl", "ookla", "aqueduct", "worldpop", "google_ms", "hdx", "rwi"]
+
+
+@pytest.fixture
+def offline_handler_setup(request):
+    def _setup(name):
+        if name in ("hdx", "rwi"):
+            request.getfixturevalue(name)
+        if name == "ghsl":
+            request.getfixturevalue("ghsl_tile_requests")
+
+    return _setup
+
+
+@pytest.mark.parametrize("name", CONFIG_FIELD_HANDLERS)
+def test_handler_passes_config_fields_to_its_config(
+    name, offline_handler_setup, tmp_path
+):
+    offline_handler_setup(name)
+
+    handler = _build_handler(name, base_path=tmp_path / "data", n_workers=3)
+
+    assert handler.config.base_path == tmp_path / "data"
+    assert handler.config.n_workers == 3
+
+
+def test_ghsl_handler_passes_the_tile_certificate_opt_out(tmp_path, ghsl_tile_requests):
+    handler = _build_handler("ghsl", base_path=tmp_path / "data", verify_tiles_ssl=False)
+
+    assert handler.config.verify_tiles_ssl is False
+    assert ghsl_tile_requests[0]["verify"] is False
+
+
+@pytest.mark.parametrize("name", CONFIG_FIELD_HANDLERS)
+def test_handler_rejects_an_unknown_config_field(name, offline_handler_setup, tmp_path):
+    offline_handler_setup(name)
+
+    with pytest.raises(TypeError, match="'base_pth'"):
+        _build_handler(name, base_pth=tmp_path / "data")
+
+
 def test_ghsl_merge_rasters_reaches_the_reader(ghsl, monkeypatch):
     ghsl.store.write_file(str(ghsl.config.get_data_unit_path("R1_C1")), b"tif")
     seen = []
@@ -518,6 +670,26 @@ def test_google_ms_source_and_confidence_filters_are_applied(google_ms, tmp_path
 
     assert list(data["source"]) == ["google"]
     assert list(data["confidence"]) == [0.9]
+
+
+def test_google_ms_lists_the_units_of_every_available_country(google_ms, monkeypatch):
+    from gigaspatial.handlers import google_ms_combined_buildings as module
+
+    formats = []
+
+    def _iso3s(data_format="geoparquet", **kwargs):
+        formats.append(data_format)
+        return ["KEN", "RWA"]
+
+    monkeypatch.setattr(module, "get_available_iso3s", _iso3s)
+    monkeypatch.setattr(
+        module, "get_available_s2_files", lambda iso3, data_format: ["1.parquet"]
+    )
+
+    units = google_ms.config.get_available_units()
+
+    assert formats == [google_ms.config.data_format]
+    assert [u for u in units if "KEN" in u] and [u for u in units if "RWA" in u]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
