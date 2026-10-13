@@ -700,10 +700,9 @@ class GoogleMSBuildingsHandler(BaseHandler):
         if not self.ensure_data_available(source, **kwargs):
             raise RuntimeError("Could not ensure data availability for loading")
 
-        source_data_paths = self.reader.resolve_source_paths(
+        processed_paths = self.reader.resolve_source_paths(
             source, **self.select_options(kwargs, self.config)
         )
-        processed_paths = self.reader._pre_load_hook(source_data_paths)
 
         cache_paths = []
 
@@ -774,10 +773,9 @@ class GoogleMSBuildingsHandler(BaseHandler):
             Dictionary containing combined numpy arrays (e.g., {'coords': np.ndarray})
         """
         # 1. Resolve what the base parquet files *should* be for this source
-        source_data_paths = self.reader.resolve_source_paths(
+        processed_paths = self.reader.resolve_source_paths(
             source, **self.select_options(kwargs, self.config)
         )
-        processed_paths = self.reader._pre_load_hook(source_data_paths)
 
         if not processed_paths:
             self.logger.warning("No valid paths to load centroids from.")

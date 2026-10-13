@@ -100,6 +100,34 @@ points = [(38.404581, 27.4816677), (39.8915702, 32.7809618)]
 polygons_gdf = gob_handler.load_polygons(points, ensure_available = True)
 ```
 
+### Passing options to a handler
+
+`load_data`, `download_and_load`, `ensure_data_available` and the reader's and downloader's own entry points take options as keyword arguments. Each handler declares the options it understands, and a keyword it doesn't recognize raises a `TypeError` instead of being silently ignored:
+
+```python
+from gigaspatial.handlers import OpenCellIDHandler
+
+handler = OpenCellIDHandler()
+
+# Read options: keep only towers created from 2020 on
+towers = handler.load_data("KEN", created_newer=2020)
+
+# A misspelled option fails right away
+handler.load_data("KEN", created_newr=2020)  # TypeError
+```
+
+Options every handler accepts:
+
+- `crs`: the CRS of a geometry, point list or DataFrame source that carries none (default `EPSG:4326`).
+- `country_geom_path` and `country_data_store`: where to read a country's boundary from, instead of the default admin boundaries.
+- `show_progress`: show download progress bars (default `True`).
+
+Handler-specific options include WorldPop's `sex`, `ages`, `min_age` and `max_age`, Google Open Buildings' `data_type`, Google-MS combined's `source_filter` and `min_confidence`, OpenCellID's `created_newer`, `created_before` and `drop_duplicates`, HDX's `key`, `exact_match`, `token_match` and `read_kwargs`, and `merge_rasters` for GHSL and WorldPop rasters.
+
+With `crop_to_source=True`, the loaded data is cropped to the source's geometry. Path sources are returned as loaded. Country sources on datasets published per country (WorldPop, OpenCellID, Google-MS combined, Microsoft Buildings, HDX and RWI) are not cropped, since the files already cover that country.
+
+Downloads run in `config.n_workers` threads. A data unit that fails to download is logged and skipped while the others continue; `ensure_data_available` then returns `False`, and `load_data` raises a `RuntimeError`.
+
 ## Storing Geospatial Data
 
 You can store the processed data in various formats using the `DataStore` class from the `core.io` module. Here's an example of saving data to a parquet file:

@@ -109,35 +109,6 @@ class BaseHandlerReader(ABC):
             return [paths]
         return list(paths)
 
-    def _pre_load_hook(self, source_data_path) -> Any:
-        """Hook called before loading data."""
-        if isinstance(source_data_path, (Path, str)):
-            source_data_path = [source_data_path]
-
-        if not source_data_path:
-            self.logger.warning("No paths found!")
-            return []
-
-        source_data_paths = [str(file_path) for file_path in source_data_path]
-
-        self.logger.info(
-            f"Pre-loading validation complete for {len(source_data_path)} files"
-        )
-        return source_data_paths
-
-    def _post_load_hook(self, data) -> Any:
-        """Hook called after loading data."""
-        if isinstance(data, Iterable):
-            if len(data) == 0:
-                self.logger.warning("No data was loaded from the source files")
-                return data
-
-            self.logger.info(f"{len(data)} valid data records.")
-
-        self.logger.info(f"Post-load processing complete.")
-
-        return data
-
     def _check_file_exists(self, file_paths: List[Union[str, Path]]):
         """
         Validate that all specified files exist in the data store.
@@ -309,8 +280,8 @@ class BaseHandlerReader(ABC):
         """
         Orchestrate the resolution and loading of data from a source.
 
-        Standardizes the workflow: Resolve Paths -> Pre-load Hook -> Load ->
-        Post-load Hook -> Optional Crop.
+        Resolves the source to stored paths, loads them with
+        ``load_from_paths``, then optionally crops to the source.
 
         Args:
             source: specification of the data to load.
@@ -337,13 +308,8 @@ class BaseHandlerReader(ABC):
                 "No source data paths resolved. There's no matching data to load!"
             )
             return None
-        processed_paths = self._pre_load_hook(source_data_paths)
-        if not processed_paths:
-            self.logger.warning("No valid paths to load data from.")
-            return None
 
-        loaded_data = self.load_from_paths(processed_paths, read)
-        loaded_data = self._post_load_hook(loaded_data)
+        loaded_data = self.load_from_paths([str(p) for p in source_data_paths], read)
 
         if crop_to_source and loaded_data is not None:
             loaded_data = self._crop_to_source(loaded_data, source, resolve)

@@ -77,9 +77,7 @@ mgb = MSBuildingsDownloader()
 points = [(1.25214, 5.5124), (3.45234, 12.51232)]
 
 # Get building footprints
-list_of_paths = mgb.download(
-    points=points
-)
+list_of_paths = mgb.download(points)
 ```
 
 ## Satellite Imagery

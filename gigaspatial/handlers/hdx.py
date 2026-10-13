@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import List, Mapping, Optional, Union, Dict, Any
 import tempfile
+from urllib.parse import unquote, urlparse
 
 from pydantic import Field, ConfigDict
 from pydantic.dataclasses import dataclass
@@ -338,13 +339,12 @@ class HDXConfig(BaseHandlerConfig):
             options: The resolve options (unused).
 
         Returns:
-            Absolute local path for the resource file.
+            Absolute local path for the resource file, named after the file
+            in its download URL (which carries the format's extension), or
+            after the resource name when the URL names no file.
         """
-        try:
-            filename = unit.data["name"]
-        except:
-            filename = unit.get("download_url").split("/")[-1]
-
+        url = unit.get("download_url") or unit.get("url") or ""
+        filename = unquote(urlparse(url).path.rsplit("/", 1)[-1]) or unit.get("name")
         return self.output_dir_path / filename
 
     def list_resources(self) -> List[str]:

@@ -631,6 +631,24 @@ def test_hdx_read_kwargs_reach_read_dataset(hdx, tmp_path):
     assert list(data.columns) == ["a", "b"]
 
 
+@pytest.mark.parametrize(
+    "resource, filename",
+    [
+        (
+            {
+                "name": "Health Facilities (OSM), GeoJSON",
+                "download_url": "https://data.hdx.org/d/r/ken%20health.geojson.zip?dl=1",
+            },
+            "ken health.geojson.zip",
+        ),
+        ({"name": "Kenya", "url": "https://example.org/files/ken.csv"}, "ken.csv"),
+        ({"name": "ken.csv", "download_url": "https://example.org/files/"}, "ken.csv"),
+    ],
+)
+def test_hdx_stores_resources_under_the_download_file_name(hdx, resource, filename):
+    assert hdx.config.get_data_unit_path(resource) == hdx.config.output_dir_path / filename
+
+
 def test_google_open_buildings_failed_download_leaves_no_file(
     google_open_buildings, monkeypatch
 ):
