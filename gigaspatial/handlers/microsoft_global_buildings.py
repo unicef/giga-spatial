@@ -37,6 +37,7 @@ from gigaspatial.handlers.base import (
     ResolveOptions,
 )
 from gigaspatial.handlers.base.source import SourceKind, classify_source
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
 
 
@@ -384,7 +385,7 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
         self,
         tile_info: Union[pd.Series, dict],
         options: DownloadOptions,
-    ) -> Optional[str]:
+    ) -> Path:
         """
         Download a single building footprint tile.
 
@@ -393,34 +394,18 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
             options: The download options.
 
         Returns:
-            The path to the local gzipped CSV file on success, or None on failure.
+            The path to the stored gzipped CSV file.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
 
-        tile_url = tile_info["url"]
-
-        try:
-            response = requests.get(tile_url, stream=True)
-            response.raise_for_status()
-
-            file_path = str(self.config.get_data_unit_path(tile_info))
-
-            with self.data_store.open(file_path, "wb") as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
-
-                self.logger.debug(
-                    f"Successfully downloaded tile: {tile_info['quadkey']}"
-                )
-                return file_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(
-                f"Failed to download tile {tile_info['quadkey']}: {str(e)}"
-            )
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
-            return None
+        return stream_to_store(
+            tile_info["url"],
+            self.config.get_data_unit_path(tile_info),
+            self.data_store,
+            show_progress=options.show_progress,
+        )
 
     def download_by_country(
         self,

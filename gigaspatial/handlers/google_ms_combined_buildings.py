@@ -24,6 +24,7 @@ from gigaspatial.handlers.base import (
     ReadOptions,
     ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
 
 
@@ -287,19 +288,17 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
 
         Returns:
             Path to the downloaded file
+
+        Raises:
+            Exception: If the download fails.
         """
 
-        file_path = str(self.config.get_data_unit_path(unit))
-
-        try:
-            if self.config.download_strategy == "s3":
-                return self._download_from_s3(unit, file_path)
-            else:  # https
-                return self._download_from_https(unit, file_path)
-
-        except Exception as e:
-            self.logger.error(f"Error downloading unit {unit}: {e}")
-            raise
+        file_path = self.config.get_data_unit_path(unit)
+        if self.config.download_strategy == "s3":
+            return self._download_from_s3(unit, str(file_path))
+        return stream_to_store(
+            unit, file_path, self.data_store, show_progress=options.show_progress
+        )
 
     def _download_from_s3(self, s3_uri: str, save_path: Path) -> Path:
         """
@@ -330,41 +329,7 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
             self.logger.info(f"Downloaded from S3: {save_path}")
             return save_path
 
-        except Exception as e:
-            self.logger.error(f"S3 download failed for {s3_uri}: {e}")
-            # Clean up partial download
-            if self.data_store.file_exists(save_path):
-                self.data_store.remove(save_path)
-            raise
-
-    def _download_from_https(self, https_url: str, save_path: Path) -> Path:
-        """
-        Download file from HTTPS.
-
-        Args:
-            https_url: HTTPS URL
-            save_path: Path to save file
-
-        Returns:
-            Path to downloaded file
-        """
-        import requests
-
-        try:
-            response = requests.get(https_url, stream=True, timeout=30)
-            response.raise_for_status()
-
-            with self.data_store.open(save_path, "wb") as file:
-                # Stream in chunks
-                for chunk in response.iter_content(chunk_size=8192 * 1024):
-                    if chunk:
-                        file.write(chunk)
-
-            self.logger.info(f"Downloaded from HTTPS: {save_path}")
-            return save_path
-
-        except Exception as e:
-            self.logger.error(f"HTTPS download failed for {https_url}: {e}")
+        except BaseException:
             # Clean up partial download
             if self.data_store.file_exists(save_path):
                 self.data_store.remove(save_path)

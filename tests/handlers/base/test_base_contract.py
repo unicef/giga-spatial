@@ -225,6 +225,47 @@ def test_ensure_propagates_programming_errors_from_download(handler):
         handler.ensure_data_available(SMALL_AOI)
 
 
+@pytest.mark.parametrize("n_workers", [1, 2])
+def test_one_failing_unit_does_not_stop_the_others(tmp_path, n_workers):
+    handler = FakeHandler(base_path=tmp_path / "fake", n_workers=n_workers)
+    download = handler.downloader.download_data_unit
+
+    def _fail_first(unit, options):
+        if unit == "t00":
+            raise ConnectionError("network down")
+        return download(unit, options)
+
+    handler.downloader.download_data_unit = _fail_first
+
+    assert handler.ensure_data_available(box(0, 0, 2, 2)) is False
+    assert sorted(handler.downloader.downloaded) == ["t01", "t10", "t11"]
+    assert handler.ensure_data_available(box(1.2, 1.2, 1.8, 1.8)) is True
+
+
+def test_units_download_concurrently_in_threads(tmp_path):
+    import threading
+
+    handler = FakeHandler(base_path=tmp_path / "fake", n_workers=2)
+    download = handler.downloader.download_data_unit
+    both_running = threading.Barrier(2, timeout=5)
+
+    def _wait_for_the_other(unit, options):
+        both_running.wait()
+        return download(unit, options)
+
+    handler.downloader.download_data_unit = _wait_for_the_other
+
+    assert handler.ensure_data_available(box(0, 0, 2, 1)) is True
+
+
+def test_programming_errors_propagate_from_threads(tmp_path):
+    handler = FakeHandler(base_path=tmp_path / "fake", n_workers=2)
+    handler.downloader.download_data_unit = lambda unit: None
+
+    with pytest.raises(TypeError):
+        handler.ensure_data_available(box(0, 0, 2, 2))
+
+
 def test_parallel_download_stores_every_unit(tmp_path):
     handler = FakeHandler(base_path=tmp_path / "fake", n_workers=2)
 

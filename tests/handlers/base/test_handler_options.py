@@ -555,15 +555,17 @@ def test_ms_buildings_unmapped_country_uses_the_given_boundary(
 
 def test_ookla_show_progress_reaches_the_progress_bar(ookla, monkeypatch):
     from gigaspatial.handlers import ookla_speedtest
+    from gigaspatial.handlers.base import fetch
 
     disabled = []
+    real_tqdm = fetch.tqdm
 
-    def _tqdm(iterable, **kwargs):
+    def _tqdm(*args, **kwargs):
         disabled.append(kwargs["disable"])
-        return iterable
+        return real_tqdm(*args, **kwargs)
 
     monkeypatch.setattr(ookla_speedtest.requests, "get", lambda *a, **k: _FakeResponse())
-    monkeypatch.setattr(ookla_speedtest, "tqdm", _tqdm)
+    monkeypatch.setattr(fetch, "tqdm", _tqdm)
 
     ookla.downloader.download_data_units(
         [ookla.config.DATASET_URL], show_progress=False
@@ -627,3 +629,23 @@ def test_hdx_read_kwargs_reach_read_dataset(hdx, tmp_path):
     data = hdx.load_data([str(path)], read_kwargs={"sep": ";"})
 
     assert list(data.columns) == ["a", "b"]
+
+
+def test_google_open_buildings_failed_download_leaves_no_file(
+    google_open_buildings, monkeypatch
+):
+    import requests
+
+    gob = google_open_buildings
+    gob.config.tiles_gdf
+
+    class _Broken(_FakeResponse):
+        def iter_content(self, chunk_size=8192):
+            yield b"partial"
+            raise requests.ConnectionError("connection reset")
+
+    monkeypatch.setattr(requests, "get", lambda url, **kwargs: _Broken())
+
+    assert gob.handler.ensure_data_available(AOI) is False
+    stored = gob.config.base_path / "polygons_s2_level_4_abc_buildings.csv.gz"
+    assert not gob.store.file_exists(str(stored))

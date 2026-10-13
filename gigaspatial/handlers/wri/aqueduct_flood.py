@@ -17,8 +17,6 @@ import logging
 from pathlib import Path
 from typing import List, Literal, Optional, Union, ClassVar
 
-import requests
-from tqdm import tqdm
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 from shapely.geometry.base import BaseGeometry
@@ -37,6 +35,7 @@ from gigaspatial.handlers.base import (
     ReadOptions,
     ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.processing.tif_processor import TifProcessor
 
@@ -500,7 +499,7 @@ class AqueductFloodDownloader(BaseHandlerDownloader):
         config = config or AqueductFloodConfig()
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, url: str, options: DownloadOptions) -> Optional[Path]:
+    def download_data_unit(self, url: str, options: DownloadOptions) -> Path:
         """Download a single Aqueduct raster file.
 
         Args:
@@ -508,38 +507,16 @@ class AqueductFloodDownloader(BaseHandlerDownloader):
             options: The download options.
 
         Returns:
-            Local path to the downloaded file, or ``None`` on failure.
+            The stored file path.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
         output_path = self.config.get_data_unit_path(url)
         self.logger.info(f"Downloading {output_path.name} from {url}")
-
-        try:
-            response = requests.get(url, stream=True, timeout=60)
-            response.raise_for_status()
-            import math
-
-            total_size = int(response.headers.get("content-length", 0))
-            total_chunks = math.ceil(total_size / 8192) if total_size else 0
-
-            with self.data_store.open(str(output_path), "wb") as fh:
-                for chunk in tqdm(
-                    response.iter_content(chunk_size=8192),
-                    total=total_chunks,
-                    unit="chunk",
-                    desc=output_path.name,
-                    disable=not options.show_progress,
-                ):
-                    fh.write(chunk)
-
-            self.logger.info(f"Saved: {output_path}")
-            return output_path
-
-        except requests.exceptions.RequestException as exc:
-            self.logger.error(f"Failed to download {url}: {exc}")
-            return None
-        except Exception as exc:
-            self.logger.error(f"Unexpected error downloading {url}: {exc}")
-            return None
+        return stream_to_store(
+            url, output_path, self.data_store, show_progress=options.show_progress
+        )
 
 
 # ---------------------------------------------------------------------------

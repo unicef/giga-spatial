@@ -8,9 +8,6 @@ stored file is a CSV with two points: one near the tile's lower-left corner
 The fake's components take typed options. ``tile`` (resolve) keeps only the
 named tile, ``columns`` (read) selects columns, and ``show_progress`` is both a
 download and a read option.
-
-Lives in a regular module, not ``conftest.py``, so ``multiprocessing`` workers
-can import the classes by name.
 """
 
 from dataclasses import dataclass

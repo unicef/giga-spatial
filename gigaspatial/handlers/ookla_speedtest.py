@@ -29,9 +29,9 @@ from gigaspatial.handlers.base import BaseHandlerDownloader
 from gigaspatial.handlers.base import BaseHandlerReader
 from gigaspatial.handlers.base import BaseHandler
 from gigaspatial.handlers.base import DownloadOptions, ReadOptions, ResolveOptions
+from gigaspatial.handlers.base.fetch import stream_to_store
 
 import logging
-from tqdm import tqdm
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
@@ -59,7 +59,6 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
     BASE_URL = "https://ookla-open-data.s3.amazonaws.com/parquet/performance"
 
     base_path: Path = Field(default=config.get_path("ookla_speedtest", "bronze"))
-    n_workers: int = 1 # Ookla data is not parallelizable beyond single file, so just iterate.
 
     type: Literal["fixed", "mobile"] = Field(...)
     year: Optional[int] = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
@@ -180,7 +179,7 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
         )
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, url: str, options: DownloadOptions) -> Optional[Path]:
+    def download_data_unit(self, url: str, options: DownloadOptions) -> Path:
         """
         Download a single Ookla Parquet file.
 
@@ -189,35 +188,17 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
             options: ``show_progress`` controls the progress bar.
 
         Returns:
-            Local path to the downloaded file, or None on failure.
+            The stored file path.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
-        output_path = self.config.get_data_unit_path(url)
-
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-
-            total_size = int(response.headers.get("content-length", 0))
-
-            with self.data_store.open(str(output_path), "wb") as file:
-                for chunk in tqdm(
-                    response.iter_content(chunk_size=8192),
-                    total=total_size // 8192,
-                    unit="KB",
-                    desc=f"Downloading {output_path.name}",
-                    disable=not options.show_progress,
-                ):
-                    file.write(chunk)
-
-            self.logger.info(f"Successfully downloaded: {url} to {output_path}")
-            return output_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download {url}: {str(e)}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
-            return None
+        return stream_to_store(
+            url,
+            self.config.get_data_unit_path(url),
+            self.data_store,
+            show_progress=options.show_progress,
+        )
 
 
 class OoklaSpeedtestReader(BaseHandlerReader):

@@ -23,10 +23,7 @@ import pandas as pd
 import geopandas as gpd
 import pycountry
 import requests
-from tqdm import tqdm
 import logging
-import zipfile
-import tempfile
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.processing.tif_processor import TifProcessor
@@ -39,6 +36,7 @@ from gigaspatial.handlers.base import (
     RasterReadOptions,
     ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import extract_zip_to_store, stream_to_store
 from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.config import config as global_config
 
@@ -1217,103 +1215,25 @@ class WPPopulationDownloader(BaseHandlerDownloader):
             options: The download options.
 
         Returns:
-            The local path(s) to the downloaded resource(s).
+            The stored path, or for a zip the paths of its extracted ``.tif``
+            files.
+
+        Raises:
+            requests.RequestException: If the download fails.
+            zipfile.BadZipFile: If a zip download is not a zip archive.
+            FileNotFoundError: If a zip holds no ``.tif`` file.
         """
-        # If the resource is a zip (e.g., school age datasets), download to temp and extract .tif files
+        fetch = dict(
+            session=self.config.client.session,
+            show_progress=options.show_progress,
+            timeout=self.config.client.timeout,
+        )
+        stored = self.config.get_data_unit_path(url)
         if url.lower().endswith(".zip"):
-            temp_downloaded_path: Optional[Path] = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".zip"
-                ) as temp_file:
-                    temp_downloaded_path = Path(temp_file.name)
-                    response = self.config.client.session.get(
-                        url, stream=True, timeout=self.config.client.timeout
-                    )
-                    response.raise_for_status()
-
-                    total_size = int(response.headers.get("content-length", 0))
-
-                    with tqdm(
-                        total=total_size,
-                        unit="B",
-                        unit_scale=True,
-                        desc=f"Downloading {os.path.basename(temp_downloaded_path)}",
-                        disable=not options.show_progress,
-                    ) as pbar:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                temp_file.write(chunk)
-                                pbar.update(len(chunk))
-
-                extracted_files: List[Path] = []
-                output_dir = self.config.get_data_unit_path(url).parent
-                with zipfile.ZipFile(str(temp_downloaded_path), "r") as zip_ref:
-                    members = [
-                        m for m in zip_ref.namelist() if m.lower().endswith(".tif")
-                    ]
-                    for member in members:
-                        extracted_path = output_dir / Path(member).name
-                        with zip_ref.open(member) as source:
-                            file_content = source.read()
-                            self.data_store.write_file(
-                                str(extracted_path), file_content
-                            )
-                        extracted_files.append(extracted_path)
-                        self.logger.info(f"Extracted {member} to {extracted_path}")
-
-                return extracted_files
-
-            except requests.RequestException as e:
-                self.logger.error(f"Failed to download {url}: {e}")
-                return None
-            except zipfile.BadZipFile:
-                self.logger.error("Downloaded file is not a valid zip archive.")
-                return None
-            except Exception as e:
-                self.logger.error(f"Unexpected error processing zip for {url}: {e}")
-                return None
-            finally:
-                if temp_downloaded_path and temp_downloaded_path.exists():
-                    try:
-                        temp_downloaded_path.unlink()
-                    except OSError as e:
-                        self.logger.warning(
-                            f"Could not delete temporary file {temp_downloaded_path}: {e}"
-                        )
-
-        # Otherwise, download as a regular file (e.g., .tif)
-        try:
-            response = self.config.client.session.get(
-                url, stream=True, timeout=self.config.client.timeout
+            return extract_zip_to_store(
+                url, stored.parent, self.data_store, r"(?i).*\.tif$", **fetch
             )
-            response.raise_for_status()
-
-            total_size = int(response.headers.get("content-length", 0))
-            file_path = self.config.get_data_unit_path(url)
-
-            with self.data_store.open(str(file_path), "wb") as file:
-                with tqdm(
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    desc=f"Downloading {os.path.basename(file_path)}",
-                    disable=not options.show_progress,
-                ) as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            file.write(chunk)
-                            pbar.update(len(chunk))
-
-            self.logger.info(f"Successfully downloaded: {file_path}")
-            return file_path
-
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to download {url}: {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading {url}: {e}")
-            return None
+        return stream_to_store(url, stored, self.data_store, **fetch)
 
 
 class WPPopulationReader(BaseHandlerReader):

@@ -187,7 +187,7 @@ class BaseHandler(ABC):
             Exception: Errors raised while resolving the source into data units
                 or paths propagate unchanged, as do programming errors
                 (``TypeError``, ``AttributeError``, ``NameError``) raised while
-                downloading. Other download errors are logged, and the
+                downloading. Other download errors are logged per unit, and the
                 availability check that follows decides the return value.
         """
         resolve, download = sort_options(
@@ -220,12 +220,7 @@ class BaseHandler(ABC):
             self.logger.info("All required data is already available")
             return True
 
-        try:
-            self.downloader._download_units(units_to_download, download)
-        except (TypeError, AttributeError, NameError):
-            raise
-        except Exception:
-            self.logger.error("Download failed", exc_info=True)
+        self.downloader._download_units(units_to_download, download)
 
         still_missing = self._missing_units(units_to_download, resolve)
         if still_missing:

@@ -7,15 +7,12 @@ multithreaded downloads from Google's public buckets, and spatial filtering.
 """
 from dataclasses import dataclass
 from pathlib import Path
-import functools
-import multiprocessing
 from typing import List, Optional, Union, Literal, Tuple
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 import requests
-from tqdm import tqdm
 import logging
 
 from gigaspatial.core.io.data_store import DataStore
@@ -28,6 +25,7 @@ from gigaspatial.handlers.base import (
     ReadOptions,
     ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import stream_to_store, tiles_intersecting
 from gigaspatial.config import config as global_config
 
 
@@ -93,10 +91,8 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         Returns:
             A list of tile records (ID, URL, size and data type).
         """
-        mask = self.tiles_gdf.geometry.intersects(search_key)
-        records = self.tiles_gdf.loc[mask, ["tile_id", "tile_url", "size_mb"]].to_dict(
-            "records"
-        )
+        tiles = tiles_intersecting(self.tiles_gdf, search_key, self.crs)
+        records = tiles[["tile_id", "tile_url", "size_mb"]].to_dict("records")
         return [{**record, "data_type": options.data_type} for record in records]
 
     def get_data_unit_path(self, unit: Union[pd.Series, dict, str], options=None) -> Path:
@@ -149,7 +145,7 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
 
     def download_data_unit(
         self, tile_info: Union[pd.Series, dict], options: DownloadOptions
-    ) -> Optional[str]:
+    ) -> Path:
         """
         Download a single building data file for a specific tile.
 
@@ -158,37 +154,22 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
             options: The download options.
 
         Returns:
-            The local file path on success, or None if the download failed.
+            The stored file path.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
 
         tile_url = tile_info["tile_url"]
         if tile_info.get("data_type", "polygons") == "points":
             tile_url = tile_url.replace("polygons", "points")
 
-        try:
-            response = requests.get(tile_url, stream=True)
-            response.raise_for_status()
-
-            file_path = str(self.config.get_data_unit_path(tile_info))
-
-            with self.data_store.open(file_path, "wb") as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
-
-                self.logger.debug(
-                    f"Successfully downloaded tile: {tile_info['tile_id']}"
-                )
-                return file_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(
-                f"Failed to download tile {tile_info['tile_id']}: {str(e)}"
-            )
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
-            return None
-
+        return stream_to_store(
+            tile_url,
+            self.config.get_data_unit_path(tile_info),
+            self.data_store,
+            show_progress=options.show_progress,
+        )
 
     def download_by_country(
         self,

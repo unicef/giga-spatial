@@ -35,7 +35,7 @@ class BaseHandlerConfig(ABC):
 
     Attributes:
         base_path: Root directory for the dataset's files.
-        n_workers: Number of parallel workers for processing or downloading.
+        n_workers: Number of threads downloading data units at once.
         data_store: Abstraction for file-system access (local or cloud).
         logger: Logger instance for tracking handler operations.
         units_match_country: True when the dataset is published per country,

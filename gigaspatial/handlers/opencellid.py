@@ -32,6 +32,7 @@ from gigaspatial.handlers.base import (
     ReadOptions,
     ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
 
 
@@ -211,33 +212,18 @@ class OpenCellIDDownloader(BaseHandlerDownloader):
             options: The download options.
 
         Returns:
-            Path to the downloaded local file.
+            The stored file path.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
-        url = unit["url"]
-        save_path = self.config.get_data_unit_path(unit)
-
-        self.logger.info(f"Downloading OpenCellID data from {url}")
-
-        try:
-            response = requests.get(url, stream=True, timeout=60)
-            response.raise_for_status()
-
-            with self.data_store.open(str(save_path), "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-
-            # Check for API errors in the downloaded file (sometimes they return 200 with error text)
-            # This is a bit tricky with data_store, but we can check if it's very small and contains error text
-
-            self.logger.info(f"Successfully downloaded to {save_path}")
-            return save_path
-
-        except Exception as e:
-            self.logger.error(f"Failed to download unit {url}: {e}")
-            if self.data_store.file_exists(str(save_path)):
-                self.data_store.remove(str(save_path))
-            raise
+        self.logger.info(f"Downloading OpenCellID data from {unit['url']}")
+        return stream_to_store(
+            unit["url"],
+            self.config.get_data_unit_path(unit),
+            self.data_store,
+            show_progress=options.show_progress,
+        )
 
 
 class OpenCellIDReader(BaseHandlerReader):

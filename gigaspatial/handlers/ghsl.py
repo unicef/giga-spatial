@@ -1,7 +1,5 @@
 import dataclasses
 from pathlib import Path
-import functools
-import multiprocessing
 from typing import List, Optional, Union, Literal
 import geopandas as gpd
 import pandas as pd
@@ -11,8 +9,6 @@ from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 from enum import Enum
 import requests
-from tqdm import tqdm
-import zipfile
 import tempfile
 from pydantic import (
     HttpUrl,
@@ -33,6 +29,11 @@ from gigaspatial.handlers.base import (
     DownloadOptions,
     RasterReadOptions,
     ResolveOptions,
+)
+from gigaspatial.handlers.base.fetch import (
+    extract_zip_to_store,
+    stream_to_store,
+    tiles_intersecting,
 )
 from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.config import config as global_config
@@ -253,23 +254,8 @@ class GHSLDataConfig(BaseHandlerConfig):
         The search geometry is in ``self.crs`` (see
         :meth:`BaseHandlerConfig.extract_search_geometry`).
         """
-        geometry = search_key
-        # Defensive: if tiles have a CRS different from the GHSL config CRS,
-        # reproject the input geometry to the tiles CRS.
-        tiles_crs = getattr(self.tiles_gdf, "crs", None)
-        if tiles_crs is not None and tiles_crs != self.crs:
-            geometry = (
-                gpd.GeoDataFrame(geometry=[geometry], crs=self.crs)
-                .to_crs(tiles_crs)
-                .geometry[0]
-            )
-
-        # Find intersecting tiles
-        mask = self.tiles_gdf.geometry.intersects(geometry)
-
-        intersecting_tiles = self.tiles_gdf.loc[mask, "tile_id"].to_list()
-
-        return intersecting_tiles
+        tiles = tiles_intersecting(self.tiles_gdf, search_key, self.crs)
+        return tiles["tile_id"].to_list()
 
     def get_data_unit_path(self, unit: str = None, options=None) -> Path:
         """
@@ -379,7 +365,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
 
     def download_data_unit(
         self, tile_id: str, options: GHSLDownloadOptions
-    ) -> Optional[Union[Path, List[Path]]]:
+    ) -> Union[Path, List[Path]]:
         """
         Downloads and optionally extracts files for a given tile.
 
@@ -388,86 +374,32 @@ class GHSLDataDownloader(BaseHandlerDownloader):
             options: ``extract`` and ``file_pattern`` select what is stored.
 
         Returns:
-            Path to the downloaded file if extract=False,
-            List of paths to the extracted files if extract=True,
-            None on failure.
+            Path to the downloaded zip if extract=False, else the paths of
+            the extracted files.
+
+        Raises:
+            requests.RequestException: If the download fails.
+            zipfile.BadZipFile: If the download is not a zip archive.
+            FileNotFoundError: If no archive member matches ``file_pattern``.
         """
         url = self.config.compute_dataset_url(tile_id=tile_id)
         output_path = self.config.get_data_unit_path(tile_id)
-        file_pattern = options.file_pattern
 
         if not options.extract:
-            return self._download_file(url, output_path.with_suffix(".zip"))
-
-        extracted_files: List[Path] = []
-        temp_downloaded_path: Optional[Path] = None
-
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
-                temp_downloaded_path = Path(temp_file.name)
-                self.logger.debug(
-                    f"Downloading {url} to temporary file: {temp_downloaded_path}"
-                )
-
-                response = requests.get(url, stream=True)
-                response.raise_for_status()
-
-                total_size = int(response.headers.get("content-length", 0))
-
-                with tqdm(
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    desc=f"Downloading {tile_id}",
-                    disable=not options.show_progress,
-                ) as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            temp_file.write(chunk)
-                            pbar.update(len(chunk))
-
-            self.logger.info(f"Successfully downloaded temporary file!")
-
-            with zipfile.ZipFile(str(temp_downloaded_path), "r") as zip_ref:
-                if file_pattern:
-                    import re
-
-                    pattern = re.compile(file_pattern)
-                    files_to_extract = [
-                        f for f in zip_ref.namelist() if pattern.match(f)
-                    ]
-                else:
-                    files_to_extract = zip_ref.namelist()
-
-                for file in files_to_extract:
-                    extracted_path = output_path.parent / Path(file).name
-                    with zip_ref.open(file) as source:
-                        file_content = source.read()
-                        self.data_store.write_file(str(extracted_path), file_content)
-                    extracted_files.append(extracted_path)
-                    self.logger.info(f"Extracted {file} to {extracted_path}")
-
-            Path(temp_file.name).unlink()
-            return extracted_files
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download {url} to temporary file: {e}")
-            return None
-        except zipfile.BadZipFile:
-            self.logger.error(f"Downloaded file for {tile_id} is not a valid zip file.")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error downloading/extracting tile {tile_id}: {e}")
-            return None
-        finally:
-            if temp_downloaded_path and temp_downloaded_path.exists():
-                try:
-                    temp_downloaded_path.unlink()
-                    self.logger.debug(f"Deleted temporary file: {temp_downloaded_path}")
-                except OSError as e:
-                    self.logger.warning(
-                        f"Could not delete temporary file {temp_downloaded_path}: {e}"
-                    )
+            return stream_to_store(
+                url,
+                output_path.with_suffix(".zip"),
+                self.data_store,
+                show_progress=options.show_progress,
+            )
+        return extract_zip_to_store(
+            url,
+            output_path.parent,
+            self.data_store,
+            options.file_pattern,
+            show_progress=options.show_progress,
+            desc=f"Downloading {tile_id}",
+        )
 
     def download_by_country(
         self,
@@ -508,46 +440,6 @@ class GHSLDataDownloader(BaseHandlerDownloader):
             file_pattern=file_pattern,
             **kwargs,
         )
-
-    def _download_file(self, url: str, output_path: Path) -> Optional[Path]:
-        """
-        Downloads a file from a URL to a specified output path with a progress bar.
-
-        Args:
-            url: The URL to download from.
-            output_path: The local path to save the downloaded file.
-
-        Returns:
-            The path to the downloaded file on success, None on failure.
-        """
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-
-            total_size = int(response.headers.get("content-length", 0))
-
-            with self.data_store.open(str(output_path), "wb") as file:
-                with tqdm(
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    desc=f"Downloading {output_path.name}",
-                ) as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            file.write(chunk)
-                            pbar.update(len(chunk))
-
-            self.logger.debug(f"Successfully downloaded: {url} to {output_path}")
-            return output_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download {url}: {str(e)}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
-            return None
-
 
 class GHSLDataReader(BaseHandlerReader):
 

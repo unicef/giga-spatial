@@ -1,6 +1,6 @@
 """Abstract downloader for dataset handlers (`BaseHandlerDownloader`)."""
 from abc import ABC, abstractmethod
-import functools
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar, List, Optional, Iterable, Type
 import pandas as pd
 import logging
@@ -51,37 +51,49 @@ class BaseHandlerDownloader(ABC):
             or global_config.get_logger(self.__class__.__name__)
         )
 
+    PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError)
+
     @abstractmethod
     def download_data_unit(self, unit: Any, options):
         """
         Download a single data unit.
 
         Must be implemented by subclasses to define the specific download
-        logic for the dataset.
+        logic for the dataset. Units may be downloaded concurrently from
+        threads, so implementations must not share mutable state unguarded.
 
         Args:
             unit: Data unit identifier.
             options: The download options.
+
+        Returns:
+            The stored path, or a list of paths for a unit stored as several
+            files.
+
+        Raises:
+            Exception: Any failure to download the unit. The base logs it and
+                carries on with the other units.
         """
         pass
 
     def download_data_units(self, units: Iterable[Any], **kwargs) -> List[Any]:
         """
-        Download multiple data units in parallel.
+        Download multiple data units, in ``config.n_workers`` threads.
 
-        Iterates through the provided units and downloads them using
-        `download_data_unit`. Parallelism is controlled by `n_workers` in
-         the configuration.
+        A unit that fails is logged and skipped; the other units still
+        download.
 
         Args:
             units: Iterable of data unit identifiers.
             **kwargs: Download options (see ``options_type``).
 
         Returns:
-            A flat list of all downloaded file paths or data records.
+            A flat list of the downloaded file paths.
 
         Raises:
-            TypeError: If a keyword is not a download option.
+            TypeError: If a keyword is not a download option, or a downloader
+                raises a programming error (``TypeError``, ``AttributeError``
+                or ``NameError``).
         """
         (options,) = sort_options(kwargs, self, entry="download_data_units")
         return self._download_units(units, options)
@@ -101,38 +113,40 @@ class BaseHandlerDownloader(ABC):
             "desc": "Downloading data units",
             "disable": not options.show_progress,
         }
-        n_workers = getattr(self.config, "n_workers", 1)
+        n_workers = max(1, min(getattr(self.config, "n_workers", 1), len(units_list)))
+
+        def _attempt(unit):
+            try:
+                return self.download_data_unit(unit, options), None
+            except self.PROGRAMMING_ERRORS:
+                raise
+            except Exception as error:
+                return None, error
 
         if n_workers > 1:
-            import multiprocessing
-
-            with multiprocessing.Pool(n_workers) as pool:
-                download_func = functools.partial(
-                    self.download_data_unit, options=options
-                )
-                results = list(
-                    tqdm(
-                        pool.imap(download_func, units_list),
-                        total=len(units_list),
-                        **progress,
-                    )
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                outcomes = list(
+                    tqdm(pool.map(_attempt, units_list), total=len(units_list), **progress)
                 )
         else:
-            results = [
-                self.download_data_unit(unit, options)
-                for unit in tqdm(units_list, **progress)
-            ]
+            outcomes = [_attempt(unit) for unit in tqdm(units_list, **progress)]
 
-        # Filter out None and flatten any list results (e.g. from extracted archives)
-        flattened = []
-        for r in results:
-            if r is None:
-                continue
-            if isinstance(r, (list, tuple)):
-                flattened.extend(r)
-            else:
-                flattened.append(r)
+        flattened, failures = [], []
+        for unit, (result, error) in zip(units_list, outcomes):
+            if error is not None:
+                failures.append(unit)
+                self.logger.error(
+                    f"Failed to download unit {unit}: {error}", exc_info=error
+                )
+            elif isinstance(result, (list, tuple)):
+                flattened.extend(result)
+            elif result is not None:
+                flattened.append(result)
 
+        if failures:
+            self.logger.error(
+                f"{len(failures)} of {len(units_list)} data unit(s) failed to download"
+            )
         return flattened
 
     def download(self, source, **kwargs):

@@ -23,6 +23,7 @@ from gigaspatial.handlers.base import (
     ResolveOptions,
 )
 from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
 from gigaspatial.processing.elevation.srtm_parser import SRTMParser
 from gigaspatial.handlers.nasa.utils import EarthdataSession, LPDAACS3CredentialProvider
@@ -186,42 +187,27 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
 
     def download_data_unit(
         self, tile_info: Union[pd.Series, dict], options: DownloadOptions
-    ) -> Optional[str]:
-        """Download data file for a single SRTM tile."""
+    ) -> Path:
+        """
+        Download data file for a single SRTM tile.
+
+        Earthdata credentials are sent through the config's session, except
+        for the public bucket.
+
+        Raises:
+            requests.RequestException: If the download fails.
+        """
 
         tile_url = tile_info.get("tile_url") or tile_info.get("tile_uri")
-        file_path = str(self.config.get_data_unit_path(tile_info))
-
-        try:
-            response = self._http_request(
-                "GET", tile_url, stream=True, timeout=30, allow_redirects=True
-            )
-            response.raise_for_status()
-
-            with self.data_store.open(file_path, "wb") as file:
-                for chunk in response.iter_content(chunk_size=8192 * 1024):
-                    if chunk:
-                        file.write(chunk)
-
-            self.logger.debug(
-                f"Successfully downloaded tile: {tile_info['tile_id']} from {tile_url}"
-            )
-            return file_path
-
-        except requests.RequestException as e:
-            self.logger.error(
-                f"Failed to download tile {tile_info['tile_id']} from {tile_url}: {e}"
-            )
-            if self.data_store.file_exists(file_path):
-                self.data_store.remove(file_path)
-            return None
-        except Exception as e:
-            self.logger.error(
-                f"Unexpected error downloading tile {tile_info['tile_id']}: {e}"
-            )
-            if self.data_store.file_exists(file_path):
-                self.data_store.remove(file_path)
-            return None
+        public = self.config.s3_bucket == "lp-prod-public"
+        return stream_to_store(
+            tile_url,
+            self.config.get_data_unit_path(tile_info),
+            self.data_store,
+            session=None if public else self.config.session,
+            show_progress=options.show_progress,
+            timeout=30,
+        )
 
 
 @dataclasses.dataclass(frozen=True)

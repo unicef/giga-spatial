@@ -95,9 +95,6 @@ class HDXConfig(BaseHandlerConfig):
 
     # Optional configuration with defaults
     base_path: Path = Field(default=global_config.get_path("hdx", "bronze"))
-    n_workers: int = (
-        1  # HDX data is not parallelizable beyond single file, so just iterate.
-    )
     user_agent: str = Field(
         default="gigaspatial", description="User agent for HDX API requests"
     )
@@ -426,26 +423,21 @@ class HDXDownloader(BaseHandlerDownloader):
             options: The download options.
 
         Returns:
-            Local path to the downloaded resource on success, or None on failure.
-        """
-        try:
-            resource_name = resource.get("name", "Unknown")
-            self.logger.info(f"Downloading resource: {resource_name}")
+            The stored path of the resource.
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                url, local_path = resource.download(folder=tmpdir)
-                with open(local_path, "rb") as f:
-                    data = f.read()
-                # Compose the target path in the DataStore
-                target_path = str(self.config.get_data_unit_path(resource))
-                self.data_store.write_file(target_path, data)
-                self.logger.info(
-                    f"Downloaded resource: {resource_name} to {target_path}"
-                )
-                return target_path
-        except Exception as e:
-            self.logger.error(f"Error downloading resource {resource_name}: {str(e)}")
-            return None
+        Raises:
+            Exception: Any error from the HDX client while downloading.
+        """
+        resource_name = resource.get("name", "Unknown")
+        self.logger.info(f"Downloading resource: {resource_name}")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            url, local_path = resource.download(folder=tmpdir)
+            target_path = str(self.config.get_data_unit_path(resource))
+            with open(local_path, "rb") as f:
+                self.data_store.write_file(target_path, f)
+        self.logger.info(f"Downloaded resource: {resource_name} to {target_path}")
+        return target_path
 
 
 class HDXReader(BaseHandlerReader):
