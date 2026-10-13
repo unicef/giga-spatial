@@ -108,12 +108,37 @@ def test_ookla_ensure_available_false_skips_availability_check(ookla, monkeypatc
     assert calls == []
 
 
-@breaks("step 4", "load_data writes a bare quadkey list into the (units, geometry) cache")
 def test_ookla_filtering_keeps_unit_cache_readable(ookla):
     aoi = box(36.8, -1.3, 36.81, -1.29)
     ookla.handler.load_data(aoi, ensure_available=False)
 
-    ookla.config.get_cached_search_geometry(aoi)
+    assert ookla.config.get_cached_search_geometry(aoi).equals(aoi)
+
+
+# Inside the zoom 16 tile of quadkey 1202102332221212 (Berlin).
+OOKLA_AOI = box(13.415, 52.517, 13.416, 52.518)
+
+
+def test_ookla_crops_to_source_by_default(ookla):
+    data = ookla.handler.load_data(OOKLA_AOI)
+
+    assert list(data["quadkey"]) == ["1202102332221212"]
+
+
+def test_ookla_no_crop_returns_whole_quarter(ookla):
+    assert len(ookla.handler.load_data(OOKLA_AOI, crop_to_source=False)) == 2
+
+
+def test_ookla_country_source_resolves_without_boundary_lookup(ookla, monkeypatch):
+    from gigaspatial.handlers import boundaries
+
+    def _no_lookup(*args, **kwargs):
+        raise AssertionError("resolving a global dataset must not fetch boundaries")
+
+    monkeypatch.setattr(boundaries.AdminBoundaries, "create", staticmethod(_no_lookup))
+
+    assert ookla.config.get_relevant_data_units("KEN") == [ookla.config.DATASET_URL]
+    assert len(ookla.handler.load_data("KEN", crop_to_source=False)) == 2
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +253,29 @@ def test_rwi_caller_can_override_token_match(monkeypatch):
 
     config.get_relevant_data_units("KEN", force_recompute=True, token_match=False)
     assert seen["token_match"] is False
+
+
+def test_rwi_latest_only_is_applied_in_the_lookup(monkeypatch):
+    pytest.importorskip("hdx")
+    from gigaspatial.handlers.hdx import HDXConfig
+    from gigaspatial.handlers.rwi import RWIConfig
+
+    old = {"name": "ken_2021.csv", "created": "2021-01-01T00:00:00Z"}
+    new = {"name": "ken_2023.csv", "created": "2023-01-01T00:00:00Z"}
+    calls = []
+
+    def _resources(self, filter=None, exact_match=False, token_match=False):
+        calls.append(filter)
+        return [old, new]
+
+    monkeypatch.setattr(HDXConfig, "configure_hdx", lambda self: None)
+    monkeypatch.setattr(HDXConfig, "fetch_dataset", lambda self: None)
+    monkeypatch.setattr(HDXConfig, "get_dataset_resources", _resources)
+    config = RWIConfig()
+
+    assert config.get_relevant_data_units("KEN") == [new]
+    assert config.get_relevant_data_units("KEN") == [new]
+    assert len(calls) == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

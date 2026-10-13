@@ -415,26 +415,15 @@ class AqueductFloodConfig(BaseHandlerConfig):
     # BaseHandlerConfig interface
     # ────────────────────────────────────────────────────
 
-    def get_relevant_data_units(self, source=None, **kwargs) -> List[str]:
-        """Return the S3 download URL for the configured dataset.
-
-        Aqueduct rasters are global; geometry does not filter the units.
-
-        Args:
-            source: Ignored; present for interface compatibility.
-
-        Returns:
-            Single-element list containing the S3 URL.
-        """
-        return [self.DATASET_URL]
+    def get_search_key(self, source, **kwargs) -> None:
+        """Aqueduct rasters are global: no source narrows the files to fetch."""
+        return None
 
     def get_relevant_data_units_by_key(self, search_key=None, **kwargs) -> List[str]:
         """Return the S3 download URL for the configured dataset.
 
-        Aqueduct rasters are global; the search key does not filter the units.
-
         Args:
-            search_key: Ignored; present for interface compatibility.
+            search_key: Always None; the dataset is a single global file.
 
         Returns:
             Single-element list containing the S3 URL.

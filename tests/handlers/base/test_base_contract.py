@@ -82,6 +82,47 @@ class FilterConfig(FakeConfig):
         return list(search_key)
 
 
+@pytest.fixture
+def boundary_calls(monkeypatch):
+    """Make 'FAK' resolve to SMALL_AOI and record every boundary lookup."""
+    from gigaspatial.handlers import boundaries
+
+    calls = []
+
+    class _Boundary:
+        def to_geoms(self):
+            return [SMALL_AOI]
+
+    def _create(country_code=None, **kwargs):
+        calls.append(country_code)
+        return _Boundary()
+
+    monkeypatch.setattr(boundaries.AdminBoundaries, "create", staticmethod(_create))
+    return calls
+
+
+class CodeConfig(FakeConfig):
+    """Looks units up by country code, like per-country datasets do."""
+
+    def get_search_key(self, source, **kwargs):
+        return source
+
+    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+        self.lookups += 1
+        return ["t00"]
+
+
+class GlobalConfig(FakeConfig):
+    """One global file: every source resolves to the same unit."""
+
+    def get_search_key(self, source, **kwargs):
+        return None
+
+    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+        self.lookups += 1
+        return ["t00"]
+
+
 class MercatorConfig(FakeConfig):
     @property
     def crs(self) -> str:
@@ -377,6 +418,43 @@ def test_clear_unit_cache(handler):
     handler.config.clear_unit_cache()
 
     assert handler.config.get_cached_search_geometry(WIDE_AOI) is None
+
+
+def test_crs_option_is_part_of_the_cache_key(handler):
+    handler.config.get_relevant_data_units(WIDE_AOI)
+    handler.config.get_relevant_data_units(WIDE_AOI, crs="EPSG:4326")
+
+    assert handler.config.lookups == 2
+
+
+def test_load_resolves_each_source_once(handler):
+    handler.load_data(WIDE_AOI, crop_to_source=True)
+
+    assert handler.config.lookups == 1
+
+
+def test_search_geometry_is_computed_once_when_key_is_not_a_geometry(
+    tmp_path, boundary_calls
+):
+    config = CodeConfig(base_path=tmp_path / "fake")
+    handler = FakeHandler(base_path=tmp_path / "fake", config=config)
+
+    handler.load_data("FAK", crop_to_source=True)
+    handler.load_data("FAK", crop_to_source=True)
+
+    assert boundary_calls == ["FAK"]
+    assert config.lookups == 1
+
+
+def test_global_dataset_resolves_without_search_geometry(tmp_path, boundary_calls):
+    config = GlobalConfig(base_path=tmp_path / "fake")
+    handler = FakeHandler(base_path=tmp_path / "fake", config=config)
+
+    assert len(handler.load_data("FAK")) == 2
+    assert boundary_calls == []
+
+    assert len(handler.load_data("FAK", crop_to_source=True)) == 1
+    assert boundary_calls == ["FAK"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, List, Union, Tuple, Iterable
+from typing import Any, ClassVar, List, Optional, Union, Tuple, Iterable
 import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import Point, MultiPoint
@@ -13,6 +13,7 @@ import logging
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.handlers.base.resolution import UnitCache, UnitResolution
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 
@@ -51,7 +52,7 @@ class BaseHandlerConfig(ABC):
         if self.logger is None:
             self.logger = global_config.get_logger(self.__class__.__name__)
 
-        self._unit_cache = {}
+        self._units = UnitCache()
 
     @property
     def crs(self) -> str:
@@ -59,7 +60,12 @@ class BaseHandlerConfig(ABC):
         return "EPSG:4326"
 
     def _cache_key(self, source, **kwargs):
-        """Create a canonical cache key from source."""
+        """Create a canonical cache key from the source and its ``crs`` option."""
+        crs = kwargs.get("crs")
+        return (*self._source_key(source), None if crs is None else str(crs))
+
+    @staticmethod
+    def _source_key(source):
         kind = classify_source(source)
         if kind in (SourceKind.COUNTRY, SourceKind.PATHS):
             return (kind.value, str(source))
@@ -111,19 +117,23 @@ class BaseHandlerConfig(ABC):
 
         Returns:
             A list of relevant data unit identifiers.
+
+        Note:
+            Handlers customise resolution through ``get_search_key`` and
+            ``get_relevant_data_units_by_key``; this method and its cache are
+            not meant to be overridden.
         """
         key = self._cache_key(source, **kwargs)
 
-        # Check cache unless forced recompute
-        if not force_recompute and key in self._unit_cache:
-            self.logger.debug(f"Using cached units for {key[0]}: {key[1][:50]}...")
-            units, _ = self._unit_cache[key]  # Unpack tuple, only return units
-            return units
+        cached = None if force_recompute else self._units.get(key)
+        if cached is not None:
+            self.logger.debug(f"Using cached units for {key[0]}: {str(key[1])[:50]}...")
+            return cached.units
 
         search_key = self.get_search_key(source, **kwargs)
         units = self.get_relevant_data_units_by_key(search_key, **kwargs)
 
-        self._unit_cache[key] = (units, search_key)
+        self._units.put(key, UnitResolution(units=units, search_key=search_key))
         return units
 
     def get_search_key(self, source, **kwargs) -> Any:
@@ -131,7 +141,9 @@ class BaseHandlerConfig(ABC):
         Turn a source into the value the dataset's unit lookup understands.
 
         Override for datasets indexed by something other than area, such as a
-        country code. The default is the search geometry.
+        country code, or return ``None`` for a single global dataset. The
+        default is the search geometry; a key that is a geometry must be the
+        search geometry, since the cache reuses it for cropping.
 
         Args:
             source: Input source (country, geometry, points, DataFrame or GDF).
@@ -247,23 +259,21 @@ class BaseHandlerConfig(ABC):
 
     def get_search_geometry(self, source, **kwargs) -> BaseGeometry:
         """
-        Return the search geometry of a source, reusing a cached one if the
-        search key of this source is already a geometry.
+        Return the search geometry of a source, computing it at most once per
+        source and caching it.
         """
-        cached = self.get_cached_search_geometry(source)
-        if isinstance(cached, BaseGeometry):
-            return cached
-        return self.extract_search_geometry(source, **kwargs)
+        key = self._cache_key(source, **kwargs)
+        geometry = self._units.get_geometry(key)
+        if geometry is None:
+            geometry = self.extract_search_geometry(source, **kwargs)
+            self._units.put_geometry(key, geometry)
+        return geometry
 
-    def get_cached_search_geometry(self, source):
-        key = self._cache_key(source)
-        result = self._unit_cache.get(key)
-        if result:
-            _, geometry = result
-            return geometry
-        return None
+    def get_cached_search_geometry(self, source, **kwargs) -> Optional[BaseGeometry]:
+        """Return the cached search geometry of a source, or None."""
+        return self._units.get_geometry(self._cache_key(source, **kwargs))
 
     def clear_unit_cache(self):
         """Clear cached units."""
-        self._unit_cache.clear()
+        self._units.clear()
         self.logger.debug("Unit cache cleared")

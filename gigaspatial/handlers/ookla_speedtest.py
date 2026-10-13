@@ -21,7 +21,7 @@ from pydantic.dataclasses import dataclass
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry import Point
 
-from gigaspatial.grid.mercator_tiles import MercatorTiles, CountryMercatorTiles
+from gigaspatial.grid.mercator_tiles import MercatorTiles
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.config import config
 from gigaspatial.handlers.base import BaseHandlerConfig
@@ -123,25 +123,16 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
 
         return ookla_tiles
 
-    def get_relevant_data_units(self, source=None, **kwargs):
-        """
-        Identify the Parquet URL for the configured year and quarter.
-
-        Args:
-            source: Geographic source (ignored as Ookla data is global).
-            **kwargs: Additional parameters.
-
-        Returns:
-            A list containing the single dataset URL.
-        """
-        return [self.DATASET_URL]
+    def get_search_key(self, source, **kwargs) -> None:
+        """Ookla data is one global file per quarter: no source narrows it."""
+        return None
 
     def get_relevant_data_units_by_key(self, search_key=None, **kwargs) -> List[str]:
         """
-        Return the dataset URL; the dataset is a single global file.
+        Return the Parquet URL for the configured year and quarter.
 
         Args:
-            search_key: Ignored.
+            search_key: Always None; the dataset is a single global file.
             **kwargs: Additional parameters.
 
         Returns:
@@ -228,6 +219,8 @@ class OoklaSpeedtestReader(BaseHandlerReader):
     Loads and processes performance tiles into tabular formats.
     """
 
+    QUADKEY_ZOOM_LEVEL = 16
+
     def __init__(
         self,
         config: Union[OoklaSpeedtestConfig, dict[str, Union[str, int]]],
@@ -256,6 +249,23 @@ class OoklaSpeedtestReader(BaseHandlerReader):
         """
         result = self._load_tabular_data(file_paths=source_data_path)
         return result
+
+    def crop_to_geometry(self, data, geometry, **kwargs) -> pd.DataFrame:
+        """
+        Keep the rows whose zoom 16 quadkey tile intersects the geometry.
+
+        Args:
+            data: Ookla rows with a ``quadkey`` column.
+            geometry: Search geometry in EPSG:4326.
+            **kwargs: Ignored.
+
+        Returns:
+            The matching rows, re-indexed from zero.
+        """
+        quadkeys = MercatorTiles.from_spatial(
+            geometry, zoom_level=self.QUADKEY_ZOOM_LEVEL
+        ).quadkeys
+        return data[data["quadkey"].isin(quadkeys)].reset_index(drop=True)
 
     def load(
         self,
@@ -366,6 +376,7 @@ class OoklaSpeedtestHandler(BaseHandler):
             str,  # path
             List[Union[str, Path]],
         ] = None,
+        crop_to_source: bool = True,
         process_geospatial: bool = False,
         ensure_available: bool = True,
         **kwargs,
@@ -374,7 +385,10 @@ class OoklaSpeedtestHandler(BaseHandler):
         Acquire and filter Ookla Speedtest data.
 
         Args:
-            source: Geographic filter (country, geometry) or direct file paths.
+            source: Geographic filter (country, geometry, points) or direct
+                file paths. None loads the whole quarter.
+            crop_to_source: If True, keeps only the tiles intersecting the
+                source. Path sources and None are never cropped.
             process_geospatial: If True, returns a GeoDataFrame with tile geometries.
             ensure_available: If True, executes download if data is missing locally.
             **kwargs: Filtering and processing parameters.
@@ -382,63 +396,12 @@ class OoklaSpeedtestHandler(BaseHandler):
         Returns:
             Tabular or geospatial data for the requested area.
         """
-
-        if source is None or (
-            isinstance(source, (str, Path))
-            and (
-                self.data_store.file_exists(str(source))
-                or str(source).endswith(".parquet")
-            )
-            or (
-                isinstance(source, List)
-                and all(isinstance(p, (str, Path)) for p in source)
-            )
-        ):
-            # If no source or source is a direct path, load without filtering
-            result = super().load_data(
-                source, ensure_available=ensure_available, **kwargs
-            )
-        else:
-            # Load the entire dataset and then apply Mercator tile filtering
-            full_dataset = super().load_data(
-                None, ensure_available=ensure_available, **kwargs
-            )  # Load the full dataset (uses DATASET_URL)
-
-            key = self.config._cache_key(source, **kwargs)
-
-            # Check cache unless forced recompute
-            if (
-                not kwargs.get("force_recompute", False)
-                and key in self.config._unit_cache
-            ):
-                self.logger.debug(
-                    f"Using cached quadkeys for {key[0]}: {key[1][:50]}..."
-                )
-                quadkeys = self.config._unit_cache[key]
-
-            else:
-
-                if isinstance(source, str):  # country
-                    mercator_tiles = CountryMercatorTiles.create(
-                        source, zoom_level=16, **kwargs
-                    )
-                elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame, List)):
-                    mercator_tiles = MercatorTiles.from_spatial(
-                        source, zoom_level=16, **kwargs
-                    )
-                else:
-                    raise ValueError(
-                        f"Unsupported source type for filtering: {type(source)}"
-                    )
-
-                quadkeys = mercator_tiles.quadkeys
-
-                # Cache the result
-                self.config._unit_cache[key] = quadkeys
-
-            result = full_dataset[full_dataset["quadkey"].isin(quadkeys)].reset_index(
-                drop=True
-            )
+        result = super().load_data(
+            source,
+            crop_to_source=crop_to_source and source is not None,
+            ensure_available=ensure_available,
+            **kwargs,
+        )
 
         if process_geospatial:
             # Convert 'tile' column from WKT to geometry

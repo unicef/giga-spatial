@@ -48,24 +48,22 @@ class RWIConfig(HDXConfig):
     def __post_init__(self):
         super().__post_init__()
 
-    def get_relevant_data_units(
-        self, source: str, force_recompute: bool = False, **kwargs
-    ):
+    def get_relevant_data_units_by_key(self, search_key, **kwargs):
         """
-        Identify relevant RWI resources on HDX for a given source.
+        Identify the RWI resources on HDX matching a resource filter.
+
+        Matches whole tokens by default, so 'af' does not match 'caf'. With
+        ``latest_only``, keeps only the most recently created resource.
 
         Args:
-            source: Geographic source (e.g., country name).
-            force_recompute: If True, bypasses the internal cache.
+            search_key: Resource filter built by ``get_search_key``.
             **kwargs: Additional filtering parameters.
 
         Returns:
             A list of matching HDX Resource objects.
         """
-        key = self._cache_key(source, **kwargs)
-        # Use token_match=True to prevent 'af' matching 'caf'
-        resources = super().get_relevant_data_units(
-            source, force_recompute, **{"token_match": True, **kwargs}
+        resources = super().get_relevant_data_units_by_key(
+            search_key, **{"token_match": True, **kwargs}
         )
 
         if self.latest_only and len(resources) > 1:
@@ -90,10 +88,6 @@ class RWIConfig(HDXConfig):
 
             if latest_resource:
                 resources = [latest_resource]
-
-            # Update the cache to the latest only
-            self._unit_cache[key] = (resources, self._unit_cache[key][1])
-            return resources
 
         return resources
 
