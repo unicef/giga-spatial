@@ -5,13 +5,17 @@ The grid is four 1x1 degree tiles covering lon/lat [0, 2] x [0, 2]. Each tile's
 stored file is a CSV with two points: one near the tile's lower-left corner
 (``offset 0.1``) and one near its upper-right corner (``offset 0.9``).
 
+The fake's components take typed options. ``tile`` (resolve) keeps only the
+named tile, ``columns`` (read) selects columns, and ``show_progress`` is both a
+download and a read option.
+
 Lives in a regular module, not ``conftest.py``, so ``multiprocessing`` workers
 can import the classes by name.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 import pandas as pd
 from shapely.geometry import box
@@ -21,6 +25,9 @@ from gigaspatial.handlers.base import (
     BaseHandlerConfig,
     BaseHandlerDownloader,
     BaseHandlerReader,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 
 TILES = {
@@ -39,37 +46,68 @@ def tile_rows(tile_id: str) -> pd.DataFrame:
     )
 
 
+@dataclass(frozen=True)
+class FakeResolveOptions(ResolveOptions):
+    tile: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class FakeReadOptions(ReadOptions):
+    columns: Optional[Tuple[str, ...]] = None
+    show_progress: bool = False
+
+
 @dataclass
 class FakeConfig(BaseHandlerConfig):
+    options_type = FakeResolveOptions
+
     n_workers: int = 1
 
     def __post_init__(self):
         super().__post_init__()
         self.lookups = 0
 
-    def get_relevant_data_units_by_key(self, search_key, **kwargs) -> List[str]:
+    def get_relevant_data_units_by_key(self, search_key, options) -> List[str]:
         self.lookups += 1
-        return [tid for tid, geom in TILES.items() if geom.intersects(search_key)]
+        return [
+            tid
+            for tid, geom in TILES.items()
+            if geom.intersects(search_key) and options.tile in (None, tid)
+        ]
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str, options=None) -> Path:
         return self.base_path / f"{unit}.csv"
 
 
 class FakeDownloader(BaseHandlerDownloader):
+    options_type = DownloadOptions
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.downloaded = []
+        self.received = []
 
-    def download_data_unit(self, unit: str, **kwargs) -> str:
+    def download_data_unit(self, unit: str, options) -> str:
         path = str(self.config.get_data_unit_path(unit))
         self.data_store.write_file(path, tile_rows(unit).to_csv(index=False))
         self.downloaded.append(unit)
+        self.received.append(options)
         return path
 
 
 class FakeReader(BaseHandlerReader):
-    def load_from_paths(self, source_data_path, **kwargs) -> pd.DataFrame:
-        return self._load_tabular_data(file_paths=source_data_path, show_progress=False)
+    options_type = FakeReadOptions
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.received = []
+
+    def load_from_paths(self, source_data_path, options) -> pd.DataFrame:
+        self.received.append(options)
+        data = self._load_tabular_data(
+            file_paths=source_data_path, show_progress=options.show_progress
+        )
+        return data[list(options.columns)] if options.columns else data
 
 
 class FakeHandler(BaseHandler):

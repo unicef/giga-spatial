@@ -12,6 +12,7 @@ from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.handlers.base.config import BaseHandlerConfig
 from gigaspatial.handlers.base.downloader import BaseHandlerDownloader
+from gigaspatial.handlers.base.options import select_kwargs, sort_options
 from gigaspatial.handlers.base.reader import BaseHandlerReader
 from gigaspatial.handlers.base.source import is_path_source
 
@@ -174,7 +175,7 @@ class BaseHandler(ABC):
         Args:
             source: Specification of the required data.
             force_download: If True, downloads every unit regardless of local state.
-            **kwargs: Additional parameters for unit resolution or download.
+            **kwargs: Resolve and download options.
 
         Returns:
             True if all required data is available in the DataStore, False if
@@ -182,12 +183,19 @@ class BaseHandler(ABC):
             download attempt.
 
         Raises:
+            TypeError: If a keyword is neither a resolve nor a download option.
             Exception: Errors raised while resolving the source into data units
                 or paths propagate unchanged, as do programming errors
                 (``TypeError``, ``AttributeError``, ``NameError``) raised while
                 downloading. Other download errors are logged, and the
                 availability check that follows decides the return value.
         """
+        resolve, download = sort_options(
+            kwargs, self.config, self.downloader, entry="ensure_data_available"
+        )
+        return self._ensure_available(source, force_download, resolve, download)
+
+    def _ensure_available(self, source, force_download: bool, resolve, download) -> bool:
         if is_path_source(source):
             paths = self.reader.resolve_by_paths(source)
             missing = [p for p in paths if not self.data_store.file_exists(str(p))]
@@ -204,24 +212,22 @@ class BaseHandler(ABC):
                 )
             return True
 
-        units = self.config.get_relevant_data_units(
-            source, force_recompute=force_download, **kwargs
-        )
+        units = self.config._resolve_units(source, resolve, force_recompute=force_download)
         units_to_download = (
-            list(units) if force_download else self._missing_units(units, **kwargs)
+            list(units) if force_download else self._missing_units(units, resolve)
         )
         if not units_to_download:
             self.logger.info("All required data is already available")
             return True
 
         try:
-            self.downloader.download_data_units(units_to_download, **kwargs)
+            self.downloader._download_units(units_to_download, download)
         except (TypeError, AttributeError, NameError):
             raise
         except Exception:
             self.logger.error("Download failed", exc_info=True)
 
-        still_missing = self._missing_units(units_to_download, **kwargs)
+        still_missing = self._missing_units(units_to_download, resolve)
         if still_missing:
             self.logger.error(
                 f"{len(still_missing)} data unit(s) still missing after download: "
@@ -231,12 +237,12 @@ class BaseHandler(ABC):
 
         return True
 
-    def _missing_units(self, units, **kwargs) -> list:
+    def _missing_units(self, units, resolve) -> list:
         return [
             unit
             for unit in units
             if not self.config.is_unit_available(
-                unit, self.config.get_stored_paths(unit, **kwargs)
+                unit, self.config._stored_paths(unit, resolve)
             )
         ]
 
@@ -264,19 +270,30 @@ class BaseHandler(ABC):
             source: Specification of the data to load.
             crop_to_source: If True, crops the result to the source geometry.
             ensure_available: If True, downloads missing data before loading.
-            **kwargs: Additional parameters for loading or downloading.
+            **kwargs: Resolve, download and read options.
 
         Returns:
             The loaded data object.
 
         Raises:
+            TypeError: If a keyword is not an option of any component.
             RuntimeError: If data availability cannot be ensured.
         """
+        resolve, download, _ = sort_options(
+            kwargs, self.config, self.downloader, self.reader, entry="load_data"
+        )
         if ensure_available:
-            if not self.ensure_data_available(source, **kwargs):
+            if not self._ensure_available(source, False, resolve, download):
                 raise RuntimeError("Could not ensure data availability for loading")
 
-        return self.reader.load(source, crop_to_source=crop_to_source, **kwargs)
+        return self._read(source, crop_to_source, kwargs)
+
+    def _read(self, source, crop_to_source: bool, kwargs) -> Any:
+        return self.reader.load(
+            source,
+            crop_to_source=crop_to_source,
+            **select_kwargs(kwargs, self.config, self.reader),
+        )
 
     def download_and_load(
         self,
@@ -299,13 +316,19 @@ class BaseHandler(ABC):
             source: Specification of the data to acquire and load.
             crop_to_source: If True, crops the result to the source geometry.
             force_download: If True, re-downloads data even if present.
-            **kwargs: Additional parameters for downloading or loading.
+            **kwargs: Resolve, download and read options.
 
         Returns:
             The loaded data object.
+
+        Raises:
+            TypeError: If a keyword is not an option of any component.
         """
-        self.ensure_data_available(source, force_download=force_download, **kwargs)
-        return self.reader.load(source, crop_to_source=crop_to_source, **kwargs)
+        resolve, download, _ = sort_options(
+            kwargs, self.config, self.downloader, self.reader, entry="download_and_load"
+        )
+        self._ensure_available(source, force_download, resolve, download)
+        return self._read(source, crop_to_source, kwargs)
 
     def get_available_data_info(
         self,
@@ -322,18 +345,22 @@ class BaseHandler(ABC):
 
         Args:
             source: Specification of the data to check.
-            **kwargs: Additional parameters for resolving paths.
+            **kwargs: Resolve options.
 
         Returns:
             A dictionary with the number of available and missing data units,
             and the stored paths that exist and do not exist.
+
+        Raises:
+            TypeError: If a keyword is not a resolve option.
         """
+        (resolve,) = sort_options(kwargs, self.config, entry="get_available_data_info")
         try:
-            units = self.config.get_relevant_data_units(source, **kwargs)
+            units = self.config._resolve_units(source, resolve)
             available_units = 0
             existing_paths, missing_paths = [], []
             for unit in units:
-                paths = self.config.get_stored_paths(unit, **kwargs)
+                paths = self.config._stored_paths(unit, resolve)
                 available_units += self.config.is_unit_available(unit, paths)
                 for path in paths:
                     if self.data_store.file_exists(str(path)):

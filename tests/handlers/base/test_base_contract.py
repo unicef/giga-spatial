@@ -16,8 +16,17 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point, box
 
-from _fakes import TILES, FakeConfig, FakeDownloader, FakeHandler, tile_rows
-from gigaspatial.handlers.base import BaseHandlerConfig
+from _fakes import (
+    TILES,
+    FakeConfig,
+    FakeDownloader,
+    FakeHandler,
+    FakeReader,
+    FakeReadOptions,
+    FakeResolveOptions,
+    tile_rows,
+)
+from gigaspatial.handlers.base import BaseHandlerConfig, DownloadOptions
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 # Intersects only tile t00 and contains only its lower-left point.
@@ -76,10 +85,10 @@ class CountryFileConfig(FakeConfig):
 class FilterConfig(FakeConfig):
     """Resolves a ``{"tiles": [...]}`` filter dict, which has no geometry."""
 
-    def get_search_key(self, source, **kwargs):
+    def get_search_key(self, source, options):
         return source["tiles"]
 
-    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+    def get_relevant_data_units_by_key(self, search_key, options):
         return list(search_key)
 
 
@@ -105,10 +114,10 @@ def boundary_calls(monkeypatch):
 class CodeConfig(FakeConfig):
     """Looks units up by country code, like per-country datasets do."""
 
-    def get_search_key(self, source, **kwargs):
+    def get_search_key(self, source, options):
         return source
 
-    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+    def get_relevant_data_units_by_key(self, search_key, options):
         self.lookups += 1
         return ["t00"]
 
@@ -116,10 +125,10 @@ class CodeConfig(FakeConfig):
 class GlobalConfig(FakeConfig):
     """One global file: every source resolves to the same unit."""
 
-    def get_search_key(self, source, **kwargs):
+    def get_search_key(self, source, options):
         return None
 
-    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+    def get_relevant_data_units_by_key(self, search_key, options):
         self.lookups += 1
         return ["t00"]
 
@@ -127,13 +136,13 @@ class GlobalConfig(FakeConfig):
 class PairConfig(FakeConfig):
     """Each unit is stored as a data file plus a sidecar file."""
 
-    def get_stored_paths(self, unit, **kwargs):
+    def get_stored_paths(self, unit, options=None):
         return [self.base_path / f"{unit}.csv", self.base_path / f"{unit}.meta"]
 
 
 class PairDownloader(FakeDownloader):
-    def download_data_unit(self, unit, **kwargs):
-        path = super().download_data_unit(unit, **kwargs)
+    def download_data_unit(self, unit, options):
+        path = super().download_data_unit(unit, options)
         self.data_store.write_file(str(self.config.base_path / f"{unit}.meta"), "m")
         return path
 
@@ -141,7 +150,7 @@ class PairDownloader(FakeDownloader):
 class ArchiveConfig(FakeConfig):
     """Stored files are known only once the unit is extracted, like WorldPop zips."""
 
-    def get_stored_paths(self, unit, **kwargs):
+    def get_stored_paths(self, unit, options=None):
         path = self.base_path / f"{unit}.csv"
         return [path] if self.data_store.file_exists(str(path)) else []
 
@@ -153,6 +162,51 @@ class MercatorConfig(FakeConfig):
     @property
     def crs(self) -> str:
         return "EPSG:3857"
+
+
+class LegacyConfig(FakeConfig):
+    """A config not yet migrated to typed options."""
+
+    options_type = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.received = []
+
+    def get_relevant_data_units_by_key(self, search_key, **kwargs):
+        self.received.append(kwargs)
+        return super().get_relevant_data_units_by_key(search_key, FakeResolveOptions())
+
+    def get_data_unit_path(self, unit, **kwargs):
+        return self.base_path / f"{unit}.csv"
+
+
+class LegacyDownloader(FakeDownloader):
+    options_type = None
+
+    def download_data_unit(self, unit, **kwargs):
+        return super().download_data_unit(unit, kwargs)
+
+
+class LegacyReader(FakeReader):
+    options_type = None
+
+    def load_from_paths(self, source_data_path, **kwargs):
+        self.received.append(kwargs)
+        return self._load_tabular_data(file_paths=source_data_path, show_progress=False)
+
+
+class LegacyHandler(FakeHandler):
+    def create_config(self, data_store, logger, **kwargs):
+        return LegacyConfig(
+            base_path=self._base_path, data_store=data_store, logger=logger
+        )
+
+    def create_downloader(self, config, data_store, logger, **kwargs):
+        return LegacyDownloader(config=config, data_store=data_store, logger=logger)
+
+    def create_reader(self, config, data_store, logger, **kwargs):
+        return LegacyReader(config=config, data_store=data_store, logger=logger)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -198,7 +252,7 @@ def test_ensure_propagates_resolution_errors(handler):
 
 
 def test_ensure_returns_false_when_download_fails(handler):
-    def _fail(unit, **kwargs):
+    def _fail(unit, options):
         raise ConnectionError("network down")
 
     handler.downloader.download_data_unit = _fail
@@ -213,7 +267,7 @@ def test_ensure_propagates_programming_errors_from_download(handler):
     handler.downloader.download_data_unit = _bad_signature
 
     with pytest.raises(TypeError):
-        handler.ensure_data_available(SMALL_AOI, merge_rasters=True)
+        handler.ensure_data_available(SMALL_AOI)
 
 
 def test_parallel_download_stores_every_unit(tmp_path):
@@ -225,7 +279,7 @@ def test_parallel_download_stores_every_unit(tmp_path):
 
 def test_download_data_units_flattens_lists_and_drops_none(handler):
     results = iter([["a", "b"], None, "c"])
-    handler.downloader.download_data_unit = lambda unit, **kwargs: next(results)
+    handler.downloader.download_data_unit = lambda unit, options: next(results)
 
     assert handler.downloader.download_data_units(["x", "y", "z"]) == ["a", "b", "c"]
 
@@ -364,7 +418,7 @@ def test_units_with_paths_known_only_after_download(tmp_path):
 
 def test_config_must_implement_a_path_hook(tmp_path):
     class NoPaths(BaseHandlerConfig):
-        def get_relevant_data_units_by_key(self, search_key, **kwargs):
+        def get_relevant_data_units_by_key(self, search_key, options):
             return ["t00"]
 
     with pytest.raises(NotImplementedError, match="get_stored_paths"):
@@ -551,6 +605,85 @@ def test_global_dataset_resolves_without_search_geometry(tmp_path, boundary_call
 
     assert len(handler.load_data("FAK", crop_to_source=True)) == 1
     assert boundary_calls == ["FAK"]
+
+
+def test_resolve_options_are_part_of_the_cache_key(handler):
+    assert handler.config.get_relevant_data_units(WIDE_AOI) == ["t00", "t10"]
+    assert handler.config.get_relevant_data_units(WIDE_AOI, tile="t10") == ["t10"]
+
+    assert handler.config.lookups == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Options
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda h: h.load_data(SMALL_AOI, colour="red"),
+        lambda h: h.download_and_load(SMALL_AOI, colour="red"),
+        lambda h: h.ensure_data_available(SMALL_AOI, colour="red"),
+        lambda h: h.get_available_data_info(SMALL_AOI, colour="red"),
+        lambda h: h.reader.load(SMALL_AOI, colour="red"),
+        lambda h: h.reader.resolve_source_paths(SMALL_AOI, colour="red"),
+        lambda h: h.downloader.download(SMALL_AOI, colour="red"),
+        lambda h: h.downloader.download_data_units(["t00"], colour="red"),
+        lambda h: h.config.get_relevant_data_units(SMALL_AOI, colour="red"),
+        lambda h: h.config.get_data_unit_paths(["t00"], colour="red"),
+        lambda h: h.config.get_search_geometry(SMALL_AOI, colour="red"),
+    ],
+)
+def test_unknown_option_raises_type_error(handler, call):
+    with pytest.raises(TypeError, match="'colour'"):
+        call(handler)
+    assert handler.downloader.downloaded == []
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda h: h.ensure_data_available(SMALL_AOI, columns=("tile_id",)),
+        lambda h: h.downloader.download(SMALL_AOI, columns=("tile_id",)),
+        lambda h: h.config.get_relevant_data_units(SMALL_AOI, show_progress=True),
+    ],
+)
+def test_option_of_a_component_the_entry_does_not_drive_raises(handler, call):
+    with pytest.raises(TypeError):
+        call(handler)
+
+
+def test_each_component_receives_only_its_options(handler):
+    data = handler.load_data(
+        WIDE_AOI, tile="t10", columns=("tile_id",), show_progress=True
+    )
+
+    assert list(data.columns) == ["tile_id"]
+    assert set(data["tile_id"]) == {"t10"}
+    assert handler.downloader.received == [DownloadOptions(show_progress=True)]
+    assert handler.reader.received == [
+        FakeReadOptions(columns=("tile_id",), show_progress=True)
+    ]
+
+
+def test_options_reach_parallel_downloads(tmp_path):
+    handler = FakeHandler(base_path=tmp_path / "fake", n_workers=2)
+
+    assert handler.ensure_data_available(box(0, 0, 2, 2), show_progress=False)
+    assert all(stored(handler, unit) for unit in TILES)
+
+
+def test_unmigrated_components_still_receive_raw_kwargs(tmp_path):
+    handler = LegacyHandler(base_path=tmp_path / "fake")
+    raw = {"colour": "red", "crs": "EPSG:4326"}
+
+    data = handler.load_data(SMALL_AOI, **raw)
+
+    assert len(data) == 2
+    assert handler.config.received == [raw]
+    assert handler.downloader.received == [raw]
+    assert handler.reader.received == [raw]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

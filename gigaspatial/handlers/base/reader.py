@@ -1,7 +1,7 @@
 """Abstract reader for dataset handlers (`BaseHandlerReader`)."""
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, List, Optional, Union, Tuple, Callable, Iterable
+from typing import Any, ClassVar, List, Optional, Union, Tuple, Callable, Iterable, Type
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
@@ -15,6 +15,7 @@ from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.processing.tif_processor import TifProcessor
 from gigaspatial.handlers.base.config import BaseHandlerConfig
+from gigaspatial.handlers.base.options import ReadOptions, call_with_options, sort_options
 from gigaspatial.handlers.base.source import SourceKind, classify_source, is_path_source
 
 
@@ -30,7 +31,11 @@ class BaseHandlerReader(ABC):
         config: Handler configuration object.
         data_store: Abstraction for file-system access.
         logger: Logger instance for tracking data loading.
+        options_type: The `ReadOptions` subclass ``load_from_paths`` takes, or
+            None for a reader that still takes raw keyword arguments.
     """
+
+    options_type: ClassVar[Optional[Type[ReadOptions]]] = None
 
     def __init__(
         self,
@@ -74,22 +79,29 @@ class BaseHandlerReader(ABC):
 
         Args:
             source: Source specification (country, geometry, points, or paths).
-            **kwargs: Additional parameters for resolving paths.
+            **kwargs: Resolve options (see ``config.options_type``).
 
         Returns:
             A list of resolved file paths.
+
+        Raises:
+            TypeError: If a keyword is not a resolve option.
         """
+        (resolve,) = sort_options(kwargs, self.config, entry="resolve_source_paths")
+        return self._resolve_paths(source, resolve)
+
+    def _resolve_paths(self, source, resolve) -> List[Union[str, Path]]:
         if is_path_source(source):
             return self.resolve_by_paths(source)
 
-        data_units = self.config.get_relevant_data_units(source, **kwargs)
-        data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
+        data_units = self.config._resolve_units(source, resolve)
+        data_paths = self.config._stored_paths_of(data_units, resolve)
 
         self.logger.info(f"Resolved {len(data_paths)} paths!")
         return data_paths
 
     def resolve_by_paths(
-        self, paths: Union[Path, str, List[Union[str, Path]]], **kwargs
+        self, paths: Union[Path, str, List[Union[str, Path]]]
     ) -> List[Union[str, Path]]:
         """
         Return explicit paths as a list.
@@ -98,7 +110,7 @@ class BaseHandlerReader(ABC):
             return [paths]
         return list(paths)
 
-    def _pre_load_hook(self, source_data_path, **kwargs) -> Any:
+    def _pre_load_hook(self, source_data_path) -> Any:
         """Hook called before loading data."""
         if isinstance(source_data_path, (Path, str)):
             source_data_path = [source_data_path]
@@ -114,7 +126,7 @@ class BaseHandlerReader(ABC):
         )
         return source_data_paths
 
-    def _post_load_hook(self, data, **kwargs) -> Any:
+    def _post_load_hook(self, data) -> Any:
         """Hook called after loading data."""
         if isinstance(data, Iterable):
             if len(data) == 0:
@@ -268,15 +280,16 @@ class BaseHandlerReader(ABC):
         return data
 
     @abstractmethod
-    def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
-    ) -> Any:
+    def load_from_paths(self, source_data_path: List[Union[str, Path]], options) -> Any:
         """
         Abstract method to load source data from paths.
 
+        Readers without an ``options_type`` receive raw keyword arguments
+        instead of ``options``.
+
         Args:
             source_data_path: List of source paths
-            **kwargs: Additional parameters for data loading
+            options: The read options.
 
         Returns:
             Loaded data (DataFrame, GeoDataFrame, etc.)
@@ -308,35 +321,40 @@ class BaseHandlerReader(ABC):
             crop_to_source: If True, the data is cropped to the search geometry
                 of the source. Path sources are never cropped, and neither are
                 country sources when ``config.units_match_country`` is True.
-            **kwargs: Additional parameters for loading.
+            **kwargs: Resolve and read options.
 
         Returns:
             The loaded data object.
 
         Raises:
+            TypeError: If a keyword is neither a resolve nor a read option.
             ValueError: If cropping is requested for a source with no
                 geometry, such as a filter dict.
         """
-        source_data_paths = self.resolve_source_paths(source, **kwargs)
+        resolve, read = sort_options(kwargs, self.config, self, entry="load")
+        return self._load(source, crop_to_source, resolve, read)
+
+    def _load(self, source, crop_to_source: bool, resolve, read) -> Any:
+        source_data_paths = self._resolve_paths(source, resolve)
         if not source_data_paths:
             self.logger.warning(
                 "No source data paths resolved. There's no matching data to load!"
             )
             return None
-        processed_paths = self._pre_load_hook(source_data_paths, **kwargs)
+        processed_paths = self._pre_load_hook(source_data_paths)
         if not processed_paths:
             self.logger.warning("No valid paths to load data from.")
             return None
 
-        loaded_data = self.load_from_paths(processed_paths, **kwargs)
-        loaded_data = self._post_load_hook(loaded_data, **kwargs)
+        loaded_data = call_with_options(self.load_from_paths, processed_paths, options=read)
+        loaded_data = self._post_load_hook(loaded_data)
 
         if crop_to_source and loaded_data is not None:
-            loaded_data = self._crop_to_source(loaded_data, source, **kwargs)
+            loaded_data = self._crop_to_source(loaded_data, source, resolve)
 
         return loaded_data
 
-    def _crop_to_source(self, data, source, **kwargs):
+    def _crop_to_source(self, data, source, resolve):
         kind = classify_source(source)
         if kind is SourceKind.PATHS:
             self.logger.debug("Path source: data is returned uncropped")
@@ -350,5 +368,5 @@ class BaseHandlerReader(ABC):
                 f"crop_to_source=True needs a source with a geometry, got {type(source)}"
             )
 
-        geometry = self.config.get_search_geometry(source, **kwargs)
+        geometry = self.config._search_geometry(source, resolve)
         return self.crop_to_geometry(data, geometry, crs=self.config.crs)

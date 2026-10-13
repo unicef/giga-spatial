@@ -16,10 +16,18 @@ from gigaspatial.handlers.base.config import BaseHandlerConfig
 from gigaspatial.handlers.base.downloader import BaseHandlerDownloader
 from gigaspatial.handlers.base.reader import BaseHandlerReader
 from gigaspatial.handlers.base.handler import BaseHandler
+from gigaspatial.handlers.base.options import (
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
+)
 
 __all__ = [
     "BaseHandlerConfig",
     "BaseHandlerDownloader",
     "BaseHandlerReader",
     "BaseHandler",
+    "DownloadOptions",
+    "ReadOptions",
+    "ResolveOptions",
 ]

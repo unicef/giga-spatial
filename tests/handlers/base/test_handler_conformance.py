@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from gigaspatial.handlers.base import BaseHandlerConfig
+from gigaspatial.handlers.base import (
+    BaseHandler,
+    BaseHandlerConfig,
+    BaseHandlerDownloader,
+    BaseHandlerReader,
+)
 
 HANDLER_MODULES = [
     "gigaspatial.handlers.ghsl",
@@ -27,14 +32,14 @@ HANDLER_MODULES = [
 ]
 
 
-def _handler_configs():
+def _handler_subclasses(*bases):
     for name in HANDLER_MODULES:
         try:
             importlib.import_module(name)
         except ImportError:
             continue
 
-    found, stack = [], list(BaseHandlerConfig.__subclasses__())
+    found, stack = [], [sub for base in bases for sub in base.__subclasses__()]
     while stack:
         cls = stack.pop()
         stack.extend(cls.__subclasses__())
@@ -43,7 +48,29 @@ def _handler_configs():
     return sorted(set(found), key=lambda c: c.__qualname__)
 
 
-HANDLER_CONFIGS = _handler_configs()
+HANDLER_CONFIGS = _handler_subclasses(BaseHandlerConfig)
+HANDLER_COMPONENTS = _handler_subclasses(
+    BaseHandlerConfig, BaseHandlerDownloader, BaseHandlerReader, BaseHandler
+)
+
+OPTION_INTERNALS = (
+    "_resolve_units",
+    "_stored_paths_of",
+    "_stored_paths",
+    "_search_geometry",
+    "_download_units",
+    "_resolve_paths",
+    "_load",
+    "_crop_to_source",
+    "_ensure_available",
+    "_read",
+    "_missing_units",
+)
+
+
+@pytest.mark.parametrize("cls", HANDLER_COMPONENTS, ids=lambda c: c.__qualname__)
+def test_options_are_sorted_only_by_the_base(cls):
+    assert not [name for name in OPTION_INTERNALS if name in vars(cls)]
 
 
 def test_handler_configs_were_found():
