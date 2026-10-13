@@ -11,7 +11,7 @@ from dataclasses import field
 from pydantic.dataclasses import dataclass
 from pydantic import ConfigDict
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Iterable
+from typing import List, Optional, Union, Dict
 import numpy as np
 import pandas as pd
 from shapely.geometry.base import BaseGeometry
@@ -326,13 +326,6 @@ class MSBuildingsConfig(BaseHandlerConfig):
             / self.manifest_date
             / f'{unit["quadkey"]}.csv.gz'
         )
-
-    def get_data_unit_paths(
-        self, units: Union[pd.DataFrame, Iterable[dict]], **kwargs
-    ) -> List:
-        if isinstance(units, pd.DataFrame):
-            return [self.get_data_unit_path(row) for _, row in units.iterrows()]
-        return super().get_data_unit_paths(units)
 
     def get_search_key(self, source, **kwargs) -> Union[str, BaseGeometry]:
         """

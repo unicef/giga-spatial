@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import functools
 import multiprocessing
-from typing import List, Optional, Union, Literal, Tuple, Iterable
+from typing import List, Optional, Union, Literal, Tuple
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
@@ -103,30 +103,6 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
             else unit
         )
         return self.base_path / f"{data_type}_s2_level_4_{tile_id}_buildings.csv.gz"
-
-    def get_data_unit_paths(
-        self,
-        units: Union[pd.DataFrame, Iterable[Union[dict, str]]],
-        data_type: str = "polygons",
-        **kwargs,
-    ) -> list:
-        """
-        Resolve multiple tile identifiers to their corresponding local paths.
-
-        Args:
-            units: Collection of tile identifiers or metadata.
-            data_type: Geometry format ('polygons' or 'points').
-            **kwargs: Additional context.
-
-        Returns:
-            List of resolved absolute paths.
-        """
-        if isinstance(units, pd.DataFrame):
-            return [
-                self.get_data_unit_path(row, data_type=data_type, **kwargs)
-                for _, row in units.iterrows()
-            ]
-        return super().get_data_unit_paths(units, data_type=data_type)
 
 
 class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):

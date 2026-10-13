@@ -265,21 +265,24 @@ class GHSLDataConfig(BaseHandlerConfig):
 
         return intersecting_tiles
 
-    def get_data_unit_path(self, unit: str = None, file_ext=".zip", **kwargs) -> Path:
-        """Construct and return the path for the configured dataset or dataset tile."""
+    def get_data_unit_path(self, unit: str = None, **kwargs) -> Path:
+        """
+        Return the stored ``.tif`` of the configured dataset or dataset tile.
+
+        GHSL zips hold one raster named like the zip itself, which the
+        downloader extracts next to where the zip would be.
+        """
         info = self._get_product_info()
 
-        tile_path = (
+        return (
             self.base_path
             / info["product_folder"]
             / (
                 f"{info['product_name']}_V{info['product_version']}_0"
                 + (f"_{unit}" if unit else "")
-                + file_ext
+                + ".tif"
             )
         )
-
-        return tile_path
 
     def compute_dataset_url(self, tile_id=None) -> str:
         """Compute the download URL for a GHSL dataset."""
@@ -376,7 +379,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
         output_path = self.config.get_data_unit_path(tile_id)
 
         if not extract:
-            return self._download_file(url, output_path)
+            return self._download_file(url, output_path.with_suffix(".zip"))
 
         extracted_files: List[Path] = []
         temp_downloaded_path: Optional[Path] = None
@@ -623,7 +626,6 @@ class GHSLDataReader(BaseHandlerReader):
         return super().load(
             source=source,
             crop_to_source=crop_to_source,
-            file_ext=kwargs.pop("file_ext", ".tif"),
             merge_rasters=merge_rasters,
             **kwargs,
         )
@@ -813,7 +815,6 @@ class GHSLDataHandler(BaseHandler):
             source=source,
             crop_to_source=crop_to_source,
             ensure_available=ensure_available,
-            file_ext=".tif",
             extract=True,
             file_pattern=r".*\.tif$",
             merge_rasters=merge_rasters,
@@ -893,15 +894,3 @@ class GHSLDataHandler(BaseHandler):
         return pd.concat(
             [tp.to_geodataframe(**kwargs) for tp in tif_processors], ignore_index=True
         )
-
-    def get_available_data_info(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-        ],
-        **kwargs,
-    ) -> dict:
-        return super().get_available_data_info(source, file_ext=".tif", **kwargs)

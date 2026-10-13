@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-from typing import List, Union, Iterable, Literal, Optional
+from typing import List, Union, Literal, Optional
 import geopandas as gpd
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
@@ -135,18 +135,6 @@ class NasaSRTMConfig(BaseHandlerConfig):
         """
         tile_id = unit["tile_id"] if isinstance(unit, (pd.Series, dict)) else unit
         return self.base_path / f"{tile_id}.SRTMGL{self._res_arc}.hgt.zip"
-
-    def get_data_unit_paths(
-        self, units: Union[pd.DataFrame, Iterable[Union[dict, str]]], **kwargs
-    ) -> list:
-        """
-        Given tile identifiers, return list of file paths.
-        """
-        if isinstance(units, pd.DataFrame):
-            return [
-                self.get_data_unit_path(row, **kwargs) for _, row in units.iterrows()
-            ]
-        return super().get_data_unit_paths(units, **kwargs)
 
 
 class NasaSRTMDownloader(BaseHandlerDownloader):

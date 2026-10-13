@@ -16,7 +16,8 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point, box
 
-from _fakes import TILES, FakeConfig, FakeHandler, tile_rows
+from _fakes import TILES, FakeConfig, FakeDownloader, FakeHandler, tile_rows
+from gigaspatial.handlers.base import BaseHandlerConfig
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 # Intersects only tile t00 and contains only its lower-left point.
@@ -121,6 +122,31 @@ class GlobalConfig(FakeConfig):
     def get_relevant_data_units_by_key(self, search_key, **kwargs):
         self.lookups += 1
         return ["t00"]
+
+
+class PairConfig(FakeConfig):
+    """Each unit is stored as a data file plus a sidecar file."""
+
+    def get_stored_paths(self, unit, **kwargs):
+        return [self.base_path / f"{unit}.csv", self.base_path / f"{unit}.meta"]
+
+
+class PairDownloader(FakeDownloader):
+    def download_data_unit(self, unit, **kwargs):
+        path = super().download_data_unit(unit, **kwargs)
+        self.data_store.write_file(str(self.config.base_path / f"{unit}.meta"), "m")
+        return path
+
+
+class ArchiveConfig(FakeConfig):
+    """Stored files are known only once the unit is extracted, like WorldPop zips."""
+
+    def get_stored_paths(self, unit, **kwargs):
+        path = self.base_path / f"{unit}.csv"
+        return [path] if self.data_store.file_exists(str(path)) else []
+
+    def is_unit_available(self, unit, paths):
+        return bool(paths)
 
 
 class MercatorConfig(FakeConfig):
@@ -273,6 +299,76 @@ def test_load_without_ensure_does_not_download(handler):
 
     assert list(data["tile_id"].unique()) == ["t00"]
     assert handler.downloader.downloaded == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stored-file paths
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_force_download_on_stored_path_source_is_available(handler):
+    handler.ensure_data_available(SMALL_AOI)
+    handler.downloader.downloaded.clear()
+
+    path = handler.config.get_data_unit_path("t00")
+
+    assert handler.ensure_data_available(path, force_download=True) is True
+    assert handler.downloader.downloaded == []
+
+
+def _pair_handler(tmp_path):
+    config = PairConfig(base_path=tmp_path / "fake")
+    downloader = PairDownloader(config=config, data_store=config.data_store)
+    return FakeHandler(base_path=config.base_path, config=config, downloader=downloader)
+
+
+def test_unit_stored_as_several_files_is_missing_until_all_exist(tmp_path):
+    handler = _pair_handler(tmp_path)
+    handler.ensure_data_available(WIDE_AOI)
+    handler.data_store.remove(str(handler.config.base_path / "t10.meta"))
+    handler.downloader.downloaded.clear()
+
+    assert handler.ensure_data_available(WIDE_AOI) is True
+    assert handler.downloader.downloaded == ["t10"]
+
+
+def test_data_unit_paths_are_flattened_per_unit(tmp_path):
+    config = PairConfig(base_path=tmp_path)
+
+    assert config.get_data_unit_paths(["t00", "t10"]) == [
+        tmp_path / "t00.csv",
+        tmp_path / "t00.meta",
+        tmp_path / "t10.csv",
+        tmp_path / "t10.meta",
+    ]
+
+
+def test_single_string_unit_is_not_split_into_characters(handler):
+    assert handler.config.get_data_unit_paths("t00") == [
+        handler.config.get_data_unit_path("t00")
+    ]
+
+
+def test_units_with_paths_known_only_after_download(tmp_path):
+    config = ArchiveConfig(base_path=tmp_path / "fake")
+    handler = FakeHandler(base_path=config.base_path, config=config)
+
+    assert handler.ensure_data_available(SMALL_AOI) is True
+    assert handler.downloader.downloaded == ["t00"]
+    assert len(handler.load_data(SMALL_AOI)) == 2
+
+    handler.downloader.downloaded.clear()
+    assert handler.ensure_data_available(SMALL_AOI) is True
+    assert handler.downloader.downloaded == []
+
+
+def test_config_must_implement_a_path_hook(tmp_path):
+    class NoPaths(BaseHandlerConfig):
+        def get_relevant_data_units_by_key(self, search_key, **kwargs):
+            return ["t00"]
+
+    with pytest.raises(NotImplementedError, match="get_stored_paths"):
+        NoPaths(base_path=tmp_path).get_data_unit_paths(["t00"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

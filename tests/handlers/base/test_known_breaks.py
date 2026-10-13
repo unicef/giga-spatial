@@ -11,6 +11,7 @@ All tests run offline: network calls are replaced with fakes.
 
 import gzip
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import geopandas as gpd
@@ -310,12 +311,12 @@ def test_ghsl_rejects_10m_for_products_without_it(tmp_path):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GHSL: stored paths depend on the file_ext kwarg (L2, L5)
+# GHSL: stored paths are the extracted rasters (L2, L5)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@breaks("step 5", "without file_ext the base checks the never-stored .zip path")
-def test_ghsl_stored_tif_counts_as_available_without_file_ext(tmp_path):
+@pytest.fixture
+def ghsl(tmp_path):
     from gigaspatial.handlers.ghsl import GHSLDataConfig, GHSLDataHandler
 
     store = LocalDataStore()
@@ -326,19 +327,110 @@ def test_ghsl_stored_tif_counts_as_available_without_file_ext(tmp_path):
     tiles.to_file(tmp_path / "cache" / "tiles_4326.geojson", driver="GeoJSON")
 
     config = GHSLDataConfig(
-        product="GHS_POP", year=2020, resolution=100, base_path=tmp_path, data_store=store
+        product="GHS_POP",
+        year=2020,
+        resolution=100,
+        base_path=tmp_path,
+        data_store=store,
+        n_workers=1,
     )
     handler = GHSLDataHandler(
         product="GHS_POP", year=2020, resolution=100, config=config, data_store=store
     )
-    tif = config.get_data_unit_path("R1_C1", file_ext=".tif")
-    store.write_file(str(tif), b"tif")
+    return SimpleNamespace(handler=handler, config=config, store=store)
 
+
+def test_ghsl_stored_tif_counts_as_available_without_file_ext(ghsl):
+    ghsl.store.write_file(str(ghsl.config.get_data_unit_path("R1_C1")), b"tif")
     downloads = []
-    handler.downloader.download_data_units = lambda *a, **k: downloads.append(a)
+    ghsl.handler.downloader.download_data_units = lambda *a, **k: downloads.append(a)
 
-    assert handler.ensure_data_available(box(1, 1, 2, 2)) is True
+    assert ghsl.handler.ensure_data_available(box(1, 1, 2, 2)) is True
     assert downloads == []
+
+
+def test_ghsl_stored_tif_is_named_after_the_zip(ghsl):
+    url = ghsl.config.compute_dataset_url(tile_id="R1_C1")
+
+    assert ghsl.config.get_data_unit_path("R1_C1").name == (
+        url.rsplit("/", 1)[1].replace(".zip", ".tif")
+    )
+
+
+def test_ghsl_download_extracts_to_the_stored_path(ghsl, monkeypatch):
+    import io
+    import zipfile
+
+    from gigaspatial.handlers import ghsl as ghsl_module
+
+    stored = ghsl.config.get_data_unit_path("R1_C1")
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(stored.name, b"raster")
+        zf.writestr("GHSL_Data_Package.pdf", b"doc")
+    monkeypatch.setattr(
+        ghsl_module.requests,
+        "get",
+        lambda *a, **k: _FakeResponse(content=archive.getvalue()),
+    )
+
+    assert ghsl.handler.ensure_data_available(box(1, 1, 2, 2)) is True
+    assert ghsl.store.read_file(str(stored)) == b"raster"
+    info = ghsl.handler.get_available_data_info(box(1, 1, 2, 2))
+    assert info["available_paths"] == [stored] and info["all_available"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WorldPop: zip resources are stored as their extracted rasters (L5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+WP_ZIP = (
+    "https://data.worldpop.org/GIS/AgeSex_structures/School_Age_Population/"
+    "v1/2020/KEN/KEN_SAP_1km_2020.zip"
+)
+
+
+@pytest.fixture
+def school_age(tmp_path):
+    from gigaspatial.handlers.worldpop import WPPopulationConfig
+
+    return WPPopulationConfig(
+        release="GR1",
+        project="age_structures",
+        year=2020,
+        resolution=1000,
+        school_age=True,
+        under_18=False,
+        un_adjusted=False,
+        constrained=False,
+        base_path=tmp_path / "worldpop",
+        data_store=LocalDataStore(base_path=tmp_path),
+    )
+
+
+def test_worldpop_zip_unit_has_no_stored_paths_before_extraction(school_age):
+    assert school_age.get_stored_paths(WP_ZIP) == []
+    assert school_age.is_unit_available(WP_ZIP, []) is False
+
+
+def test_worldpop_zip_unit_is_stored_as_filtered_extracted_tifs(school_age):
+    folder = school_age.get_data_unit_path(WP_ZIP).parent
+    for name in ("KEN_F_M_PRIMARY_2020_1km.tif", "KEN_F_PRIMARY_2020_1km.tif"):
+        school_age.data_store.write_file(str(folder / name), b"tif")
+
+    default = school_age.get_stored_paths(WP_ZIP)
+    female = school_age.get_stored_paths(WP_ZIP, sex="F")
+    male = school_age.get_stored_paths(WP_ZIP, sex="M")
+
+    assert [Path(p).name for p in default] == ["KEN_F_M_PRIMARY_2020_1km.tif"]
+    assert [Path(p).name for p in female] == ["KEN_F_PRIMARY_2020_1km.tif"]
+    assert male == [] and school_age.is_unit_available(WP_ZIP, male) is True
+
+
+def test_worldpop_tif_unit_is_stored_as_itself(school_age):
+    url = WP_ZIP.replace(".zip", ".tif")
+
+    assert school_age.get_stored_paths(url) == [school_age.get_data_unit_path(url)]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

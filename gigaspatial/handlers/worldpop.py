@@ -850,7 +850,7 @@ class WPPopulationConfig(BaseHandlerConfig):
         under_18:           If ``True``, filters for under-18 demographic cohorts.
         dug_level:          Urbanisation classification level (``"L1"`` or ``"L2"``).
         dataset_category:   Resolved category string (populated by validator).
-        demographic_filter: Active path filter (populated by :meth:`get_data_unit_paths`).
+        demographic_filter: Active path filter (populated by :meth:`get_stored_paths`).
     """
 
     client = WorldPopRestClient()
@@ -1026,67 +1026,64 @@ class WPPopulationConfig(BaseHandlerConfig):
         """
         return self.base_path / unit.split("GIS/")[1]
 
-    def get_data_unit_paths(self, units: Union[List[str], str], **kwargs) -> List[Path]:
+    def get_stored_paths(self, unit: str, **kwargs) -> List[Path]:
         """
-        Resolve one or more WorldPop URLs to local file paths, applying filters.
+        Return the stored files of a WorldPop resource.
 
-        For **school-age** and **under-18** datasets (zip archives already
-        extracted), constructs a :class:`DemographicPathFilter` from ``kwargs``
-        and stores it on ``self.demographic_filter`` for the reader to consume.
-        For non-school-age ``age_structures`` the filter is stored without
-        immediately applying it (deferred to the reader), replacing the former
-        ``_temp_age_sex_filters`` side-channel.
+        A ``.tif`` resource is stored as itself. A zip resource (school-age
+        and under-18 cohorts) is stored as the ``.tif`` files extracted from
+        it, filtered by the demographic criteria in ``kwargs``; their names
+        are known only after extraction, so this is empty before download.
+
+        For ``age_structures`` the :class:`DemographicPathFilter` built from
+        ``kwargs`` is also stored on ``self.demographic_filter`` for the
+        reader to consume.
 
         Args:
-            units:    Single URL or list of URLs for WorldPop resources.
+            unit:     Remote URL of the resource.
             **kwargs: Filtering criteria forwarded to
                       :meth:`DemographicPathFilter.from_kwargs`.
 
         Returns:
-            A list of :class:`~pathlib.Path` objects for the resolved local files.
+            The resource's stored file paths.
         """
-        if not isinstance(units, list):
-            units = [units]
-
-        dem_filter = DemographicPathFilter.from_kwargs(**kwargs)
-
-        # ── School-age / under-18 branch (zip → extracted tifs) ──────────────
-        if self.project == "age_structures" and (self.school_age or self.under_18):
-            # Store the filter so the reader can access it if it needs to re-filter
+        dem_filter = None
+        if self.project == "age_structures":
+            dem_filter = DemographicPathFilter.from_kwargs(**kwargs)
             object.__setattr__(self, "demographic_filter", dem_filter)
 
-            resolved_paths: List[Path] = []
-            for url in units:
-                output_dir = self.get_data_unit_path(url).parent
-                if self.data_store.is_dir(str(output_dir)):
-                    try:
-                        all_extracted_tifs = [
-                            Path(f)
-                            for f in self.data_store.list_files(str(output_dir))
-                            if f.lower().endswith(".tif")
-                        ]
-                        filtered_tifs = dem_filter.filter_paths(
-                            all_extracted_tifs,
-                            project=self.project,
-                            school_age=self.school_age,
-                            _logger=self.logger,
-                        )
-                        resolved_paths.extend(filtered_tifs)
-                    except Exception:
-                        resolved_paths.append(self.get_data_unit_path(url))
-                else:
-                    resolved_paths.append(self.get_data_unit_path(url))
+        if not self._is_archive(unit):
+            return [self.get_data_unit_path(unit)]
 
-            return resolved_paths
+        tifs = self._extracted_tifs(unit)
+        if dem_filter is None:
+            return tifs
+        return dem_filter.filter_paths(
+            tifs,
+            project=self.project,
+            school_age=self.school_age,
+            _logger=self.logger,
+        )
 
-        # ── Non-school_age age_structures (deferred filter via demographic_filter) ──
-        if self.project == "age_structures" and not self.school_age:
-            # Store the filter for the reader; return all potential paths
-            object.__setattr__(self, "demographic_filter", dem_filter)
-            return [self.get_data_unit_path(unit) for unit in units]
+    def is_unit_available(self, unit: str, paths: List[Path]) -> bool:
+        """A zip resource is available once any of its ``.tif`` files is extracted."""
+        if self._is_archive(unit):
+            return bool(self._extracted_tifs(unit))
+        return super().is_unit_available(unit, paths)
 
-        # ── All other datasets ────────────────────────────────────────────────
-        return [self.get_data_unit_path(unit) for unit in units]
+    @staticmethod
+    def _is_archive(unit: str) -> bool:
+        return unit.lower().endswith(".zip")
+
+    def _extracted_tifs(self, unit: str) -> List[Path]:
+        output_dir = self.get_data_unit_path(unit).parent
+        if not self.data_store.is_dir(str(output_dir)):
+            return []
+        return [
+            Path(f)
+            for f in self.data_store.list_files(str(output_dir))
+            if f.lower().endswith(".tif")
+        ]
 
     # ── Backward-compatibility shim ───────────────────────────────────────────
 

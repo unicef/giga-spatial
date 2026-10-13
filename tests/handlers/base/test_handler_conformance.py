@@ -65,6 +65,11 @@ def test_resolution_is_customised_only_through_hooks(cls):
     assert "get_relevant_data_units" not in vars(cls)
 
 
+@pytest.mark.parametrize("cls", HANDLER_CONFIGS, ids=lambda c: c.__name__)
+def test_stored_paths_are_customised_per_unit(cls):
+    assert "get_data_unit_paths" not in vars(cls)
+
+
 CACHE_INTERNALS = ("_units", "_unit_cache", "_cache_key", "_source_key")
 
 

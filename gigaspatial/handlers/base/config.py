@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, List, Optional, Union, Tuple, Iterable
 import geopandas as gpd
+import pandas as pd
 from pyproj import CRS
 from shapely.geometry import Point, MultiPoint
 from shapely.geometry.base import BaseGeometry
@@ -168,38 +169,71 @@ class BaseHandlerConfig(ABC):
         """
         pass
 
-    @abstractmethod
-    def get_data_unit_path(self, unit: Any, **kwargs) -> list:
+    def get_data_unit_path(self, unit: Any, **kwargs) -> Path:
         """
-        Resolve a data unit identifier to its file path(s).
+        Resolve a data unit to its single stored file.
+
+        Implement this for datasets that store one file per unit, or override
+        ``get_stored_paths`` instead.
 
         Args:
             unit: The data unit identifier (e.g., a filename or tile ID).
             **kwargs: Additional resolution context.
 
         Returns:
-            A list of paths corresponding to the unit.
+            The path of the unit's stored file in the data store.
         """
-        pass
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement get_data_unit_path or get_stored_paths"
+        )
 
-    def get_data_unit_paths(self, units: Union[Iterable[Any]], **kwargs) -> list:
+    def get_stored_paths(self, unit: Any, **kwargs) -> List[Path]:
         """
-        Resolve multiple data unit identifiers to their corresponding file paths.
+        Return the files a data unit is stored as in the data store.
+
+        These are the files that end up in storage after download (e.g. the
+        ``.tif`` extracted from a downloaded zip), not the remote resource.
+        The default is the single path from ``get_data_unit_path``.
 
         Args:
-            units: Iterable of data unit identifiers.
+            unit: The data unit identifier.
             **kwargs: Additional resolution context.
 
         Returns:
-            A flat list of all resolved file paths.
+            The unit's stored file paths.
         """
-        if not isinstance(units, Iterable):
+        return [self.get_data_unit_path(unit, **kwargs)]
+
+    def is_unit_available(self, unit: Any, paths: List[Path]) -> bool:
+        """
+        Return True if a data unit is already stored and needs no download.
+
+        Args:
+            unit: The data unit identifier.
+            paths: The unit's stored paths, from ``get_stored_paths``.
+
+        Returns:
+            True if every stored path exists in the data store.
+        """
+        return all(self.data_store.file_exists(str(path)) for path in paths)
+
+    def get_data_unit_paths(self, units: Union[Iterable[Any]], **kwargs) -> list:
+        """
+        Return the stored file paths of several data units, flattened.
+
+        Args:
+            units: Iterable (or DataFrame) of data unit identifiers.
+            **kwargs: Additional resolution context.
+
+        Returns:
+            A flat list of all stored file paths.
+        """
+        if isinstance(units, pd.DataFrame):
+            units = units.to_dict("records")
+        elif isinstance(units, (str, dict)) or not isinstance(units, Iterable):
             units = [units]
 
-        if not units:
-            return []
-
-        return [self.get_data_unit_path(unit=unit, **kwargs) for unit in units]
+        return [path for unit in units for path in self.get_stored_paths(unit, **kwargs)]
 
     def extract_search_geometry(self, source, **kwargs) -> BaseGeometry:
         """

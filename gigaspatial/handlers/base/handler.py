@@ -167,17 +167,19 @@ class BaseHandler(ABC):
         """
         Guarantee that the required data for a source exists in the `DataStore`.
 
-        Checks for local availability of data files. If any are missing or if
-        `force_download` is True, it triggers the downloader to acquire them.
+        Resolves the source into data units and downloads those that are not
+        stored yet (``config.is_unit_available``), or all of them if
+        `force_download` is True. Path sources are only checked for existence.
 
         Args:
             source: Specification of the required data.
-            force_download: If True, downloads data regardless of local state.
+            force_download: If True, downloads every unit regardless of local state.
             **kwargs: Additional parameters for unit resolution or download.
 
         Returns:
             True if all required data is available in the DataStore, False if
-            some files are still missing after the download attempt.
+            some units (or explicit paths) are still missing after the
+            download attempt.
 
         Raises:
             Exception: Errors raised while resolving the source into data units
@@ -186,80 +188,57 @@ class BaseHandler(ABC):
                 downloading. Other download errors are logged, and the
                 availability check that follows decides the return value.
         """
-        path_source = is_path_source(source)
+        if is_path_source(source):
+            paths = self.reader.resolve_by_paths(source)
+            missing = [p for p in paths if not self.data_store.file_exists(str(p))]
+            if missing:
+                self.logger.warning(
+                    f"Required explicit file paths are missing: {missing}. "
+                    "Cannot automatically download them without an abstract source."
+                )
+                return False
+            if force_download:
+                self.logger.warning(
+                    "force_download has no effect on path sources: they name "
+                    "stored files, not data units to fetch."
+                )
+            return True
 
-        if path_source:
-            if isinstance(source, (str, Path)):
-                data_paths = [Path(source)]
-            else:
-                data_paths = [Path(p) for p in source]
-            data_units = data_paths
-        else:
-            # Get relevant units (cached if already computed for this source)
-            data_units = self.config.get_relevant_data_units(
-                source, force_recompute=force_download, **kwargs
-            )
-            data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
-
-        # Check if data exists (unless force download)
-        if not force_download:
-            missing_paths = [
-                path
-                for path in data_paths
-                if not self.data_store.file_exists(str(path))
-            ]
-        else:
-            # If force_download, treat all as missing
-            missing_paths = data_paths
-
-        if not missing_paths:
+        units = self.config.get_relevant_data_units(
+            source, force_recompute=force_download, **kwargs
+        )
+        units_to_download = (
+            list(units) if force_download else self._missing_units(units, **kwargs)
+        )
+        if not units_to_download:
             self.logger.info("All required data is already available")
             return True
 
-        if path_source:
-            self.logger.warning(
-                f"Required explicit file paths are missing: {missing_paths}. "
-                "Cannot automatically download them without an abstract source."
-            )
-            return False
-
-        # Map units to paths (assumes correspondence order; adapt if needed)
-        path_to_unit = dict(zip(data_paths, data_units))
-        if force_download:
-            units_to_download = data_units
-        else:
-            units_to_download = [
-                path_to_unit[p] for p in missing_paths if p in path_to_unit
-            ]
-
         try:
-            if units_to_download:
-                self.downloader.download_data_units(units_to_download, **kwargs)
-            else:
-                # Fallback - download by source if unit mapping isn't available
-                self.downloader.download(source, **kwargs)
+            self.downloader.download_data_units(units_to_download, **kwargs)
         except (TypeError, AttributeError, NameError):
             raise
         except Exception:
             self.logger.error("Download failed", exc_info=True)
 
-        # After attempted download, refresh data paths in case the mapping
-        # from units to local files has changed (e.g. ZIP → extracted .tif files)
-        data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
-
-        # After attempted download, check again
-        remaining_missing = [
-            path
-            for path in data_paths
-            if not self.data_store.file_exists(str(path))
-        ]
-        if remaining_missing:
+        still_missing = self._missing_units(units_to_download, **kwargs)
+        if still_missing:
             self.logger.error(
-                f"Some data still missing after download: {remaining_missing}"
+                f"{len(still_missing)} data unit(s) still missing after download: "
+                f"{still_missing}"
             )
             return False
 
         return True
+
+    def _missing_units(self, units, **kwargs) -> list:
+        return [
+            unit
+            for unit in units
+            if not self.config.is_unit_available(
+                unit, self.config.get_stored_paths(unit, **kwargs)
+            )
+        ]
 
     def load_data(
         self,
@@ -346,31 +325,29 @@ class BaseHandler(ABC):
             **kwargs: Additional parameters for resolving paths.
 
         Returns:
-            A dictionary containing counts and paths of available/missing data.
+            A dictionary with the number of available and missing data units,
+            and the stored paths that exist and do not exist.
         """
         try:
-            if hasattr(self.config, "get_relevant_data_units"):
-                data_units = self.config.get_relevant_data_units(source, **kwargs)
-                data_paths = self.config.get_data_unit_paths(data_units, **kwargs)
-            else:
-                data_paths = self.reader.resolve_source_paths(source, **kwargs)
-
-            existing_paths = [
-                path for path in data_paths if self.data_store.file_exists(str(path))
-            ]
-            missing_paths = [
-                path
-                for path in data_paths
-                if not self.data_store.file_exists(str(path))
-            ]
+            units = self.config.get_relevant_data_units(source, **kwargs)
+            available_units = 0
+            existing_paths, missing_paths = [], []
+            for unit in units:
+                paths = self.config.get_stored_paths(unit, **kwargs)
+                available_units += self.config.is_unit_available(unit, paths)
+                for path in paths:
+                    if self.data_store.file_exists(str(path)):
+                        existing_paths.append(path)
+                    else:
+                        missing_paths.append(path)
 
             return {
-                "total_data_units": len(data_paths),
-                "available_data_units": len(existing_paths),
-                "missing_data_units": len(missing_paths),
+                "total_data_units": len(units),
+                "available_data_units": available_units,
+                "missing_data_units": len(units) - available_units,
                 "available_paths": existing_paths,
                 "missing_paths": missing_paths,
-                "all_available": len(missing_paths) == 0,
+                "all_available": available_units == len(units),
             }
 
         except Exception as e:
