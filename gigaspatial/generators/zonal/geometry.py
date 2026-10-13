@@ -273,7 +273,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             self.zone_gdf,
             ensure_available=self.config.ensure_available,
             merge_rasters=True,
-            **kwargs,
+            **handler.select_options(kwargs),
         )
 
         self.logger.info(
@@ -664,7 +664,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                 raw = handler.load_data(
                     iso,
                     ensure_available=self.config.ensure_available,
-                    **kwargs,
+                    **handler.select_options(kwargs),
                 )
                 all_tif_processors = self._ensure_tif_list(raw)
 
@@ -691,7 +691,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
                     raw = handler.load_data(
                         iso,
                         ensure_available=self.config.ensure_available,
-                        **kwargs,
+                        **handler.select_options(kwargs),
                     )
                     tif_processors.extend(self._ensure_tif_list(raw))
 

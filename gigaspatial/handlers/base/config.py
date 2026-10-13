@@ -286,7 +286,8 @@ class BaseHandlerConfig(ABC):
                 DataFrame with coordinate columns, or iterable of
                 ``(lat, lon)`` pairs or ``Point`` objects.
             options: The resolve options; ``crs`` is the CRS of a source that
-                carries none.
+                carries none, and country sources read their boundary from
+                ``country_geom_path`` / ``country_data_store`` when given.
             **kwargs: Raw options, for configs without an ``options_type``.
                 Country sources forward the keys other than ``crs`` to
                 ``AdminBoundaries.create``.
@@ -302,7 +303,14 @@ class BaseHandlerConfig(ABC):
             boundary_kwargs = {**(options or {}), **kwargs}
             source_crs = boundary_kwargs.pop("crs", None)
         else:
-            boundary_kwargs = {}
+            boundary_kwargs = {
+                key: value
+                for key, value in (
+                    ("path", options.country_geom_path),
+                    ("data_store", options.country_data_store),
+                )
+                if value is not None
+            }
             source_crs = options.crs
         source_crs = source_crs or "EPSG:4326"
         kind = classify_source(source)

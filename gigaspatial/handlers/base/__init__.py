@@ -18,6 +18,7 @@ from gigaspatial.handlers.base.reader import BaseHandlerReader
 from gigaspatial.handlers.base.handler import BaseHandler
 from gigaspatial.handlers.base.options import (
     DownloadOptions,
+    RasterReadOptions,
     ReadOptions,
     ResolveOptions,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "BaseHandlerReader",
     "BaseHandler",
     "DownloadOptions",
+    "RasterReadOptions",
     "ReadOptions",
     "ResolveOptions",
 ]

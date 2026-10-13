@@ -1,3 +1,4 @@
+import dataclasses
 import pandas as pd
 from pathlib import Path
 from typing import List, Union, Literal, Optional
@@ -17,6 +18,9 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.config import config as global_config
@@ -32,6 +36,8 @@ class NasaSRTMConfig(BaseHandlerConfig):
 
     Each tile file covers 1 degree latitude x 1 degree longitude.
     """
+
+    options_type = ResolveOptions
 
     earthdata_username: str = Field(
         default=global_config.EARTHDATA_USERNAME, description="Earthdata Login username"
@@ -122,14 +128,14 @@ class NasaSRTMConfig(BaseHandlerConfig):
         return f"{ns}{abs(lat):02d}{ew}{abs(lon):03d}"
 
     def get_relevant_data_units_by_key(
-        self, search_key: BaseGeometry, **kwargs
+        self, search_key: BaseGeometry, options: ResolveOptions
     ) -> List[dict]:
         mask = self.tile_tree.query(search_key, predicate="intersects")
         filtered_grid = [self.grid_records[i] for i in mask]
 
         return gpd.GeoDataFrame(filtered_grid, crs="EPSG:4326").to_dict("records")
 
-    def get_data_unit_path(self, unit: Union[pd.Series, dict, str], **kwargs) -> Path:
+    def get_data_unit_path(self, unit: Union[pd.Series, dict, str], options=None) -> Path:
         """
         Given a tile unit or tile_id, return expected storage path.
         """
@@ -139,6 +145,8 @@ class NasaSRTMConfig(BaseHandlerConfig):
 
 class NasaSRTMDownloader(BaseHandlerDownloader):
     """A class to handle downloads of NASA SRTM elevation data."""
+
+    options_type = DownloadOptions
 
     def __init__(
         self,
@@ -177,9 +185,7 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
             return False
 
     def download_data_unit(
-        self,
-        tile_info: Union[pd.Series, dict],
-        **kwargs,
+        self, tile_info: Union[pd.Series, dict], options: DownloadOptions
     ) -> Optional[str]:
         """Download data file for a single SRTM tile."""
 
@@ -218,8 +224,25 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
             return None
 
 
+@dataclasses.dataclass(frozen=True)
+class SRTMReadOptions(ReadOptions):
+    """
+    Read options of NASA SRTM tiles.
+
+    Attributes:
+        as_dataframe: If True, returns one DataFrame of elevation points;
+            otherwise a list of `SRTMParser` objects.
+        dropna: If True, drops points with no elevation value.
+    """
+
+    as_dataframe: bool = True
+    dropna: bool = True
+
+
 class NasaSRTMReader(BaseHandlerReader):
     """A class to handle reading of NASA SRTM elevation data."""
+
+    options_type = SRTMReadOptions
 
     def __init__(
         self,
@@ -243,23 +266,20 @@ class NasaSRTMReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: SRTMReadOptions
     ) -> Union[pd.DataFrame, List[SRTMParser]]:
         """
         Load SRTM elevation data from file paths.
 
         Args:
             source_data_path: List of SRTM .hgt.zip file paths
-            **kwargs: Additional parameters for data loading
-                - as_dataframe: bool, default=True. If True, return concatenated DataFrame.
-                               If False, return list of SRTMParser objects.
-                - dropna: bool, default=True. If True, drop rows with NaN elevation values.
+            options: See `SRTMReadOptions`.
 
         Returns:
             Union[pd.DataFrame, List[SRTMParser]]: Loaded elevation data
         """
-        as_dataframe = kwargs.get("as_dataframe", True)
-        dropna = kwargs.get("dropna", True)
+        as_dataframe = options.as_dataframe
+        dropna = options.dropna
 
         parsers = []
         for file_path in source_data_path:

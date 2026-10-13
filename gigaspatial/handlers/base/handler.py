@@ -389,6 +389,15 @@ class BaseHandler(ABC):
                 "all_available": False,
             }
 
+    def select_options(self, kwargs: dict) -> dict:
+        """
+        Return the keyword arguments that are options of this handler.
+
+        For callers that share one set of keyword arguments between the
+        handler and other consumers.
+        """
+        return select_kwargs(kwargs, self.config, self.downloader, self.reader)
+
     def cleanup(self):
         """
         Cleanup resources used by the handler.

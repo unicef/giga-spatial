@@ -1,8 +1,8 @@
-# from dataclasses import dataclass
+import dataclasses
 from pathlib import Path
 import functools
 import multiprocessing
-from typing import List, Optional, Union, Literal, Tuple
+from typing import List, Optional, Union, Literal
 import geopandas as gpd
 import pandas as pd
 import numpy as np
@@ -30,7 +30,11 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    RasterReadOptions,
+    ResolveOptions,
 )
+from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.config import config as global_config
 
 
@@ -43,6 +47,8 @@ class CoordSystem(int, Enum):
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
 class GHSLDataConfig(BaseHandlerConfig):
+    options_type = ResolveOptions
+
     # constants
     AVAILABLE_YEARS: List = Field(default=np.append(np.arange(1975, 2031, 5), 2018))
     AVAILABLE_RESOLUTIONS: List = Field(default=[10, 100, 1000])
@@ -239,7 +245,7 @@ class GHSLDataConfig(BaseHandlerConfig):
         return "EPSG:4326" if self.coord_system == CoordSystem.WGS84 else "ESRI:54009"
 
     def get_relevant_data_units_by_key(
-        self, search_key: BaseGeometry, **kwargs
+        self, search_key: BaseGeometry, options: ResolveOptions
     ) -> List[str]:
         """
         Return the IDs of the tiles intersecting a search geometry.
@@ -265,7 +271,7 @@ class GHSLDataConfig(BaseHandlerConfig):
 
         return intersecting_tiles
 
-    def get_data_unit_path(self, unit: str = None, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str = None, options=None) -> Path:
         """
         Return the stored ``.tif`` of the configured dataset or dataset tile.
 
@@ -332,8 +338,25 @@ class GHSLDataConfig(BaseHandlerConfig):
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class GHSLDownloadOptions(DownloadOptions):
+    """
+    Download options of GHSL tiles.
+
+    Attributes:
+        extract: If True, the raster is extracted from the downloaded zip;
+            otherwise the zip is saved next to where the raster would be.
+        file_pattern: Regex selecting the zip members to extract.
+    """
+
+    extract: bool = True
+    file_pattern: Optional[str] = r".*\.tif$"
+
+
 class GHSLDataDownloader(BaseHandlerDownloader):
     """A class to handle downloads of GHSL datasets."""
+
+    options_type = GHSLDownloadOptions
 
     def __init__(
         self,
@@ -355,20 +378,14 @@ class GHSLDataDownloader(BaseHandlerDownloader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def download_data_unit(
-        self,
-        tile_id: str,
-        extract: bool = True,
-        file_pattern: Optional[str] = r".*\.tif$",
-        **kwargs,
+        self, tile_id: str, options: GHSLDownloadOptions
     ) -> Optional[Union[Path, List[Path]]]:
         """
         Downloads and optionally extracts files for a given tile.
 
         Args:
             tile_id: tile ID to process.
-            extract: If True and the downloaded file is a zip, extract its contents. Defaults to True.
-            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-            **kwargs: Additional parameters passed to download methods
+            options: ``extract`` and ``file_pattern`` select what is stored.
 
         Returns:
             Path to the downloaded file if extract=False,
@@ -377,8 +394,9 @@ class GHSLDataDownloader(BaseHandlerDownloader):
         """
         url = self.config.compute_dataset_url(tile_id=tile_id)
         output_path = self.config.get_data_unit_path(tile_id)
+        file_pattern = options.file_pattern
 
-        if not extract:
+        if not options.extract:
             return self._download_file(url, output_path.with_suffix(".zip"))
 
         extracted_files: List[Path] = []
@@ -401,6 +419,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
                     unit="B",
                     unit_scale=True,
                     desc=f"Downloading {tile_id}",
+                    disable=not options.show_progress,
                 ) as pbar:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
@@ -450,50 +469,6 @@ class GHSLDataDownloader(BaseHandlerDownloader):
                         f"Could not delete temporary file {temp_downloaded_path}: {e}"
                     )
 
-    def download(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
-            BaseGeometry,  # shapely geoms
-            gpd.GeoDataFrame,
-        ],
-        extract: bool = True,
-        file_pattern: Optional[str] = r".*\.tif$",
-        **kwargs,
-    ) -> List[Optional[Union[Path, List[Path]]]]:
-        """
-        Download GHSL data for a specified geographic region.
-
-        The region can be defined by a country code/name, a list of points,
-        a Shapely geometry, or a GeoDataFrame. This method identifies the
-        relevant GHSL tiles intersecting the region and downloads the
-        specified type of data (polygons or points) for those tiles in parallel.
-
-        Args:
-            source: Defines the geographic area for which to download data.
-                    Can be:
-                      - A string representing a country code or name.
-                      - A list of (latitude, longitude) tuples or Shapely Point objects.
-                      - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
-                      - A GeoDataFrame with geometry column in EPSG:4326.
-            extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
-            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-            **kwargs: Additional keyword arguments. These will be passed down to
-                      `AdminBoundaries.create()` (if `source` is a country)
-                      and to `self.download_data_units()`.
-
-        Returns:
-            A list of local file paths for the successfully downloaded tiles.
-            Returns an empty list if no data is found for the region or if
-            all downloads fail.
-        """
-
-        tiles = self.config.get_relevant_data_units(source, **kwargs)
-        return self.download_data_units(
-            tiles, extract=extract, file_pattern=file_pattern, **kwargs
-        )
-
     def download_by_country(
         self,
         country_code: str,
@@ -519,17 +494,16 @@ class GHSLDataDownloader(BaseHandlerDownloader):
                                instead of the default from `AdminBoundaries`.
             extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
             file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-            **kwargs: Additional keyword arguments that are passed to
-                      `download_data_units`. For example, `extract` to download and extract.
+            **kwargs: Other resolve and download options.
 
         Returns:
             A list of local file paths for the successfully downloaded tiles
             for the specified country.
         """
         return self.download(
-            source=country_code,
-            data_store=data_store,
-            path=country_geom_path,
+            country_code,
+            country_data_store=data_store,
+            country_geom_path=country_geom_path,
             extract=extract,
             file_pattern=file_pattern,
             **kwargs,
@@ -577,6 +551,8 @@ class GHSLDataDownloader(BaseHandlerDownloader):
 
 class GHSLDataReader(BaseHandlerReader):
 
+    options_type = RasterReadOptions
+
     def __init__(
         self,
         config: Union[GHSLDataConfig, dict[str, Union[str, int]]],
@@ -597,37 +573,19 @@ class GHSLDataReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self,
-        source_data_path: List[Union[str, Path]],
-        merge_rasters: bool = False,
-        **kwargs,
+        self, source_data_path: List[Union[str, Path]], options: RasterReadOptions
     ) -> Union[List[TifProcessor], TifProcessor]:
         """
         Load TifProcessors from GHSL dataset.
         Args:
             source_data_path: List of file paths to load
-            merge_rasters: If True, all rasters will be merged into a single TifProcessor.
-                           Defaults to False.
+            options: ``merge_rasters`` merges all rasters into a single TifProcessor.
         Returns:
             Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects for accessing the raster data or a single
                                                     TifProcessor if merge_rasters is True.
         """
         return self._load_raster_data(
-            raster_paths=source_data_path, merge_rasters=merge_rasters
-        )
-
-    def load(
-        self,
-        source,
-        crop_to_source: bool = False,
-        merge_rasters: bool = False,
-        **kwargs,
-    ):
-        return super().load(
-            source=source,
-            crop_to_source=crop_to_source,
-            merge_rasters=merge_rasters,
-            **kwargs,
+            raster_paths=source_data_path, merge_rasters=options.merge_rasters
         )
 
 
@@ -796,31 +754,6 @@ class GHSLDataHandler(BaseHandler):
             config=config, data_store=data_store, logger=logger, **kwargs
         )
 
-    def load_data(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-            Path,  # path
-            List[Union[str, Path]],  # list of paths
-        ],
-        crop_to_source: bool = False,
-        ensure_available: bool = True,
-        merge_rasters: bool = False,
-        **kwargs,
-    ):
-        return super().load_data(
-            source=source,
-            crop_to_source=crop_to_source,
-            ensure_available=ensure_available,
-            extract=True,
-            file_pattern=r".*\.tif$",
-            merge_rasters=merge_rasters,
-            **kwargs,
-        )
-
     def load_into_dataframe(
         self,
         source: Union[
@@ -841,21 +774,26 @@ class GHSLDataHandler(BaseHandler):
         Args:
             source: The data source specification
             ensure_available: If True, ensure data is downloaded before loading
-            **kwargs: Additional parameters passed to load methods
+            **kwargs: Handler options go to ``load_data``, the rest to
+                ``TifProcessor.to_dataframe``.
 
         Returns:
             DataFrame containing the GHSL data
         """
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
             source=source,
             crop_to_source=crop_to_source,
             ensure_available=ensure_available,
-            **kwargs,
+            **load_kwargs,
         )
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_dataframe(**kwargs)
+            return tif_processors.to_dataframe(**frame_kwargs)
         return pd.concat(
-            [tp.to_dataframe(**kwargs) for tp in tif_processors], ignore_index=True
+            [tp.to_dataframe(**frame_kwargs) for tp in tif_processors],
+            ignore_index=True,
         )
 
     def load_into_geodataframe(
@@ -878,19 +816,24 @@ class GHSLDataHandler(BaseHandler):
         Args:
             source: The data source specification
             ensure_available: If True, ensure data is downloaded before loading
-            **kwargs: Additional parameters passed to load methods
+            **kwargs: Handler options go to ``load_data``, the rest to
+                ``TifProcessor.to_geodataframe``.
 
         Returns:
             GeoDataFrame containing the GHSL data
         """
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
             source=source,
             crop_to_source=crop_to_source,
             ensure_available=ensure_available,
-            **kwargs,
+            **load_kwargs,
         )
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_geodataframe(**kwargs)
+            return tif_processors.to_geodataframe(**frame_kwargs)
         return pd.concat(
-            [tp.to_geodataframe(**kwargs) for tp in tif_processors], ignore_index=True
+            [tp.to_geodataframe(**frame_kwargs) for tp in tif_processors],
+            ignore_index=True,
         )

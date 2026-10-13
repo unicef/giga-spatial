@@ -414,13 +414,15 @@ def test_worldpop_zip_unit_has_no_stored_paths_before_extraction(school_age):
 
 
 def test_worldpop_zip_unit_is_stored_as_filtered_extracted_tifs(school_age):
+    from gigaspatial.handlers.worldpop import WPResolveOptions
+
     folder = school_age.get_data_unit_path(WP_ZIP).parent
     for name in ("KEN_F_M_PRIMARY_2020_1km.tif", "KEN_F_PRIMARY_2020_1km.tif"):
         school_age.data_store.write_file(str(folder / name), b"tif")
 
     default = school_age.get_stored_paths(WP_ZIP)
-    female = school_age.get_stored_paths(WP_ZIP, sex="F")
-    male = school_age.get_stored_paths(WP_ZIP, sex="M")
+    female = school_age.get_stored_paths(WP_ZIP, WPResolveOptions(sex="F"))
+    male = school_age.get_stored_paths(WP_ZIP, WPResolveOptions(sex=["M"]))
 
     assert [Path(p).name for p in default] == ["KEN_F_M_PRIMARY_2020_1km.tif"]
     assert [Path(p).name for p in female] == ["KEN_F_PRIMARY_2020_1km.tif"]
