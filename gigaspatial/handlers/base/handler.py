@@ -389,14 +389,20 @@ class BaseHandler(ABC):
                 "all_available": False,
             }
 
-    def select_options(self, kwargs: dict) -> dict:
+    def select_options(self, kwargs: dict, *components) -> dict:
         """
         Return the keyword arguments that are options of this handler.
 
         For callers that share one set of keyword arguments between the
         handler and other consumers.
+
+        Args:
+            kwargs: The shared keyword arguments.
+            *components: Keep only the options of these components (e.g.
+                ``handler.config`` for resolve options); defaults to all.
         """
-        return select_kwargs(kwargs, self.config, self.downloader, self.reader)
+        components = components or (self.config, self.downloader, self.reader)
+        return select_kwargs(kwargs, *components)
 
     def cleanup(self):
         """

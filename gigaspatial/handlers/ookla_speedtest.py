@@ -28,6 +28,7 @@ from gigaspatial.handlers.base import BaseHandlerConfig
 from gigaspatial.handlers.base import BaseHandlerDownloader
 from gigaspatial.handlers.base import BaseHandlerReader
 from gigaspatial.handlers.base import BaseHandler
+from gigaspatial.handlers.base import DownloadOptions, ReadOptions, ResolveOptions
 
 import logging
 from tqdm import tqdm
@@ -63,6 +64,8 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
     type: Literal["fixed", "mobile"] = Field(...)
     year: Optional[int] = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     quarter: Optional[int] = Field(default=None, ge=0, le=4)
+
+    options_type = ResolveOptions
 
     def __post_init__(self):
         if self.year is None:
@@ -123,29 +126,31 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
 
         return ookla_tiles
 
-    def get_search_key(self, source, **kwargs) -> None:
+    def get_search_key(self, source, options: ResolveOptions) -> None:
         """Ookla data is one global file per quarter: no source narrows it."""
         return None
 
-    def get_relevant_data_units_by_key(self, search_key=None, **kwargs) -> List[str]:
+    def get_relevant_data_units_by_key(
+        self, search_key, options: ResolveOptions
+    ) -> List[str]:
         """
         Return the Parquet URL for the configured year and quarter.
 
         Args:
             search_key: Always None; the dataset is a single global file.
-            **kwargs: Additional parameters.
+            options: The resolve options (unused).
 
         Returns:
             A list of dataset URLs.
         """
         return [self.DATASET_URL]
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str, options=None) -> Path:
         """Resolves a remote Ookla dataset URL to its local storage path.
 
         Args:
             unit: The remote Parquet URL.
-            **kwargs: Additional context.
+            options: The resolve options (unused).
 
         Returns:
             Absolute path to the local data file.
@@ -160,6 +165,8 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
     Acquires performance tiles from AWS S3 and persists them to local storage.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Union[OoklaSpeedtestConfig, dict[str, Union[str, int]]],
@@ -173,13 +180,13 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
         )
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, url: str, **kwargs) -> Optional[Path]:
+    def download_data_unit(self, url: str, options: DownloadOptions) -> Optional[Path]:
         """
         Download a single Ookla Parquet file.
 
         Args:
             url: Remote S3 URL.
-            **kwargs: Downloading parameters.
+            options: ``show_progress`` controls the progress bar.
 
         Returns:
             Local path to the downloaded file, or None on failure.
@@ -198,6 +205,7 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
                     total=total_size // 8192,
                     unit="KB",
                     desc=f"Downloading {output_path.name}",
+                    disable=not options.show_progress,
                 ):
                     file.write(chunk)
 
@@ -220,6 +228,7 @@ class OoklaSpeedtestReader(BaseHandlerReader):
     """
 
     QUADKEY_ZOOM_LEVEL = 16
+    options_type = ReadOptions
 
     def __init__(
         self,
@@ -235,14 +244,14 @@ class OoklaSpeedtestReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: ReadOptions
     ) -> pd.DataFrame:
         """
         Load Ookla data from local Parquet files.
 
         Args:
             source_data_path: List of local file paths.
-            **kwargs: Loading parameters.
+            options: The read options.
 
         Returns:
             A pandas DataFrame of speedtest results.
@@ -391,7 +400,7 @@ class OoklaSpeedtestHandler(BaseHandler):
                 source. Path sources and None are never cropped.
             process_geospatial: If True, returns a GeoDataFrame with tile geometries.
             ensure_available: If True, executes download if data is missing locally.
-            **kwargs: Filtering and processing parameters.
+            **kwargs: Handler options (e.g. ``show_progress``).
 
         Returns:
             Tabular or geospatial data for the requested area.

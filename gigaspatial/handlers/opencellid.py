@@ -12,6 +12,7 @@ import pandas as pd
 import geopandas as gpd
 import requests
 import logging
+import dataclasses
 from typing import List, Optional, Union
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -27,8 +28,30 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 from gigaspatial.config import config as global_config
+
+
+@dataclasses.dataclass(frozen=True)
+class OpenCellIDReadOptions(ReadOptions):
+    """
+    Read options of OpenCellID.
+
+    Attributes:
+        created_newer: Keep towers created in or after this year.
+        created_before: Keep towers created before this year; None means the
+            current year.
+        drop_duplicates: If True, keeps the latest update of each tower.
+        as_geodataframe: If True, returns a GeoDataFrame with point geometries.
+    """
+
+    created_newer: int = 2003
+    created_before: Optional[int] = None
+    drop_duplicates: bool = True
+    as_geodataframe: bool = False
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
@@ -47,14 +70,15 @@ class OpenCellIDConfig(BaseHandlerConfig):
     download_url: str = "https://opencellid.org/downloads.php?token="
 
     units_match_country = True
+    options_type = ResolveOptions
 
-    def get_search_key(self, source, **kwargs) -> str:
+    def get_search_key(self, source, options: ResolveOptions) -> str:
         """
         Identify the country alpha-2 code from a geographic source.
 
         Args:
             source: Country name or ISO code.
-            **kwargs: Additional context.
+            options: The resolve options (unused).
 
         Returns:
             The ISO 3166-1 alpha-2 country code.
@@ -71,14 +95,14 @@ class OpenCellIDConfig(BaseHandlerConfig):
             raise ValueError(f"Invalid country provided: {source}")
 
     def get_relevant_data_units_by_key(
-        self, search_key: str, **kwargs
+        self, search_key: str, options: ResolveOptions
     ) -> List[dict]:
         """
         Discover download links for a specific country by screen-scraping.
 
         Args:
             search_key: ISO 3166-1 alpha-2 country code.
-            **kwargs: Additional parameters.
+            options: The resolve options (unused).
 
         Returns:
             A list of dictionaries containing 'url' and 'country'.
@@ -137,13 +161,13 @@ class OpenCellIDConfig(BaseHandlerConfig):
             self.logger.error(f"Error fetching download links: {str(e)}")
             raise
 
-    def get_data_unit_path(self, unit: dict, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: dict, options=None) -> Path:
         """
         Determine the local storage path for an OpenCellID data unit.
 
         Args:
             unit: Dictionary containing 'url' and 'country' metadata.
-            **kwargs: Additional resolution context.
+            options: The resolve options (unused).
 
         Returns:
             Absolute local path for the CSV file.
@@ -176,13 +200,15 @@ class OpenCellIDDownloader(BaseHandlerDownloader):
     streaming responses to local storage.
     """
 
-    def download_data_unit(self, unit: dict, **kwargs) -> Path:
+    options_type = DownloadOptions
+
+    def download_data_unit(self, unit: dict, options: DownloadOptions) -> Path:
         """
         Acquire a single OpenCellID data unit.
 
         Args:
             unit: Dictionary containing 'url' and 'country' metadata.
-            **kwargs: Download parameters.
+            options: The download options.
 
         Returns:
             Path to the downloaded local file.
@@ -222,31 +248,27 @@ class OpenCellIDReader(BaseHandlerReader):
     results into tabular or geospatial objects.
     """
 
+    options_type = OpenCellIDReadOptions
+
     def load_from_paths(
         self,
         source_data_path: List[Union[str, Path]],
-        created_newer: int = 2003,
-        created_before: Optional[int] = None,
-        drop_duplicates: bool = True,
-        as_geodataframe: bool = False,
-        **kwargs,
+        options: OpenCellIDReadOptions,
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
         Load cell tower data from one or more local CSV paths.
 
         Args:
             source_data_path: List of local paths to OpenCellID files.
-            created_newer: Optional start year for creation date filtering.
-            created_before: Optional end year for creation date filtering.
-            drop_duplicates: If True, resolves duplicate towers by latest update.
-            as_geodataframe: If True, returns a GeoDataFrame with point geometries.
-            **kwargs: Additional loading parameters.
+            options: The creation year, deduplication and output filters.
 
         Returns:
             A pandas DataFrame or geopandas GeoDataFrame of processed cell data.
         """
-        if created_before is None:
-            created_before = pd.Timestamp.now().year
+        created_newer = options.created_newer
+        created_before = options.created_before or pd.Timestamp.now().year
+        drop_duplicates = options.drop_duplicates
+        as_geodataframe = options.as_geodataframe
 
         dfs = []
 

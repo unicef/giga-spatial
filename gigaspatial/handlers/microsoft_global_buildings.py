@@ -32,6 +32,9 @@ from gigaspatial.handlers.base import (
     BaseHandlerConfig,
     BaseHandlerDownloader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 from gigaspatial.config import config as global_config
@@ -95,6 +98,8 @@ class MSBuildingsConfig(BaseHandlerConfig):
         }
     )
     CUSTOM_MAPPING: Optional[Dict[str, str]] = None
+
+    options_type = ResolveOptions
 
     def __post_init__(self):
         """Initialize the configuration, load tile URLs, and set up location mapping."""
@@ -271,7 +276,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
         return location_mapping
 
     def get_relevant_data_units_by_key(
-        self, search_key: Union[str, BaseGeometry], **kwargs
+        self, search_key: Union[str, BaseGeometry], options: ResolveOptions
     ) -> List[dict]:
         """
         Find Microsoft Building tiles for a country or a geographic area.
@@ -281,7 +286,8 @@ class MSBuildingsConfig(BaseHandlerConfig):
 
         Args:
             search_key: ISO 3166-1 alpha-3 country code, or a search geometry.
-            **kwargs: Additional filtering parameters.
+            options: The country boundary options, for countries missing
+                from the location mapping.
 
         Returns:
             List of tile records containing quadkey, URL, and country metadata.
@@ -301,7 +307,10 @@ class MSBuildingsConfig(BaseHandlerConfig):
             )
 
             source_tiles = CountryMercatorTiles.create(
-                country_code, self.MERCATOR_ZOOM_LEVEL
+                country_code,
+                self.MERCATOR_ZOOM_LEVEL,
+                data_store=options.country_data_store,
+                country_geom_path=options.country_geom_path,
             )
         else:
             source_tiles = MercatorTiles.from_spatial(
@@ -316,7 +325,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
             mask, ["quadkey", "url", "country", "location"]
         ].to_dict("records")
 
-    def get_data_unit_path(self, unit: Union[pd.Series, dict], **kwargs) -> Path:
+    def get_data_unit_path(self, unit: Union[pd.Series, dict], options=None) -> Path:
 
         tile_location = unit["country"] if unit["country"] else unit["location"]
 
@@ -327,7 +336,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
             / f'{unit["quadkey"]}.csv.gz'
         )
 
-    def get_search_key(self, source, **kwargs) -> Union[str, BaseGeometry]:
+    def get_search_key(self, source, options: ResolveOptions) -> Union[str, BaseGeometry]:
         """
         Return the ISO 3166-1 alpha-3 code of a country source, so its tiles
         can be looked up by country; other sources use the search geometry.
@@ -337,7 +346,7 @@ class MSBuildingsConfig(BaseHandlerConfig):
                 return pycountry.countries.lookup(source).alpha_3
             except LookupError:
                 raise ValueError(f"Invalid country: {source}")
-        return self.extract_search_geometry(source, **kwargs)
+        return self.extract_search_geometry(source, options)
 
 
 class MSBuildingsDownloader(BaseHandlerDownloader):
@@ -347,6 +356,8 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
     Handles the parallel acquisition of gzipped building footprint CSVs
     from Azure Open Datasets.
     """
+
+    options_type = DownloadOptions
 
     def __init__(
         self,
@@ -372,14 +383,14 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
     def download_data_unit(
         self,
         tile_info: Union[pd.Series, dict],
-        **kwargs,
+        options: DownloadOptions,
     ) -> Optional[str]:
         """
         Download a single building footprint tile.
 
         Args:
             tile_info: Metropolitan or quadkey-specific metadata including 'url' and 'quadkey'.
-            **kwargs: Additional parameters.
+            options: The download options.
 
         Returns:
             The path to the local gzipped CSV file on success, or None on failure.
@@ -429,7 +440,7 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
             A list of local paths to the successfully downloaded tiles.
         """
         return self.download(
-            source=country, data_store=data_store, path=country_geom_path
+            country, country_data_store=data_store, country_geom_path=country_geom_path
         )
 
 
@@ -441,6 +452,8 @@ class MSBuildingsReader(BaseHandlerReader):
     handling the conversion of string-based geometry into Shapely objects.
     """
 
+    options_type = ReadOptions
+
     def __init__(
         self,
         config: Optional[MSBuildingsConfig] = None,
@@ -451,14 +464,14 @@ class MSBuildingsReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: ReadOptions
     ) -> gpd.GeoDataFrame:
         """
         Load building data from specific file paths.
 
         Args:
             source_data_path: List of local paths to building data files.
-            **kwargs: Additional parameters for `read_ms_dataset`.
+            options: The read options.
 
         Returns:
             A GeoDataFrame containing the aggregated building data.

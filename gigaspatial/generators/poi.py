@@ -1191,7 +1191,9 @@ class PoiViewGenerator:
                 self._update_view(empty_df)
                 return self.view
 
-        building_files = handler.reader.resolve_source_paths(country, **kwargs)
+        building_files = handler.reader.resolve_source_paths(
+            country, **handler.select_options(kwargs, handler.config)
+        )
 
         result = GoogleMSBuildingsEngine.nearest_buildings_to_pois(
             handler=handler,
@@ -1249,7 +1251,9 @@ class PoiViewGenerator:
                 self._update_view(empty_df)
                 return self.view
 
-        building_files = handler.reader.resolve_source_paths(country, **kwargs)
+        building_files = handler.reader.resolve_source_paths(
+            country, **handler.select_options(kwargs, handler.config)
+        )
 
         if len(building_files) == 1:
             self.logger.info("Single file country: using single-file optimization.")

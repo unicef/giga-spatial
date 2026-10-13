@@ -147,7 +147,7 @@ def test_ookla_country_source_resolves_without_boundary_lookup(ookla, monkeypatc
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_google_ms_download_accepts_forwarded_kwargs(tmp_path, monkeypatch):
+def test_google_ms_download_accepts_download_options(tmp_path, monkeypatch):
     from gigaspatial.handlers.google_ms_combined_buildings import (
         GoogleMSBuildingsConfig,
         GoogleMSBuildingsDownloader,
@@ -164,7 +164,7 @@ def test_google_ms_download_accepts_forwarded_kwargs(tmp_path, monkeypatch):
         f"{config.cloud_uri}/geoparquet/by_country/country_iso=KEN/KEN.parquet"
     )
 
-    assert downloader.download_data_units([unit], merge_rasters=False)
+    assert downloader.download_data_units([unit], show_progress=False)
 
 
 @pytest.fixture
@@ -201,12 +201,12 @@ def google_open_buildings(tmp_path, monkeypatch):
     return gob.GoogleOpenBuildingsDownloader(config=config)
 
 
-def test_google_open_buildings_download_accepts_forwarded_kwargs(
+def test_google_open_buildings_download_accepts_download_options(
     google_open_buildings,
 ):
     unit = google_open_buildings.config.tiles_gdf.iloc[0].to_dict()
 
-    assert google_open_buildings.download_data_units([unit], merge_rasters=False)
+    assert google_open_buildings.download_data_units([unit], show_progress=False)
 
 
 def test_google_open_buildings_download_by_country(google_open_buildings):

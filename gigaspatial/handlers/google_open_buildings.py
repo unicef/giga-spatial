@@ -24,8 +24,24 @@ from gigaspatial.handlers.base import (
     BaseHandlerConfig,
     BaseHandlerDownloader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 from gigaspatial.config import config as global_config
+
+
+@dataclass(frozen=True)
+class GoogleOpenBuildingsResolveOptions(ResolveOptions):
+    """
+    Resolve options of Google Open Buildings.
+
+    Attributes:
+        data_type: Geometry format of the tiles ('polygons' or 'points').
+            It is stored on each resolved unit, so the unit names its file.
+    """
+
+    data_type: Literal["polygons", "points"] = "polygons"
 
 
 @dataclass
@@ -43,6 +59,8 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
     TILES_URL: str = (
         "https://openbuildings-public-dot-gweb-research.uw.r.appspot.com/public/tiles.geojson"
     )
+    options_type = GoogleOpenBuildingsResolveOptions
+
     base_path: Path = global_config.get_path("google_open_buildings", "bronze")
     data_types: tuple = ("polygons", "points")
 
@@ -63,45 +81,39 @@ class GoogleOpenBuildingsConfig(BaseHandlerConfig):
         )
 
     def get_relevant_data_units_by_key(
-        self, search_key: BaseGeometry, **kwargs
+        self, search_key: BaseGeometry, options: GoogleOpenBuildingsResolveOptions
     ) -> List[dict]:
         """
         Identify S2 tiles intersecting a search geometry.
 
         Args:
             search_key: The search geometry, in EPSG:4326.
-            **kwargs: Additional filtering parameters.
+            options: ``data_type`` is stored on each unit.
 
         Returns:
-            A list of dictionaries containing tile metadata (ID, URL, Size).
+            A list of tile records (ID, URL, size and data type).
         """
         mask = self.tiles_gdf.geometry.intersects(search_key)
-        return self.tiles_gdf.loc[mask, ["tile_id", "tile_url", "size_mb"]].to_dict(
+        records = self.tiles_gdf.loc[mask, ["tile_id", "tile_url", "size_mb"]].to_dict(
             "records"
         )
+        return [{**record, "data_type": options.data_type} for record in records]
 
-    def get_data_unit_path(
-        self,
-        unit: Union[pd.Series, dict, str],
-        data_type: str = "polygons",
-        **kwargs,
-    ) -> Path:
+    def get_data_unit_path(self, unit: Union[pd.Series, dict, str], options=None) -> Path:
         """
         Resolve a building tile to its local compressed CSV path.
 
         Args:
-            unit: Tile identifier or metadata record.
-            data_type: Geometry format ('polygons' or 'points').
-            **kwargs: Additional context.
+            unit: Tile record, or a bare tile ID for polygons.
+            options: The resolve options (unused; the unit holds its data type).
 
         Returns:
             Absolute path to the local data file.
         """
-        tile_id = (
-            unit["tile_id"]
-            if isinstance(unit, pd.Series) or isinstance(unit, dict)
-            else unit
-        )
+        if isinstance(unit, (pd.Series, dict)):
+            tile_id, data_type = unit["tile_id"], unit.get("data_type", "polygons")
+        else:
+            tile_id, data_type = unit, "polygons"
         return self.base_path / f"{data_type}_s2_level_4_{tile_id}_buildings.csv.gz"
 
 
@@ -112,6 +124,8 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
     Manages the acquisition of building footprint data (CSV files) from Google's
     public dataset buckets. Supports point and polygon geometries.
     """
+
+    options_type = DownloadOptions
 
     def __init__(
         self,
@@ -134,36 +148,28 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def download_data_unit(
-        self,
-        tile_info: Union[pd.Series, dict],
-        data_type: Literal["polygons", "points"] = "polygons",
-        **kwargs,
+        self, tile_info: Union[pd.Series, dict], options: DownloadOptions
     ) -> Optional[str]:
         """
         Download a single building data file for a specific tile.
 
         Args:
-            tile_info: Metadata dictionary or Series containing 'tile_url' and 'tile_id'.
-            data_type: Geometry format ('polygons' or 'points').
-            **kwargs: Ignored.
+            tile_info: Tile record with 'tile_url', 'tile_id' and 'data_type'.
+            options: The download options.
 
         Returns:
             The local file path on success, or None if the download failed.
         """
 
         tile_url = tile_info["tile_url"]
-        if data_type == "points":
+        if tile_info.get("data_type", "polygons") == "points":
             tile_url = tile_url.replace("polygons", "points")
 
         try:
             response = requests.get(tile_url, stream=True)
             response.raise_for_status()
 
-            file_path = str(
-                self.config.get_data_unit_path(
-                    tile_info["tile_id"], data_type=data_type
-                )
-            )
+            file_path = str(self.config.get_data_unit_path(tile_info))
 
             with self.data_store.open(file_path, "wb") as file:
                 for chunk in response.iter_content(chunk_size=8192):
@@ -213,10 +219,10 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
             for the specified country.
         """
         return self.download(
-            source=country,
+            country,
             data_type=data_type,
-            data_store=data_store,
-            path=country_geom_path,
+            country_data_store=data_store,
+            country_geom_path=country_geom_path,
         )
 
 
@@ -228,6 +234,8 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
     data store into GeoDataFrames.
     """
 
+    options_type = ReadOptions
+
     def __init__(
         self,
         config: Optional[GoogleOpenBuildingsConfig] = None,
@@ -238,27 +246,20 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: ReadOptions
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
         Load building data from specific file paths.
 
         Args:
             source_data_path: List of local paths to building data files.
-            **kwargs: Additional parameters for `_load_tabular_data`.
+            options: The read options.
 
         Returns:
             A GeoDataFrame containing the aggregated building data.
         """
         result = self._load_tabular_data(file_paths=source_data_path)
         return result
-
-    def load(
-        self, source, crop_to_source: bool = False, data_type="polygons", **kwargs
-    ):
-        return super().load(
-            source=source, crop_to_source=crop_to_source, data_type=data_type, **kwargs
-        )
 
     def load_points(self, source, crop_to_source: bool = False, **kwargs) -> gpd.GeoDataFrame:
         """Convenience method to load building point data.

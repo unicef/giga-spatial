@@ -1,3 +1,4 @@
+import dataclasses
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -19,8 +20,27 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 from gigaspatial.config import config as global_config
+
+
+@dataclasses.dataclass(frozen=True)
+class GoogleMSReadOptions(ReadOptions):
+    """
+    Read options of the Google-Microsoft combined buildings.
+
+    Attributes:
+        source_filter: Keep only buildings from this source ('google' or
+            'microsoft'); None keeps both.
+        min_confidence: Keep only buildings with at least this confidence
+            score (0.0-1.0); None keeps all.
+    """
+
+    source_filter: Optional[Literal["google", "microsoft"]] = None
+    min_confidence: Optional[float] = None
 
 
 def get_available_iso3s(
@@ -109,6 +129,7 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
     )
 
     units_match_country = True
+    options_type = ResolveOptions
 
     # Metadata
     dataset_name: str = "Google-Microsoft Combined Buildings"
@@ -130,7 +151,9 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
             f"partition_strategy={self.partition_strategy}"
         )
 
-    def get_relevant_data_units_by_key(self, search_key: str, **kwargs):
+    def get_relevant_data_units_by_key(
+        self, search_key: str, options: Optional[ResolveOptions] = None
+    ):
         """
         Get the data partitions (whole country or its S2 grid cells) of a country.
 
@@ -193,12 +216,12 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
 
             return all_units
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str, options=None) -> Path:
         return self.base_path / unit.split("google-microsoft-open-buildings/")[
             1
         ].replace("country_iso=", "")
 
-    def get_search_key(self, source, **kwargs) -> str:
+    def get_search_key(self, source, options: ResolveOptions) -> str:
         """
         Return the ISO 3166-1 alpha-3 code of a country source; the data is
         partitioned by country.
@@ -236,6 +259,8 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
                 named after the module is created and used.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Optional[GoogleMSBuildingsConfig] = None,
@@ -252,13 +277,13 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
             f"download_strategy={config.download_strategy}"
         )
 
-    def download_data_unit(self, unit: str, **kwargs) -> Path:
+    def download_data_unit(self, unit: str, options: DownloadOptions) -> Path:
         """
         Download a single data unit (partition file).
 
         Args:
             unit: Full URL/URI to the data unit (from get_relevant_data_units)
-            **kwargs: Ignored.
+            options: The download options.
 
         Returns:
             Path to the downloaded file
@@ -477,6 +502,8 @@ class GoogleMSBuildingsReader(BaseHandlerReader):
     - Geometry cropping
     """
 
+    options_type = GoogleMSReadOptions
+
     def __init__(
         self,
         config: Optional[GoogleMSBuildingsConfig] = None,
@@ -488,16 +515,21 @@ class GoogleMSBuildingsReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: GoogleMSReadOptions
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
         Args:
             source_data_path: List of file paths to load
+            options: The source and confidence filters.
         Returns:
             DataFrame containing building data
         """
-        result = self._load_tabular_data(file_paths=source_data_path, **kwargs)
-        return result
+        result = self._load_tabular_data(file_paths=source_data_path)
+        return self._apply_filters(
+            result,
+            source_filter=options.source_filter,
+            min_confidence=options.min_confidence,
+        )
 
     def _apply_filters(
         self,
@@ -703,7 +735,9 @@ class GoogleMSBuildingsHandler(BaseHandler):
         if not self.ensure_data_available(source, **kwargs):
             raise RuntimeError("Could not ensure data availability for loading")
 
-        source_data_paths = self.reader.resolve_source_paths(source, **kwargs)
+        source_data_paths = self.reader.resolve_source_paths(
+            source, **self.select_options(kwargs, self.config)
+        )
         processed_paths = self.reader._pre_load_hook(source_data_paths)
 
         cache_paths = []
@@ -769,13 +803,15 @@ class GoogleMSBuildingsHandler(BaseHandler):
         Args:
             source: specification of the data to load (e.g., iso3 code, geometry).
             force: If True, forces regeneration of the cache.
-            **kwargs: Additional parameters passed to the path resolver.
+            **kwargs: Resolve and download options.
 
         Returns:
             Dictionary containing combined numpy arrays (e.g., {'coords': np.ndarray})
         """
         # 1. Resolve what the base parquet files *should* be for this source
-        source_data_paths = self.reader.resolve_source_paths(source, **kwargs)
+        source_data_paths = self.reader.resolve_source_paths(
+            source, **self.select_options(kwargs, self.config)
+        )
         processed_paths = self.reader._pre_load_hook(source_data_paths)
 
         if not processed_paths:
