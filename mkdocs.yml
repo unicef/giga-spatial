@@ -4,6 +4,7 @@ site_author: "Utku Can Ozturk"
 
 theme:
   name: material
+  custom_dir: overrides
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
@@ -176,6 +177,8 @@ extra:
       link: https://www.linkedin.com/company/gigaglobal/
   version:
     provider: mike
+    default: latest
+    alias: true
 
   generator: false
 
