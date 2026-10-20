@@ -3,8 +3,8 @@
 from typing import Dict, Optional, List
 from pathlib import Path
 import json
-from .datasets.base import GEEDatasetEntry
-from .datasets.builtin import BUILTIN_DATASETS
+from gigaspatial.fetchers.gee.datasets.base import GEEDatasetEntry
+from gigaspatial.fetchers.gee.datasets.builtin import BUILTIN_DATASETS
 
 
 class GEEDatasetRegistry:

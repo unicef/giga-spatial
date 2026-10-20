@@ -21,7 +21,7 @@ import threading
 from typing import Union, Optional, List, Generator, Tuple
 import shutil
 
-from .data_store import DataStore
+from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.config import config
 
 if snowflake:

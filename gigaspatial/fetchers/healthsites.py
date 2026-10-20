@@ -14,7 +14,7 @@ from pydantic.dataclasses import dataclass
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from gigaspatial.config import config as global_config
-from gigaspatial.handlers import OSMLocationFetcher
+from gigaspatial.fetchers.osm import OSMLocationFetcher
 from gigaspatial.core.http import BaseRestApiClient, RestApiClientConfig, BasePaginationStrategy, AuthConfig, AuthType
 
 

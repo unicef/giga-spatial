@@ -2,6 +2,18 @@
 
 Thank you for considering contributing to Giga! We value your input and aim to make the contribution process as accessible and transparent as possible. Whether you're interested in reporting bugs, discussing code, submitting fixes, proposing features, becoming a maintainer, or engaging with the Giga community, we welcome your involvement.
 
+## Adding a dataset
+
+A dataset published as files is a handler. A dataset served as a query is a fetcher. The handler base, including the search key and the search geometry, is documented in the API reference: [Handler base](https://unicef.github.io/giga-spatial/api/handler-base/). That section is for contributors to this repository. It is not a stable API for other packages.
+
+Where a new dataset goes:
+
+- A handler goes in `gigaspatial/handlers/`. Add its config, downloader, reader, and handler to the dictionary in `gigaspatial/handlers/__init__.py`, and the handler alone to the one in `gigaspatial/__init__.py`.
+- A fetcher goes in `gigaspatial/fetchers/` and its class name ends in `Fetcher`. Register it in `gigaspatial/fetchers/__init__.py` and `gigaspatial/__init__.py`.
+- An image downloader goes in `gigaspatial/image_downloaders/`. Add it to that package's `__all__` and to `gigaspatial/__init__.py`.
+
+Those `__init__.py` files load names lazily. Each one also repeats its names in an `if TYPE_CHECKING:` block, and `tests/test_public_api.py` fails if the two lists differ. Code inside the package uses absolute imports (`from gigaspatial.handlers.ghsl import ...`). The reasons are in [Public import paths](https://github.com/unicef/giga-spatial/blob/main/docs/adr/0003-public-import-paths.md).
+
 ## How to Contribute to our Giga Project?
 
 1. **Familiarize Yourself:** Before contributing, familiarize yourself with the project by reviewing the README, code of conduct, and existing issues or pull requests.

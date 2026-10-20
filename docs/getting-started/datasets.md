@@ -33,7 +33,7 @@ from gigaspatial import OSMLocationFetcher
 clinics = OSMLocationFetcher(country="RWA", location_types=["clinic"]).fetch_locations()
 ```
 
-`MLabHandler` is a fetcher: it queries BigQuery. The class name still says handler.
+`MLabFetcher` queries M-Lab speed tests in BigQuery.
 
 ## Data store
 

@@ -1,4 +1,4 @@
-from .base import GEEDatasetEntry
+from gigaspatial.fetchers.gee.datasets.base import GEEDatasetEntry
 
 
 # Define built-in datasets

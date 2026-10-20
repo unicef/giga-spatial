@@ -24,8 +24,8 @@ from gigaspatial.config import config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.processing.entity_processor import EntityProcessor
 
-from .entity import ENUM_ENTITY_CONFIG, EntityTable, GigaEntity
-from .shared import (
+from gigaspatial.core.schemas.entity import ENUM_ENTITY_CONFIG, EntityTable, GigaEntity
+from gigaspatial.core.schemas.shared import (
     enum_value,
     DataConfidence,
     InfrastructureStatus,
@@ -40,7 +40,7 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
-    from .wireless_access_service import WirelessAccessServiceTable
+    from gigaspatial.core.schemas.wireless_access_service import WirelessAccessServiceTable
 
 logger = config.get_logger("WirelessSiteManager")
 

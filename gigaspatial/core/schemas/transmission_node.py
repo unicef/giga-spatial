@@ -12,9 +12,9 @@ from enum import Enum
 from pathlib import Path
 
 from gigaspatial.core.io.data_store import DataStore
-from .shared import DataConfidence, PowerSource, InfrastructureStatus
-from .entity import ENUM_ENTITY_CONFIG, GigaEntity, EntityTable
-from .wireless_site import BACKHAUL_ALIAS_MAP
+from gigaspatial.core.schemas.shared import DataConfidence, PowerSource, InfrastructureStatus
+from gigaspatial.core.schemas.entity import ENUM_ENTITY_CONFIG, GigaEntity, EntityTable
+from gigaspatial.core.schemas.wireless_site import BACKHAUL_ALIAS_MAP
 from gigaspatial.processing.entity_processor import EntityProcessor
 from gigaspatial.config import config
 

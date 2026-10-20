@@ -142,6 +142,7 @@ plugins:
         python:
           options:
             show_submodules: true
+            show_root_full_path: false
           filters:
             - "!^_"
           rendering:

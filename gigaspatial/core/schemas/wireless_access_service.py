@@ -25,8 +25,8 @@ from gigaspatial.config import config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.processing.entity_processor import EntityProcessor
 
-from .entity import ENUM_ENTITY_CONFIG, EntityTable, GigaEntityNoLocation
-from .shared import (
+from gigaspatial.core.schemas.entity import ENUM_ENTITY_CONFIG, EntityTable, GigaEntityNoLocation
+from gigaspatial.core.schemas.shared import (
     DataConfidence,
     InfrastructureStatus,
     WirelessAccessServiceType,

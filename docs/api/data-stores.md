@@ -4,6 +4,13 @@ A data store is where a handler keeps its files. `LocalDataStore` is the default
 
 `read_dataset` and `write_dataset` read and write a file through whichever store you pass.
 
+```python
+from gigaspatial import LocalDataStore, ADLSDataStore, read_dataset, write_dataset
+from gigaspatial.core.io import DataStore
+```
+
+Every store implements the abstract `DataStore`. To support another storage service, subclass it.
+
 ::: gigaspatial.core.io.local_data_store.LocalDataStore
     options:
       show_source: false

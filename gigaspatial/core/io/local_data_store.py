@@ -10,7 +10,7 @@ from typing import Any, List, Generator, Tuple, Union, IO, Optional
 from os import PathLike
 from typing import Union
 
-from .data_store import DataStore
+from gigaspatial.core.io.data_store import DataStore
 
 Pathish = Union[str, PathLike[str]]
 

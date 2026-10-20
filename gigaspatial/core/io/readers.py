@@ -18,11 +18,21 @@ import geopandas as gpd
 import pandas as pd
 import fiona
 
-from .data_store import DataStore
-from .local_data_store import LocalDataStore
+from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.config import config
 
 logger = config.get_logger(__name__)
+
+__all__ = [
+    "read_json",
+    "read_kmz",
+    "read_gzipped_json_or_csv",
+    "iter_field_from_gzipped_jsonl",
+    "read_field_from_gzipped_jsonl",
+    "read_dataset",
+    "read_datasets",
+]
 
 try:
     import orjson

@@ -2,6 +2,12 @@
 
 `TifProcessor` reads, clips, and samples a GeoTIFF. The functions below work on tables and geometries. The [processing guide](../user-guide/processing.md) shows both.
 
+```python
+from gigaspatial import TifProcessor, convert_to_geodataframe, aggregate_points_to_zones
+from gigaspatial.processing import get_centroids, annotate_with_admin_regions
+from gigaspatial.processing.elevation import LOSAnalyzer
+```
+
 ::: gigaspatial.processing.tif_processor.TifProcessor
     options:
       show_source: false

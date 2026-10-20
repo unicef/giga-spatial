@@ -9,7 +9,7 @@ import os
 from gigaspatial.config import config as globalconfig
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from .config import GEEConfig, get_default_registry, _HAS_GEE, ee, geemap
+from gigaspatial.fetchers.gee.config import GEEConfig, get_default_registry, _HAS_GEE, ee, geemap
 
 LOGGER = globalconfig.get_logger("GEEProfiler")
 

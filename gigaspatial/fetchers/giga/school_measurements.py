@@ -11,7 +11,7 @@ from pydantic.dataclasses import dataclass
 
 from gigaspatial.config import config as global_config
 from gigaspatial.core.http import AuthConfig, AuthType, RestApiClientConfig
-from gigaspatial.handlers.giga.api_client import GigaApiClient
+from gigaspatial.fetchers.giga.api_client import GigaApiClient
 
 _API_URL = "https://uni-ooi-giga-maps-service.azurewebsites.net/api/v1/all_measurements"
 

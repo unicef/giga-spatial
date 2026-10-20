@@ -11,7 +11,7 @@ import pycountry
 from gigaspatial.core.io.bigquery_client import BigQueryClient, BigQueryClientConfig
 from gigaspatial.config import config as global_config
 
-logger = global_config.get_logger("MLabHandler")
+logger = global_config.get_logger("MLabFetcher")
 
 _MLAB_PROJECT = "measurement-lab"
 _MLAB_NDT7 = f"`{_MLAB_PROJECT}.ndt.ndt7`"
@@ -101,9 +101,9 @@ class MLabConfig(BaseModel):
         return v
 
 
-class MLabHandler:
+class MLabFetcher:
     """
-    Handler for querying M-Lab NDT7 network measurement data from BigQuery.
+    Fetcher for querying M-Lab NDT7 network measurement data from BigQuery.
 
     Composes ``BigQueryClient`` for all query execution against the
     ``measurement-lab.ndt.ndt7`` table. Returns results as DataFrames
@@ -120,9 +120,9 @@ class MLabHandler:
 
     Examples
     --------
-    >>> handler = MLabHandler()
-    >>> df = handler.query_ndt7("TR", start_date="2023-01-01")
-    >>> df = handler.query_ndt7("KE", measurement="upload", start_date="2023-06-01")
+    >>> fetcher = MLabFetcher()
+    >>> df = fetcher.query_ndt7("TR", start_date="2023-01-01")
+    >>> df = fetcher.query_ndt7("KE", measurement="upload", start_date="2023-06-01")
     """
 
     def __init__(
@@ -133,7 +133,7 @@ class MLabHandler:
         self.config = config or MLabConfig()
         self.bq = BigQueryClient(client_config)
         logger.info(
-            "MLabHandler initialized (project=%s, dataset=%s)",
+            "MLabFetcher initialized (project=%s, dataset=%s)",
             self.config.project_id,
             self.config.dataset,
         )
@@ -395,7 +395,7 @@ class MLabHandler:
 
         Examples
         --------
-        >>> handler.estimate_query_cost("TR", start_date="2023-01-01", end_date="2023-01-31")
+        >>> fetcher.estimate_query_cost("TR", start_date="2023-01-01", end_date="2023-01-31")
         0.043
         """
         country_code = self._validate_country_code(country_code)

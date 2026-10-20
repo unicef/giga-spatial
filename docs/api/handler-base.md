@@ -2,7 +2,7 @@
 
 This section is for adding a dataset to this library. The classes below are internal: this repository is their only subclasser, and the hooks are not a stable API for other packages. Documenting them does not change that. See [the decision](../adr/0002-handler-base-in-the-api-reference.md).
 
-The guides never use these names. A caller passes a source and may set `crop_to_source`.
+The guides never use these names. A caller passes a source and may set `crop_to_source`. The classes live in `gigaspatial.handlers.base`, which is not a public import path.
 
 ## Search key and search geometry
 

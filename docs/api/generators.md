@@ -2,6 +2,11 @@
 
 A generator maps datasets onto points of interest or zones. The result is a view: those places with dataset attributes attached.
 
+```python
+from gigaspatial import PoiViewGenerator, H3ViewGenerator, AdminBoundariesViewGenerator
+from gigaspatial.generators import PoiViewGeneratorConfig, ZonalViewGeneratorConfig
+```
+
 ## Points
 
 ::: gigaspatial.generators.poi.PoiViewGenerator

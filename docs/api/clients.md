@@ -1,6 +1,10 @@
 # Clients
 
-A client queries a database or a warehouse. It is not a data store.
+A client is a connection used to query a database, a warehouse, or a web API. It is not a data store, and it is not a dataset: a fetcher or a handler may use one.
+
+```python
+from gigaspatial import BigQueryClient, BigQueryClientConfig, DBConnection
+```
 
 ::: gigaspatial.core.io.bigquery_client.BigQueryClient
     options:

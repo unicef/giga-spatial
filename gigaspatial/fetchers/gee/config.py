@@ -13,7 +13,7 @@ except ImportError:
     ee = None
     geemap = None
 
-from .registry import GEEDatasetRegistry
+from gigaspatial.fetchers.gee.registry import GEEDatasetRegistry
 
 # Module-level default registry (loaded once)
 _DEFAULT_REGISTRY = None

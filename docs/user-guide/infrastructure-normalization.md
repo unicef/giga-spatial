@@ -5,7 +5,7 @@ Partner files, such as a KMZ of fibre nodes, are not a published dataset. This g
 `TransmissionNodeTable.from_file` reads the file, cleans column names and coordinates, and validates each row. Cleaning is on by default.
 
 ```python
-from gigaspatial.core.schemas.transmission_node import TransmissionNodeTable
+from gigaspatial.core.schemas import TransmissionNodeTable
 
 nodes = TransmissionNodeTable.from_file("partner_nodes.gpkg")
 print(nodes.to_dataframe().head())
@@ -22,13 +22,10 @@ raw = read_dataset("partner_nodes.gpkg")
 To clean a table you already loaded, use `TransmissionNodeProcessor` and then `from_dataframe`:
 
 ```python
-from gigaspatial.core.schemas.transmission_node import (
-    TransmissionNodeProcessor,
-    TransmissionNodeTable,
-)
+from gigaspatial.core.schemas import TransmissionNodeProcessor, TransmissionNodeTable
 
 cleaned = TransmissionNodeProcessor().process(raw, country="RWA")
 nodes = TransmissionNodeTable.from_dataframe(cleaned, clean=False)
 ```
 
-The same pattern exists for other partner tables in `gigaspatial.core.schemas`, including wireless sites, buildings, and admin boundaries. A validated table can be passed to `PoiViewGenerator` as the points in [Points and nearest buildings](points-and-buildings.md).
+The same pattern exists for the other partner tables in `gigaspatial.core.schemas`: `WirelessSiteTable`, `WirelessAccessServiceTable`, `BuildingFootprintTable`, `MobileCoverageTable`, and `AdminBoundaryTable`, each with its processor. A validated table can be passed to `PoiViewGenerator` as the points in [Points and nearest buildings](points-and-buildings.md).

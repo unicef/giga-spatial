@@ -19,7 +19,7 @@ import os
 from pathlib import PurePosixPath
 from typing import Union, Optional, Iterator, IO
 
-from .data_store import DataStore
+from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.config import config
 
 if _HAS_AZURE:
