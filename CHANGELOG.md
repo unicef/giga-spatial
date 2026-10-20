@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.9.9] - 2026-XX-XX
+## [v0.10.0] - 2026-10-20
 
 ### Added
+
+-   **Streaming Field Extraction for Gzipped JSON Lines (`gigaspatial/core/io/readers.py`)**
+    -   Added `iter_field_from_gzipped_jsonl` (and alias `read_field_from_gzipped_jsonl`) to enable memory-efficient, line-by-line extraction of specific fields from compressed `.jsonl.gz` datasets.
+    -   Integrated `DataStore` abstraction support, allowing direct streaming from both local filesystem and cloud object stores (e.g., ADLS, S3).
+    -   Implemented high-performance JSON parsing using `orjson` when installed, with automatic fallback to Python's standard `json` module.
+    -   Added configurable missing-key handling via `ignore_missing` and `default` parameters, as well as automatic skipping of blank lines.
 
 -   **Multi-layer KMZ support (`gigaspatial/core/io/readers.py`)**
     -   Enhanced `read_kmz()` to iterate over all KML files within a KMZ archive and merge them into a single GeoDataFrame.
@@ -12,6 +18,15 @@ All notable changes to this project will be documented in this file.
     -   Included metadata columns `_kml_file` and `_layer_name` to identify the origin of each feature.
 
 ### Changed
+
+-   **Documentation site and README**
+    -   The README and the docs now lead with acquiring a published dataset, loading it for a source, and processing it. A generator maps a dataset onto points of interest or zones, and the result is a view.
+    -   Getting started is a WorldPop-on-H3 tutorial, a datasets page (handler, fetcher, source, data store), and one configuration page.
+    -   The user guide is six how-tos. The examples gallery and the separate zonal-statistics page leave the navigation.
+    -   The API reference lists caller classes one at a time, then a Handler base section for adding a dataset. 
+    -   The docs site title and the PyPI summary now say what the library does. `docs/llms.txt` and `docs/llms-full.txt` are the pages for language-model crawlers. PyPI keywords include `worldpop`, `h3`, and `buildings`.
+    -   About is the project story, the team, and the roadmap. Changelog, design decisions, and license sit under Project.
+    -   The docs are versioned with mike, starting with 0.10. A selector in the header switches versions, and older versions show a banner linking to the latest. Pages live under `https://unicef.github.io/giga-spatial/latest/`; the site root redirects there.
 
 -   **Trino Engine Configuration (`gigaspatial/core/io/database.py`)**
     -   Made `connect_args` optional in `_create_trino_engine` by safely extracting it with `kwargs.pop()` to prevent `KeyError` exceptions when not explicitly passed.
@@ -21,6 +36,122 @@ All notable changes to this project will be documented in this file.
     -   Refactored `calculate_pixels_at_location` into `calculate_bbox_pixel_size`.
     -   Simplified Mercator scale distortion logic by removing redundant `pyproj` coordinate transformations and unused `crs` parameter.
     -   Added support for non-Point geometries by automatically falling back to centroid coordinates (`centroid.y`).
+
+-   **Streaming writes across all `DataStore` backends (`gigaspatial/core/io/`)**
+    -   `DataStore.write_file` now accepts a readable binary stream (any object with `.read()`) in addition to `str`/`bytes`, allowing large files (e.g. zip archive members) to be written without buffering their full contents in memory first.
+    -   `ADLSDataStore.write_file` passes stream/bytes input straight through to `BlobClient.upload_blob`, which uploads in blocks (default 4 MiB) instead of loading the whole payload into memory. Added an `overwrite: bool = True` parameter.
+    -   `LocalDataStore.write_file` now writes stream input via `shutil.copyfileobj`, copying in bounded chunks instead of requiring the full payload up front.
+    -   `SnowflakeDataStore.write_file` gained the same `hasattr(data, "read")` branch, streaming to the local temp file via `shutil.copyfileobj` before the `PUT` upload.
+    -   Added `ADLSDataStore.open_stream`, a context manager yielding a lazy, chunked read object (`StorageStreamDownloader`) for downloading blob contents without buffering the full file in memory.
+
+-   **Explicit text encoding across all `DataStore` backends (`gigaspatial/core/io/`)**
+    -   `DataStore.read_file`, `write_file`, and `open` now all accept an optional `encoding` parameter, with a new shared `DataStore.DEFAULT_ENCODING = "utf-8"` used whenever the caller doesn't specify one.
+    -   `LocalDataStore.open` no longer relies on the platform's preferred encoding (`locale.getpreferredencoding`) for text mode; it now defaults explicitly to UTF-8, matching `ADLSDataStore` and `SnowflakeDataStore`. Previously, files written via `write_file` (always UTF-8) could fail to decode or decode incorrectly when read back via `open` on a non-UTF-8 locale (e.g. Windows) — most visible with non-ASCII school/site names.
+    -   `ADLSDataStore.write_file` and `SnowflakeDataStore.write_file` now accept `encoding` for `str` input instead of hardcoding `"utf-8"` inline.
+
+-   **Handler base split into a package (`gigaspatial/handlers/base/`)**
+    -   `base.py` is now a `base/` package with one module per base class. `from gigaspatial.handlers.base import ...` is unchanged.
+
+-   **Search key and search geometry (`gigaspatial/handlers/base/`)**
+    -   **Breaking for custom handlers:** the abstract `get_relevant_data_units_by_geometry(geometry)` is renamed `get_relevant_data_units_by_key(search_key)`. Datasets indexed by something other than area (a country code, an HDX filter) override the new `get_search_key(source)` hook instead of `extract_search_geometry`, which no handler overrides any more.
+    -   `extract_search_geometry` always returns the geometry in the config's `crs`. Input coordinates are read in the GeoDataFrame's own CRS, else in the `crs` option, else in EPSG:4326. The `crs` option now has this one meaning in every handler; it used to mean the target CRS in the base and the source CRS in GHSL.
+    -   `crop_to_source=True` crops with that search geometry, so GeoDataFrames in any CRS and bare geometries passed with `crs=` are cropped correctly.
+    -   `crop_to_source=True` no longer crops path sources (it used to raise), nor country sources on per-country datasets (WorldPop, OpenCellID, Google-Microsoft combined, Microsoft Buildings, HDX, RWI), where the loaded files already match the country. It raises `ValueError` for sources with no geometry, such as an HDX filter dict.
+    -   A string source is treated as a file path only if it contains a path separator or ends in a known data file suffix. Country names containing a dot (e.g. `"St. Lucia"`) are no longer mistaken for paths.
+
+-   **Private unit cache (`gigaspatial/handlers/base/resolution.py`)**
+    -   The unit cache is internal to `BaseHandlerConfig`; handlers customise resolution only through `get_search_key` and `get_relevant_data_units_by_key`. The `_unit_cache` attribute is gone, and `get_cached_search_geometry` returns only a geometry (it used to return whatever search key was cached, e.g. a country code).
+    -   The cache key includes the `crs` option, so the same coordinates read in two CRSs no longer share an entry. The search geometry is computed at most once per source, and only when cropping needs it.
+    -   Ookla and Aqueduct are global datasets: their search key is `None`, so country sources resolve without fetching admin boundaries.
+    -   `OoklaSpeedtestHandler.load_data` gained `crop_to_source` (default `True`, the previous behaviour). Quadkey filtering moved into `OoklaSpeedtestReader.crop_to_geometry`; point sources now work.
+
+-   **Stored-file path contract (`gigaspatial/handlers/base/`)**
+    -   New per-unit hooks: `get_stored_paths(unit)` returns the files a data unit is stored as (what ends up in the `DataStore` after download, not the remote archive), and `is_unit_available(unit, paths)` decides whether it needs downloading. `get_data_unit_path` is no longer abstract; it is the default single-file helper. `get_data_unit_paths(units)` is base-owned and flattens `get_stored_paths`.
+    -   `ensure_data_available` downloads exactly the units that are not available, without guessing which path belongs to which unit and without re-resolving paths after download. The fallback to `downloader.download(source)` is gone.
+    -   `get_available_data_info` counts data units (`total_data_units`, `available_data_units`, `missing_data_units`); `available_paths` / `missing_paths` still list stored files.
+    -   GHSL: `get_data_unit_path` returns the extracted `.tif`; the `file_ext` argument and the `get_available_data_info` override are removed. With `extract=False` the zip is saved next to it.
+    -   WorldPop: school-age and under-18 zip resources are stored as their extracted `.tif` files, and count as available once any is extracted, whatever the demographic filters.
+
+-   **Typed handler options (`gigaspatial/handlers/base/options.py`)**
+    -   New frozen `ResolveOptions` (`crs`), `DownloadOptions` (`show_progress`) and `ReadOptions` dataclasses. A config, downloader or reader declares the subclass it takes through `options_type`; its hooks (`get_search_key`, `get_relevant_data_units_by_key`, `get_stored_paths`, `download_data_unit`, `load_from_paths`) then receive one options object instead of `**kwargs`.
+    -   Public entry points (`load_data`, `download_and_load`, `ensure_data_available`, `get_available_data_info`, `reader.load`, `reader.resolve_source_paths`, `downloader.download`, `download_data_units`, `config.get_relevant_data_units`, `get_data_unit_paths`, `get_search_geometry`) sort their keyword arguments into these objects and raise `TypeError` for a keyword no component declares. `get_available_data_info` raises it instead of returning an error dict.
+    -   Resolve options are part of the unit cache key.
+    -   `download_data_units` no longer reads a `desc` keyword; `show_progress=False` hides its progress bar.
+    -   `ResolveOptions` also carries `country_geom_path` / `country_data_store`, the boundary used for a country source. New shared `RasterReadOptions` (`merge_rasters`).
+    -   `BaseHandler.select_options(kwargs)` returns the keywords that are options of the handler, for callers that share keyword arguments between a handler and other consumers. The POI and zonal generators use it, so their extra keywords (e.g. `project`, `stat`) no longer reach `load_data`.
+    -   GHSL, WorldPop, WRI Aqueduct and NASA SRTM take typed options and raise `TypeError` for unknown keywords:
+        -   GHSL: download options `extract` and `file_pattern` (`GHSLDownloadOptions`), read option `merge_rasters`. The `GHSLDataDownloader.download`, `GHSLDataReader.load` and `GHSLDataHandler.load_data` overrides are removed (same defaults). `download_by_country(data_store=, country_geom_path=)` passes the boundary as resolve options.
+        -   WorldPop: the demographic filters `sex`, `education_level` (alias `level`), `ages`, `min_age` and `max_age` are resolve options (`WPResolveOptions`). Age-structure `.tif` files outside the selected cohorts are no longer downloaded, only skipped at load. The `WPPopulationConfig.demographic_filter` field, `_filter_age_sex_paths` and the `WPPopulationReader.load` override are removed.
+        -   NASA SRTM: read options `as_dataframe` and `dropna` (`SRTMReadOptions`).
+        -   Aqueduct: `load_data` keywords are no longer forwarded to `TifProcessor`.
+        -   `load_into_dataframe` / `load_into_geodataframe` (GHSL, WorldPop, Aqueduct) send handler options to `load_data` and the remaining keywords (e.g. `band_number`) to `TifProcessor.to_dataframe` / `to_geodataframe`, instead of sending every keyword to both.
+    -   Google Open Buildings, Microsoft Buildings, Google-Microsoft combined buildings, Ookla and OpenCellID take typed options and raise `TypeError` for unknown keywords:
+        -   Google Open Buildings: `data_type` is a resolve option (`GoogleOpenBuildingsResolveOptions`) stored on each unit, so points and polygons resolve, download and cache separately. The `GoogleOpenBuildingsReader.load` override is removed.
+        -   Microsoft Buildings: a country missing from the location mapping uses `country_geom_path` / `country_data_store` for its tile lookup; `download_by_country(country_geom_path=)` was previously ignored.
+        -   Google-Microsoft combined: read options `source_filter` and `min_confidence` (`GoogleMSReadOptions`) now filter the loaded buildings; before, they were passed to the file reader.
+        -   OpenCellID: read options `created_newer`, `created_before`, `drop_duplicates` and `as_geodataframe` (`OpenCellIDReadOptions`).
+        -   Ookla: `show_progress=False` hides the file download bar.
+    -   HDX and RWI take typed options and raise `TypeError` for unknown keywords:
+        -   Resolve options `key`, `exact_match` and `token_match` (`HDXResolveOptions`); they are now part of the unit cache key. RWI's `RWIResolveOptions` defaults `token_match=True` instead of injecting it.
+        -   Keywords for `read_dataset` (e.g. `sep`, `sheet_name`) are passed as the read option `read_kwargs={...}` (`HDXReadOptions`) instead of as loose keywords.
+    -   Every handler now declares its options; the base defaults are plain `ResolveOptions` / `DownloadOptions` / `ReadOptions`. The hooks `get_search_key`, `get_data_unit_path`, `get_stored_paths` and `extract_search_geometry` take an options object and no `**kwargs`.
+    -   `BaseHandler.select_options(kwargs, *components)` can keep only some components' options (e.g. `handler.config` for resolve options).
+
+-   **Threaded downloads and one download error contract (`gigaspatial/handlers/`)**
+    -   `download_data_units` runs `download_data_unit` in `n_workers` threads instead of a `multiprocessing` pool. Downloaders no longer need to be picklable, and the HDX and Ookla `n_workers=1` pins are removed (verified live with 4 workers).
+    -   `download_data_unit` returns its stored path(s) or raises. The base logs a failed unit with its traceback and carries on with the others; before, the first failure stopped the remaining units, and most downloaders returned `None` instead of raising. Programming errors (`TypeError`, `AttributeError`, `NameError`) still propagate.
+    -   New `gigaspatial/handlers/base/fetch.py`: `stream_to_store` (streams a URL into the data store and removes a partial file on failure), `extract_zip_to_store` (stores the members of a downloaded zip that match a pattern; raises if none match) and `tiles_intersecting` (tile-grid lookup with reprojection). GHSL, WorldPop, Google Open Buildings, Microsoft Buildings, Google-Microsoft combined (HTTPS), Ookla, OpenCellID, WRI Aqueduct and NASA SRTM downloaders use them; HDX keeps the HDX client but now raises on failure.
+    -   Download progress bars follow `show_progress` for every handler, and every request has a timeout.
+
+-   **Handler base cleanup (`gigaspatial/handlers/base/`)**
+    -   The unused `BaseHandlerReader._pre_load_hook` / `_post_load_hook` are removed; `load` passes the resolved paths to `load_from_paths` as strings, and the Google-Microsoft combined centroid methods call `resolve_source_paths` directly.
+    -   HDX stores each resource under the file name of its download URL (e.g. `ken_relative_wealth_index.csv`), falling back to the resource name. Resources were stored under their title before, which often had no extension, so `read_dataset` could not infer the format. HDX files already stored under their title are downloaded again under the new name.
+    -   The quickstart documents handler options, cropping and the download error contract.
+
+-   **Public import paths and lazy loading (`gigaspatial/__init__.py`, subpackage `__init__.py` files)**
+    -   `import gigaspatial` loads in milliseconds instead of several seconds. The top level, `gigaspatial.handlers`, `gigaspatial.fetchers`, and `gigaspatial.processing.elevation` import each name the first time it is used, so optional integrations such as Earth Engine, Snowflake, and BigQuery load only when used.
+    -   The top level now holds every handler, fetcher, image downloader, view generator, grid, data store, and client. New there: `NasaSRTMHandler`, `AdminBoundariesViewGenerator`, `MapboxImageDownloader`, and `MaxarImageDownloader`.
+    -   Fetchers moved from `gigaspatial.handlers` to the new `gigaspatial.fetchers` subpackage: `OSMLocationFetcher`, `OvertureAmenityFetcher`, `HealthSitesFetcher`, the Giga fetchers, `UnicefDataFetcher`, `MLabConfig`, and Earth Engine (`GEEProfiler`, `GEEConfig`, `GEEDatasetRegistry`, `GEEDatasetEntry`).
+    -   `MLabHandler` is renamed `MLabFetcher`. It queries BigQuery and returns records, so it is a fetcher, not a handler. There is no alias for the old name.
+    -   Image downloaders moved to the new `gigaspatial.image_downloaders` subpackage: `MapboxImageDownloader`, `MaxarImageDownloader`, and `MaxarConfig`.
+    -   `GeoRepoClient` moved from `gigaspatial.handlers.unicef.georepo` to `gigaspatial.handlers.georepo` and is importable from `gigaspatial.handlers`.
+    -   `gigaspatial.core.schemas` exports the partner tables and their processors, for example `from gigaspatial.core.schemas import TransmissionNodeTable`.
+    -   Every public subpackage declares `__all__`, and the star imports in `gigaspatial.core.io` and `gigaspatial.processing` are explicit, so helper names such as `os`, `pd`, and `Path` no longer leak from them. Package code uses absolute imports.
+    -   The supported paths are recorded in `docs/adr/0003-public-import-paths.md`. The API reference shows the import to use on each page.
+
+### Removed
+
+-   **Import aliases and old paths**
+    -   The `gigaspatial.io`, `gigaspatial.elevation`, and `gigaspatial.algorithms` aliases. Use `gigaspatial.core.io`, `gigaspatial.processing.elevation`, and `gigaspatial.processing.algorithms`. `from gigaspatial import *` no longer replaces the standard library's `io`.
+    -   Fetchers, Earth Engine classes, and image downloaders under `gigaspatial.handlers`, for example `gigaspatial.handlers.OSMLocationFetcher` or `gigaspatial.handlers.osm`. Import them from `gigaspatial`, `gigaspatial.fetchers`, or `gigaspatial.image_downloaders`.
+    -   The re-exports in `gigaspatial.core`. Import from `gigaspatial.core.io` or `gigaspatial.core.http`.
+    -   `get_country_boundaries_by_iso3` from `gigaspatial.handlers`. Use `AdminBoundaries.create(...)` or `AdminBoundaries.from_georepo(...)`.
+
+### Fixed
+
+-   **`LocalDataStore.write_file` crashing on stream input**
+    -   Previously raised `TypeError` when passed a file-like object (e.g. from `zipfile.ZipExtFile`), since `data` was passed unread directly to a binary file's `.write()`. Now streams via `shutil.copyfileobj`.
+
+-   **Handler contract breaks (`gigaspatial/handlers/`)**
+    -   `OoklaSpeedtestHandler.load_data()` with no source, or with a file path, raised `Unsupported source type`; `ensure_available=False` was ignored.
+    -   `GoogleOpenBuildingsDownloader` and `GoogleMSBuildingsDownloader` rejected the keyword arguments forwarded by the base, so `download_data_units(...)` with options and `GoogleOpenBuildingsDownloader.download_by_country()` raised `TypeError`.
+    -   Passing `crs=` to Google Open Buildings or NASA SRTM, or `token_match=` to RWI, raised `TypeError` (duplicate keyword).
+    -   `GHSLDataConfig` rejected `GHS_BUILT_S` at 10 m resolution.
+    -   `BaseHandler.ensure_data_available` no longer turns every error into `False`. Errors while resolving the source, and programming errors raised by a downloader, propagate; other download failures are logged with their traceback and `False` is returned if files are still missing.
+    -   Microsoft Buildings point sources raised `TypeError` inside `MercatorTiles.from_spatial`; they now resolve like any other source.
+    -   `ensure_data_available(path, force_download=True)` returned `False` for an existing file; it now returns `True` (path sources cannot be re-downloaded).
+    -   `get_data_unit_paths("unit")` split a single string unit into characters.
+
+-   **GHSL tile grid download disabled certificate checks process-wide (`gigaspatial/handlers/ghsl.py`)**
+    -   Loading the tile grid replaced Python's default HTTPS context with an unverified one, turning off certificate verification for every later `urllib` request in the process, and silenced `InsecureRequestWarning` globally. It now downloads with one verified `requests` call with a timeout, and reads and writes the tile cache through the data store.
+    -   New config field `verify_tiles_ssl` (default `True`). Set it to `False` only behind a proxy that re-signs HTTPS traffic; it turns off verification for the tile-grid request alone. A certificate failure raises a `ValueError` that names it.
+
+-   **Handler constructors dropped config fields (`gigaspatial/handlers/`)**
+    -   `GHSLDataHandler`, `OoklaSpeedtestHandler`, `AqueductFloodHandler`, `WPPopulationHandler` and `GoogleMSBuildingsHandler` accepted config fields such as `base_path` or `n_workers` and silently ignored them; `HDXHandler` and `RWIHandler` raised `TypeError` for them. `BaseHandler.__init__` now passes config fields to `create_config`, so they reach the config in every handler.
+    -   Passing config fields together with `config=` raises `TypeError` instead of ignoring them.
+    -   Handler configs reject unknown fields (`extra="forbid"`): a misspelled field such as `base_pth=` raises `TypeError` from the handler constructor, and `ValidationError` when the config is built directly. Before, the pydantic configs silently ignored it.
+
+-   **`GoogleMSBuildingsConfig.get_available_units()` raised `AttributeError`** without a country, since it read `self.config.data_format` on the config itself.
 
 ## [v0.9.8] - 2026-07-21
 
@@ -1852,6 +1983,7 @@ All notable changes to this project will be documented in this file.
 - Some new modules, especially in `handlers` and `generators`, are experimental and may be refined in upcoming releases.
 
 ## [v0.4.1] - 2025-04-17
+
 ### Added
 - **Documentation**:
 	- Added **API Reference** documentation for all modules, classes, and functions.
@@ -1874,6 +2006,7 @@ All notable changes to this project will be documented in this file.
 - Made `admin1` and `admin1_id_giga` optional in GigaEntity instances for countries with no admin level 1 divisions.
 
 ## [v0.4.0] - 2025-04-01
+
 ### Added
 - **POI View Generators**: Introduced a new module, generators, containing a base class for POI view generation.
 - **Expanded POI Support**: Added new classes for generating POI views from:
@@ -1894,6 +2027,7 @@ All notable changes to this project will be documented in this file.
 - **Fixed Global Config Handling**: Resolved issues with handling configurations inside classes.
 
 ## [v0.3.2] - 2025-03-21
+
 ### Added
 - Added a method to efficiently assign unique IDs to features.
 
@@ -1913,7 +2047,8 @@ All notable changes to this project will be documented in this file.
 ### Removed
 - Removed the utils module containing logger.py and integrated LOG_FORMAT and get_logger into config.py for a more streamlined logging approach.
 
-## [0.3.0] - 2025-03-18  
+## [0.3.0] - 2025-03-18
+
 ### Added  
 - Compression support in readers for improved efficiency  
 - New GHSL data handler to manage GHSL dataset downloads  
@@ -1922,6 +2057,7 @@ All notable changes to this project will be documented in this file.
 - Small fixes/improvements in Microsoft Buildings, Maxar, and Overture handlers  
 
 ## [v0.2.2] - 2025-03-12
+
 - **Refactored Handlers**: Improved structure and performance of maxar_image.py, osm.py and overture.py to enhance geospatial data handling.
 
 - **Documentation Improvements**:
@@ -1935,6 +2071,7 @@ All notable changes to this project will be documented in this file.
 - **Bug Fixes & Minor Optimizations**: Small fixes and improvements across the codebase for stability and maintainability.
 
 ## [v0.2.1] - 2025-02-28
+
 ### Added
 - Introduced WorldPopDownloader feature to handlers
 - Refactored TifProcessor class for better performance
@@ -1942,8 +2079,12 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Minor bug fixes and performance improvements
 
-## [v0.2.0] - MaxarImageDownloader & Bug Fixes - 2025-02-24
+## [v0.2.0] - 2025-02-24
+
+## Added
 - **New Handler**: MaxarImageDownloader for downloading Maxar images.
+
+## Changed
 - **Bug Fixes**: Various improvements and bug fixes.
 - **Enhancements**: Minor optimizations in handlers.
 
@@ -1961,22 +2102,8 @@ All notable changes to this project will be documented in this file.
 - **Administrative Schema**: Removed `administrative.py` since its functionality is now handled by the `boundaries` handler.
 - **Globals Module**: Removed `globals.py` and replaced it with `config.py` for better configuration management.
 
-### Updated Files
-- `config.py`
-- `boundaries.py`
-- `google_open_buildings.py`
-- `mapbox_image.py`
-- `microsoft_global_buildings.py`
-- `ookla_speedtest.py`
-- `mercator_tiles.py`
-- `adls_data_store.py`
-- `data_store.py`
-- `local_data_store.py`
-- `readers.py`
-- `writers.py`
-- `entity.py`
-
 ## [v0.1.0] - 2025-02-07
+
 ### Added
 - New data handlers: `google_open_buildings.py`, `microsoft_global_buildings.py`, `overture.py`, `mapbox_image.py`, `osm.py`
 - Processing functions in `tif_processor.py`, `geo.py` and `transform.py`
