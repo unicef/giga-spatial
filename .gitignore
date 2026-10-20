@@ -1,6 +1,7 @@
 *.egg-info/
 *.egg
 *.agent/
+*.agents/
 dist/
 build/
 /__pycache__
@@ -42,7 +43,10 @@ metadata/
 profile.share
 CONTEXT.md
 ADR.md
+GLOSSARY.md
 .antigravityignore
+.cursorignore
+.geminiignore
 
 # tests
 *.ipynb
