@@ -7,15 +7,15 @@ or file format), and downloading/loading diverse humanitarian datasets (CSV,
 GeoJSON, Excel, etc.) into vectorized or tabular formats.
 """
 
+import dataclasses
 import logging
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Mapping, Optional, Union, Dict, Any
 import tempfile
+from urllib.parse import unquote, urlparse
 
-import geopandas as gpd
 from pydantic import Field, ConfigDict
 from pydantic.dataclasses import dataclass
-from shapely.geometry.base import BaseGeometry
 import pycountry
 
 try:
@@ -38,10 +38,43 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclasses.dataclass(frozen=True)
+class HDXResolveOptions(ResolveOptions):
+    """
+    Resolve options of HDX datasets.
+
+    Attributes:
+        key: Resource metadata field a country source is matched against.
+        exact_match: If True, filter values must equal the metadata value.
+        token_match: If True, a filter value must match a whole token of the
+            metadata value (so 'af' does not match 'caf').
+    """
+
+    key: str = "url"
+    exact_match: bool = False
+    token_match: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class HDXReadOptions(ReadOptions):
+    """
+    Read options of HDX datasets.
+
+    Attributes:
+        read_kwargs: Keyword arguments for `read_dataset` (e.g. ``sheet_name``
+            or ``encoding``), since HDX resources come in many formats.
+    """
+
+    read_kwargs: Optional[Mapping[str, Any]] = None
+
+
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class HDXConfig(BaseHandlerConfig):
     """
     Configuration for HDX dataset access.
@@ -63,13 +96,13 @@ class HDXConfig(BaseHandlerConfig):
 
     # Optional configuration with defaults
     base_path: Path = Field(default=global_config.get_path("hdx", "bronze"))
-    n_workers: int = (
-        1  # HDX data is not parallelizable beyond single file, so just iterate.
-    )
     user_agent: str = Field(
         default="gigaspatial", description="User agent for HDX API requests"
     )
     hdx_site: str = Field(default="prod", description="HDX site to use (prod or test)")
+
+    units_match_country = True
+    options_type = HDXResolveOptions
 
     # Internal state
     _hdx_configured: bool = Field(default=False, init=False)
@@ -288,31 +321,30 @@ class HDXConfig(BaseHandlerConfig):
             self.logger.error(f"Error getting dataset resources: {str(e)}")
             raise
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: Dict[str, Any], options: HDXResolveOptions
     ) -> List[Resource]:
         return self.get_dataset_resources(
-            filter=geometry,
-            exact_match=kwargs.get("exact_match", False),
-            token_match=kwargs.get("token_match", False),
+            filter=search_key,
+            exact_match=options.exact_match,
+            token_match=options.token_match,
         )
 
-    def get_data_unit_path(self, unit: Resource, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: Resource, options=None) -> Path:
         """
         Resolve an HDX resource to its local storage path.
 
         Args:
             unit: HDX Resource object.
-            **kwargs: Additional resolution context.
+            options: The resolve options (unused).
 
         Returns:
-            Absolute local path for the resource file.
+            Absolute local path for the resource file, named after the file
+            in its download URL (which carries the format's extension), or
+            after the resource name when the URL names no file.
         """
-        try:
-            filename = unit.data["name"]
-        except:
-            filename = unit.get("download_url").split("/")[-1]
-
+        url = unit.get("download_url") or unit.get("url") or ""
+        filename = unquote(urlparse(url).path.rsplit("/", 1)[-1]) or unit.get("name")
         return self.output_dir_path / filename
 
     def list_resources(self) -> List[str]:
@@ -329,13 +361,13 @@ class HDXConfig(BaseHandlerConfig):
             )
         return self.data_store.list_files(dataset_folder)
 
-    def extract_search_geometry(self, source, **kwargs):
+    def get_search_key(self, source, options: HDXResolveOptions) -> Dict[str, Any]:
         """
         Identify filter criteria from a geographic or structural source.
 
         Args:
             source: Country name/code, or a direct filter dictionary.
-            **kwargs: Resolution parameters (e.g., 'key' to filter on).
+            options: ``key`` is the resource field a country is matched on.
 
         Returns:
             A dictionary for resource filtering.
@@ -343,10 +375,7 @@ class HDXConfig(BaseHandlerConfig):
         if isinstance(source, str):
             country = pycountry.countries.lookup(source)
             values = [country.alpha_3, country.alpha_2, country.name]
-            key = kwargs.get(
-                "key", "url"
-            )  # The key to filter on in the resource data. Defaults to `url`
-            return {key: values}
+            return {options.key: values}
         elif isinstance(source, dict):
             return source
         else:
@@ -374,6 +403,8 @@ class HDXDownloader(BaseHandlerDownloader):
     temporary storage and DataStore abstraction for final persistence.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Union[HDXConfig, dict],
@@ -383,35 +414,30 @@ class HDXDownloader(BaseHandlerDownloader):
         config = config if isinstance(config, HDXConfig) else HDXConfig(**config)
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, resource: Resource, **kwargs) -> str:
+    def download_data_unit(self, resource: Resource, options: DownloadOptions) -> str:
         """
         Download a specific HDX resource.
 
         Args:
             resource: HDX Resource object to download.
-            **kwargs: Additional parameters.
+            options: The download options.
 
         Returns:
-            Local path to the downloaded resource on success, or None on failure.
-        """
-        try:
-            resource_name = resource.get("name", "Unknown")
-            self.logger.info(f"Downloading resource: {resource_name}")
+            The stored path of the resource.
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                url, local_path = resource.download(folder=tmpdir)
-                with open(local_path, "rb") as f:
-                    data = f.read()
-                # Compose the target path in the DataStore
-                target_path = str(self.config.get_data_unit_path(resource))
-                self.data_store.write_file(target_path, data)
-                self.logger.info(
-                    f"Downloaded resource: {resource_name} to {target_path}"
-                )
-                return target_path
-        except Exception as e:
-            self.logger.error(f"Error downloading resource {resource_name}: {str(e)}")
-            return None
+        Raises:
+            Exception: Any error from the HDX client while downloading.
+        """
+        resource_name = resource.get("name", "Unknown")
+        self.logger.info(f"Downloading resource: {resource_name}")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            url, local_path = resource.download(folder=tmpdir)
+            target_path = str(self.config.get_data_unit_path(resource))
+            with open(local_path, "rb") as f:
+                self.data_store.write_file(target_path, f)
+        self.logger.info(f"Downloaded resource: {resource_name} to {target_path}")
+        return target_path
 
 
 class HDXReader(BaseHandlerReader):
@@ -421,6 +447,8 @@ class HDXReader(BaseHandlerReader):
     Parses local HDX resource files (CSV, GeoJSON, etc.) into structured
     Python objects or dataframes.
     """
+
+    options_type = HDXReadOptions
 
     def __init__(
         self,
@@ -432,18 +460,21 @@ class HDXReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self,
+        source_data_path: List[Union[str, Path]],
+        options: Optional[HDXReadOptions] = None,
     ) -> Any:
         """
         Load data from one or more local HDX resource paths.
 
         Args:
             source_data_path: List of local paths to resource files.
-            **kwargs: Parameters passed to `read_dataset`.
+            options: ``read_kwargs`` are passed to `read_dataset`.
 
         Returns:
             Aggregated data contents (typically a dict or single DataFrame).
         """
+        kwargs = dict((options and options.read_kwargs) or {})
         if len(source_data_path) == 1:
             return read_dataset(
                 source_data_path[0], data_store=self.data_store, **kwargs

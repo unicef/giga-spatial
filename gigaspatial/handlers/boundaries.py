@@ -156,7 +156,6 @@ class AdminBoundaries(AdminBoundaryTable):
         cls,
         country_code: str,
         admin_level: int = 0,
-        **kwargs,
     ) -> "AdminBoundaries":
         """
         Load boundaries from the GADM 4.1 dataset.
@@ -164,7 +163,6 @@ class AdminBoundaries(AdminBoundaryTable):
         Args:
             country_code: ISO 3166-1 alpha-3 country code (e.g., "BRA").
             admin_level: Administrative level (0-4).
-            **kwargs: Additional parameters.
 
         Returns:
             An AdminBoundaries instance populated from GADM.
@@ -199,7 +197,6 @@ class AdminBoundaries(AdminBoundaryTable):
         cls,
         country_code: str,
         admin_level: int = 0,
-        **kwargs,
     ) -> "AdminBoundaries":
         """
         Load boundaries from the UNICEF GeoRepo API.
@@ -207,7 +204,6 @@ class AdminBoundaries(AdminBoundaryTable):
         Args:
             country_code: ISO 3166-1 alpha-3 country code.
             admin_level: Administrative level (0-4).
-            **kwargs: Additional parameters.
 
         Returns:
             An AdminBoundaries instance populated from GeoRepo.
@@ -215,7 +211,7 @@ class AdminBoundaries(AdminBoundaryTable):
         cls.logger.info(
             f"Loading GeoRepo data for {country_code} admin_level={admin_level}"
         )
-        from gigaspatial.handlers.unicef.georepo import get_country_boundaries_by_iso3
+        from gigaspatial.handlers.georepo import get_country_boundaries_by_iso3
 
         geojson = get_country_boundaries_by_iso3(country_code, admin_level=admin_level)
         features = geojson.get("features", [])
@@ -475,7 +471,7 @@ class AdminBoundaries(AdminBoundaryTable):
             return cls.from_georepo(iso3, admin_level=admin_level)
 
         cls.logger.info("Attempting GADM fallback.")
-        result = cls.from_gadm(iso3, admin_level, **kwargs)
+        result = cls.from_gadm(iso3, admin_level)
         if result.entities:
             return result
 
@@ -512,7 +508,7 @@ class AdminBoundaries(AdminBoundaryTable):
             True if GeoRepo is reachable, False otherwise.
         """
         try:
-            from gigaspatial.handlers.unicef.georepo import GeoRepoClient
+            from gigaspatial.handlers.georepo import GeoRepoClient
 
             client = GeoRepoClient()
             if client.check_connection():

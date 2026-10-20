@@ -1,19 +1,17 @@
-# from dataclasses import dataclass
+import dataclasses
 from pathlib import Path
-import functools
-import multiprocessing
-from typing import List, Optional, Union, Literal, Tuple
+from typing import List, Optional, Union, Literal
 import geopandas as gpd
 import pandas as pd
 import numpy as np
 from pydantic.dataclasses import dataclass
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
+from urllib3.exceptions import InsecureRequestWarning
 from enum import Enum
 import requests
-from tqdm import tqdm
-import zipfile
 import tempfile
+import warnings
 from pydantic import (
     HttpUrl,
     Field,
@@ -30,7 +28,16 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    RasterReadOptions,
+    ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import (
+    extract_zip_to_store,
+    stream_to_store,
+    tiles_intersecting,
+)
+from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.config import config as global_config
 
 
@@ -41,8 +48,10 @@ class CoordSystem(int, Enum):
     Mollweide = 54009
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"), kw_only=True)
 class GHSLDataConfig(BaseHandlerConfig):
+    options_type = ResolveOptions
+
     # constants
     AVAILABLE_YEARS: List = Field(default=np.append(np.arange(1975, 2031, 5), 2018))
     AVAILABLE_RESOLUTIONS: List = Field(default=[10, 100, 1000])
@@ -70,86 +79,64 @@ class GHSLDataConfig(BaseHandlerConfig):
     resolution: int = Field(
         default=100, description="Resolution in meters (10, 100, or 1000)"
     )
+    verify_tiles_ssl: bool = Field(
+        default=True,
+        description=(
+            "Verify the certificate when downloading the tile grid. Set False "
+            "only behind a proxy that re-signs HTTPS traffic; it affects that "
+            "one request."
+        ),
+    )
     tiles_gdf: Optional[gpd.GeoDataFrame] = Field(default=None, init=False)
 
     def __post_init__(self):
         super().__post_init__()
 
     def _load_tiles(self):
-        """Load GHSL tiles from tiles shapefile."""
-        # Check cache first
-        cache_dir = self.base_path / "cache"
-        tiles_cache = cache_dir / f"tiles_{self.coord_system.value}.geojson"
-
-        if self.data_store.file_exists(str(tiles_cache)):
-
-            try:
-                self.tiles_gdf = gpd.read_file(tiles_cache)
-                self.logger.info(f"Loaded tiles from cache")
-                return
-            except Exception:
-                self.logger.warning("Cache invalid, re-downloading")
-
-        import shutil
-        import ssl
-        import warnings
+        """Load the GHSL tile grid, from its cache in the data store when present."""
+        from gigaspatial.core.io.readers import read_dataset
         from gigaspatial.core.io.writers import write_dataset
 
-        temp_dir = None
-
-        try:
-            # Try with SSL verification first
+        tiles_cache = str(
+            self.base_path / "cache" / f"tiles_{self.coord_system.value}.geojson"
+        )
+        if self.data_store.file_exists(tiles_cache):
             try:
-                self.logger.info(
-                    "Attempting download GHSL tile grid with SSL verification"
+                self.tiles_gdf = read_dataset(tiles_cache, data_store=self.data_store)
+                self.logger.info("Loaded GHSL tile grid from cache")
+                return
+            except Exception:
+                self.logger.warning("Cached GHSL tile grid is unreadable, downloading it again")
+
+        if not self.verify_tiles_ssl:
+            self.logger.warning(
+                f"Downloading the GHSL tile grid without certificate verification: {self.TILES_URL}"
+            )
+        try:
+            with warnings.catch_warnings():
+                if not self.verify_tiles_ssl:
+                    warnings.simplefilter("ignore", InsecureRequestWarning)
+                response = requests.get(
+                    self.TILES_URL, timeout=60, verify=self.verify_tiles_ssl
                 )
-                # Set up SSL context before any requests
-                ssl._create_default_https_context = ssl._create_unverified_context
-                self.tiles_gdf = gpd.read_file(self.TILES_URL)
-                self.logger.info("Download successful with SSL verification")
-
-            except Exception as e:
-                # Fall back to requests with SSL verification
-                self.logger.warning(
-                    f"Geopandas download with SSL verification failed ({type(e).__name__}): {e}"
-                )
-                self.logger.warning(
-                    "Retrying GHSL tile grid download with requests and without SSL verification"
-                )
-
-                # Download tiles with requests
-                temp_dir = Path(tempfile.mkdtemp())
-                zip_path = temp_dir / "tiles.zip"
-
-                # Suppress SSL warnings when using verify=False
-                from urllib3.exceptions import InsecureRequestWarning
-
-                warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-
-                response = requests.get(self.TILES_URL, verify=False)
-                response.raise_for_status()
-                self.logger.info("Download successful without SSL verification")
-
-                # Write downloaded content to file
-                with open(zip_path, "wb") as f:
-                    f.write(response.content)
-
-                # Read the shapefile from the zip
-                self.tiles_gdf = gpd.read_file(zip_path)
-
-            # Cache it
-            write_dataset(self.tiles_gdf, self.data_store, str(tiles_cache))
-            self.logger.info("Tiles cached successfully")
-
+            response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download tiles: {e}")
+            hint = (
+                " If a proxy re-signs HTTPS traffic, set verify_tiles_ssl=False."
+                if isinstance(e, requests.exceptions.SSLError)
+                else ""
+            )
             raise ValueError(
-                f"Could not download GHSL tiles from {self.TILES_URL}"
+                f"Could not download the GHSL tile grid from {self.TILES_URL}.{hint}"
             ) from e
-        finally:
-            # Cleanup temp directory if it was created
-            if temp_dir is not None and temp_dir.exists():
-                shutil.rmtree(temp_dir)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = Path(temp_dir) / "tiles.zip"
+            zip_path.write_bytes(response.content)
+            self.tiles_gdf = gpd.read_file(zip_path)
+
+        write_dataset(self.tiles_gdf, self.data_store, tiles_cache)
+        self.logger.info("GHSL tile grid cached")
 
     @field_validator("year")
     def validate_year(cls, value: str) -> int:
@@ -178,7 +165,9 @@ class GHSLDataConfig(BaseHandlerConfig):
         if self.year == 2018 and self.product in ["GHS_BUILT_V", "GHS_POP", "GHS_SMOD"]:
             raise ValueError(f"{self.product} product is not available for 2018")
 
-        if self.resolution == 10 and "GHS_BUILT_H" not in self.product:
+        if self.resolution == 10 and not (
+            "GHS_BUILT_H" in self.product or self.product == "GHS_BUILT_S"
+        ):
             raise ValueError(
                 f"{self.product} product is not available at 10 (10m) resolution"
             )
@@ -236,102 +225,36 @@ class GHSLDataConfig(BaseHandlerConfig):
         """
         return "EPSG:4326" if self.coord_system == CoordSystem.WGS84 else "ESRI:54009"
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
-    ) -> List[dict]:
+    def get_relevant_data_units_by_key(
+        self, search_key: BaseGeometry, options: ResolveOptions
+    ) -> List[str]:
         """
-        Return intersecting tiles for a given geometry or GeoDataFrame.
+        Return the IDs of the tiles intersecting a search geometry.
 
-        Notes
-        -----
-        - The input ``geometry`` is expected to already be in the GHSL CRS
-          (see :meth:`extract_search_geometry`), i.e. ``self.crs``.
-        - Callers should normally use :meth:`get_relevant_data_units`, which
-          routes through ``extract_search_geometry`` and ensures CRS
-          normalization, instead of calling this method directly.
+        The search geometry is in ``self.crs`` (see
+        :meth:`BaseHandlerConfig.extract_search_geometry`).
         """
-        # Defensive: if tiles have a CRS different from the GHSL config CRS,
-        # reproject the input geometry to the tiles CRS.
-        tiles_crs = getattr(self.tiles_gdf, "crs", None)
-        if tiles_crs is not None and tiles_crs != self.crs:
-            geometry = (
-                gpd.GeoDataFrame(geometry=[geometry], crs=self.crs)
-                .to_crs(tiles_crs)
-                .geometry[0]
-            )
+        tiles = tiles_intersecting(self.tiles_gdf, search_key, self.crs)
+        return tiles["tile_id"].to_list()
 
-        # Find intersecting tiles
-        mask = self.tiles_gdf.geometry.intersects(geometry)
+    def get_data_unit_path(self, unit: str = None, options=None) -> Path:
+        """
+        Return the stored ``.tif`` of the configured dataset or dataset tile.
 
-        intersecting_tiles = self.tiles_gdf.loc[mask, "tile_id"].to_list()
-
-        return intersecting_tiles
-
-    def get_data_unit_path(self, unit: str = None, file_ext=".zip", **kwargs) -> Path:
-        """Construct and return the path for the configured dataset or dataset tile."""
+        GHSL zips hold one raster named like the zip itself, which the
+        downloader extracts next to where the zip would be.
+        """
         info = self._get_product_info()
 
-        tile_path = (
+        return (
             self.base_path
             / info["product_folder"]
             / (
                 f"{info['product_name']}_V{info['product_version']}_0"
                 + (f"_{unit}" if unit else "")
-                + file_ext
+                + ".tif"
             )
         )
-
-        return tile_path
-
-    def extract_search_geometry(self, source, **kwargs):
-        """
-        Extract a canonical search geometry for GHSL and normalize it to
-        the GHSL grid CRS.
-
-        Parameters
-        ----------
-        source :
-            Any supported source type from ``BaseHandlerConfig``:
-            country code (str), GeoDataFrame, shapely geometry, or iterable
-            of points.
-        crs : str, optional
-            CRS of the input coordinates when the source itself does not
-            carry CRS information (e.g. bare shapely geometry or list of
-            points). For GeoDataFrames, ``source.crs`` is preferred.
-
-        Returns
-        -------
-        shapely.geometry.base.BaseGeometry
-            Geometry normalized to the GHSL CRS (``self.crs``).
-        """
-        # Treat any passed ``crs`` as the *source* CRS for CRS-less inputs.
-        source_crs = kwargs.pop("crs", None)
-
-        # Determine the CRS of the input coordinates before we lose that
-        # information in the base implementation (which returns a bare
-        # shapely geometry without CRS metadata).
-        #
-        # - If the source is a GeoDataFrame, trust its .crs
-        # - Else, fall back to the explicitly provided source_crs
-        # - If neither is available, assume WGS84 for raw lon/lat coords
-        if isinstance(source, gpd.GeoDataFrame) and source.crs is not None:
-            geom_crs = source.crs
-        else:
-            geom_crs = source_crs or "EPSG:4326"
-
-        # Let the base class build a single geometry (union, etc.) in the
-        # same coordinate space; we will reproject afterwards if needed.
-        geometry = super().extract_search_geometry(source, **kwargs)
-
-        # Normalize into the GHSL CRS if needed.
-        if geom_crs != self.crs:
-            geometry = (
-                gpd.GeoDataFrame(geometry=[geometry], crs=geom_crs)
-                .to_crs(self.crs)
-                .geometry[0]
-            )
-
-        return geometry
 
     def compute_dataset_url(self, tile_id=None) -> str:
         """Compute the download URL for a GHSL dataset."""
@@ -381,8 +304,25 @@ class GHSLDataConfig(BaseHandlerConfig):
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class GHSLDownloadOptions(DownloadOptions):
+    """
+    Download options of GHSL tiles.
+
+    Attributes:
+        extract: If True, the raster is extracted from the downloaded zip;
+            otherwise the zip is saved next to where the raster would be.
+        file_pattern: Regex selecting the zip members to extract.
+    """
+
+    extract: bool = True
+    file_pattern: Optional[str] = r".*\.tif$"
+
+
 class GHSLDataDownloader(BaseHandlerDownloader):
     """A class to handle downloads of GHSL datasets."""
+
+    options_type = GHSLDownloadOptions
 
     def __init__(
         self,
@@ -404,143 +344,41 @@ class GHSLDataDownloader(BaseHandlerDownloader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def download_data_unit(
-        self,
-        tile_id: str,
-        extract: bool = True,
-        file_pattern: Optional[str] = r".*\.tif$",
-        **kwargs,
-    ) -> Optional[Union[Path, List[Path]]]:
+        self, tile_id: str, options: GHSLDownloadOptions
+    ) -> Union[Path, List[Path]]:
         """
         Downloads and optionally extracts files for a given tile.
 
         Args:
             tile_id: tile ID to process.
-            extract: If True and the downloaded file is a zip, extract its contents. Defaults to True.
-            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-            **kwargs: Additional parameters passed to download methods
+            options: ``extract`` and ``file_pattern`` select what is stored.
 
         Returns:
-            Path to the downloaded file if extract=False,
-            List of paths to the extracted files if extract=True,
-            None on failure.
+            Path to the downloaded zip if extract=False, else the paths of
+            the extracted files.
+
+        Raises:
+            requests.RequestException: If the download fails.
+            zipfile.BadZipFile: If the download is not a zip archive.
+            FileNotFoundError: If no archive member matches ``file_pattern``.
         """
         url = self.config.compute_dataset_url(tile_id=tile_id)
         output_path = self.config.get_data_unit_path(tile_id)
 
-        if not extract:
-            return self._download_file(url, output_path)
-
-        extracted_files: List[Path] = []
-        temp_downloaded_path: Optional[Path] = None
-
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
-                temp_downloaded_path = Path(temp_file.name)
-                self.logger.debug(
-                    f"Downloading {url} to temporary file: {temp_downloaded_path}"
-                )
-
-                response = requests.get(url, stream=True)
-                response.raise_for_status()
-
-                total_size = int(response.headers.get("content-length", 0))
-
-                with tqdm(
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    desc=f"Downloading {tile_id}",
-                ) as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            temp_file.write(chunk)
-                            pbar.update(len(chunk))
-
-            self.logger.info(f"Successfully downloaded temporary file!")
-
-            with zipfile.ZipFile(str(temp_downloaded_path), "r") as zip_ref:
-                if file_pattern:
-                    import re
-
-                    pattern = re.compile(file_pattern)
-                    files_to_extract = [
-                        f for f in zip_ref.namelist() if pattern.match(f)
-                    ]
-                else:
-                    files_to_extract = zip_ref.namelist()
-
-                for file in files_to_extract:
-                    extracted_path = output_path.parent / Path(file).name
-                    with zip_ref.open(file) as source:
-                        file_content = source.read()
-                        self.data_store.write_file(str(extracted_path), file_content)
-                    extracted_files.append(extracted_path)
-                    self.logger.info(f"Extracted {file} to {extracted_path}")
-
-            Path(temp_file.name).unlink()
-            return extracted_files
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download {url} to temporary file: {e}")
-            return None
-        except zipfile.BadZipFile:
-            self.logger.error(f"Downloaded file for {tile_id} is not a valid zip file.")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error downloading/extracting tile {tile_id}: {e}")
-            return None
-        finally:
-            if temp_downloaded_path and temp_downloaded_path.exists():
-                try:
-                    temp_downloaded_path.unlink()
-                    self.logger.debug(f"Deleted temporary file: {temp_downloaded_path}")
-                except OSError as e:
-                    self.logger.warning(
-                        f"Could not delete temporary file {temp_downloaded_path}: {e}"
-                    )
-
-    def download(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[Tuple[float, float], Point]],  # points
-            BaseGeometry,  # shapely geoms
-            gpd.GeoDataFrame,
-        ],
-        extract: bool = True,
-        file_pattern: Optional[str] = r".*\.tif$",
-        **kwargs,
-    ) -> List[Optional[Union[Path, List[Path]]]]:
-        """
-        Download GHSL data for a specified geographic region.
-
-        The region can be defined by a country code/name, a list of points,
-        a Shapely geometry, or a GeoDataFrame. This method identifies the
-        relevant GHSL tiles intersecting the region and downloads the
-        specified type of data (polygons or points) for those tiles in parallel.
-
-        Args:
-            source: Defines the geographic area for which to download data.
-                    Can be:
-                      - A string representing a country code or name.
-                      - A list of (latitude, longitude) tuples or Shapely Point objects.
-                      - A Shapely BaseGeometry object (e.g., Polygon, MultiPolygon).
-                      - A GeoDataFrame with geometry column in EPSG:4326.
-            extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
-            file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-            **kwargs: Additional keyword arguments. These will be passed down to
-                      `AdminBoundaries.create()` (if `source` is a country)
-                      and to `self.download_data_units()`.
-
-        Returns:
-            A list of local file paths for the successfully downloaded tiles.
-            Returns an empty list if no data is found for the region or if
-            all downloads fail.
-        """
-
-        tiles = self.config.get_relevant_data_units(source, **kwargs)
-        return self.download_data_units(
-            tiles, extract=extract, file_pattern=file_pattern, **kwargs
+        if not options.extract:
+            return stream_to_store(
+                url,
+                output_path.with_suffix(".zip"),
+                self.data_store,
+                show_progress=options.show_progress,
+            )
+        return extract_zip_to_store(
+            url,
+            output_path.parent,
+            self.data_store,
+            options.file_pattern,
+            show_progress=options.show_progress,
+            desc=f"Downloading {tile_id}",
         )
 
     def download_by_country(
@@ -568,63 +406,24 @@ class GHSLDataDownloader(BaseHandlerDownloader):
                                instead of the default from `AdminBoundaries`.
             extract: If True and the downloaded files are zips, extract their contents. Defaults to True.
             file_pattern: Optional regex pattern to filter extracted files (if extract=True).
-            **kwargs: Additional keyword arguments that are passed to
-                      `download_data_units`. For example, `extract` to download and extract.
+            **kwargs: Other resolve and download options.
 
         Returns:
             A list of local file paths for the successfully downloaded tiles
             for the specified country.
         """
         return self.download(
-            source=country_code,
-            data_store=data_store,
-            path=country_geom_path,
+            country_code,
+            country_data_store=data_store,
+            country_geom_path=country_geom_path,
             extract=extract,
             file_pattern=file_pattern,
             **kwargs,
         )
 
-    def _download_file(self, url: str, output_path: Path) -> Optional[Path]:
-        """
-        Downloads a file from a URL to a specified output path with a progress bar.
-
-        Args:
-            url: The URL to download from.
-            output_path: The local path to save the downloaded file.
-
-        Returns:
-            The path to the downloaded file on success, None on failure.
-        """
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-
-            total_size = int(response.headers.get("content-length", 0))
-
-            with self.data_store.open(str(output_path), "wb") as file:
-                with tqdm(
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    desc=f"Downloading {output_path.name}",
-                ) as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            file.write(chunk)
-                            pbar.update(len(chunk))
-
-            self.logger.debug(f"Successfully downloaded: {url} to {output_path}")
-            return output_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download {url}: {str(e)}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
-            return None
-
-
 class GHSLDataReader(BaseHandlerReader):
+
+    options_type = RasterReadOptions
 
     def __init__(
         self,
@@ -646,38 +445,19 @@ class GHSLDataReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self,
-        source_data_path: List[Union[str, Path]],
-        merge_rasters: bool = False,
-        **kwargs,
+        self, source_data_path: List[Union[str, Path]], options: RasterReadOptions
     ) -> Union[List[TifProcessor], TifProcessor]:
         """
         Load TifProcessors from GHSL dataset.
         Args:
             source_data_path: List of file paths to load
-            merge_rasters: If True, all rasters will be merged into a single TifProcessor.
-                           Defaults to False.
+            options: ``merge_rasters`` merges all rasters into a single TifProcessor.
         Returns:
             Union[List[TifProcessor], TifProcessor]: List of TifProcessor objects for accessing the raster data or a single
                                                     TifProcessor if merge_rasters is True.
         """
         return self._load_raster_data(
-            raster_paths=source_data_path, merge_rasters=merge_rasters
-        )
-
-    def load(
-        self,
-        source,
-        crop_to_source: bool = False,
-        merge_rasters: bool = False,
-        **kwargs,
-    ):
-        return super().load(
-            source=source,
-            crop_to_source=crop_to_source,
-            file_ext=kwargs.pop("file_ext", ".tif"),
-            merge_rasters=merge_rasters,
-            **kwargs,
+            raster_paths=source_data_path, merge_rasters=options.merge_rasters
         )
 
 
@@ -740,6 +520,7 @@ class GHSLDataHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     @property
@@ -846,32 +627,6 @@ class GHSLDataHandler(BaseHandler):
             config=config, data_store=data_store, logger=logger, **kwargs
         )
 
-    def load_data(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-            Path,  # path
-            List[Union[str, Path]],  # list of paths
-        ],
-        crop_to_source: bool = False,
-        ensure_available: bool = True,
-        merge_rasters: bool = False,
-        **kwargs,
-    ):
-        return super().load_data(
-            source=source,
-            crop_to_source=crop_to_source,
-            ensure_available=ensure_available,
-            file_ext=".tif",
-            extract=True,
-            file_pattern=r".*\.tif$",
-            merge_rasters=merge_rasters,
-            **kwargs,
-        )
-
     def load_into_dataframe(
         self,
         source: Union[
@@ -892,21 +647,26 @@ class GHSLDataHandler(BaseHandler):
         Args:
             source: The data source specification
             ensure_available: If True, ensure data is downloaded before loading
-            **kwargs: Additional parameters passed to load methods
+            **kwargs: Handler options go to ``load_data``, the rest to
+                ``TifProcessor.to_dataframe``.
 
         Returns:
             DataFrame containing the GHSL data
         """
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
             source=source,
             crop_to_source=crop_to_source,
             ensure_available=ensure_available,
-            **kwargs,
+            **load_kwargs,
         )
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_dataframe(**kwargs)
+            return tif_processors.to_dataframe(**frame_kwargs)
         return pd.concat(
-            [tp.to_dataframe(**kwargs) for tp in tif_processors], ignore_index=True
+            [tp.to_dataframe(**frame_kwargs) for tp in tif_processors],
+            ignore_index=True,
         )
 
     def load_into_geodataframe(
@@ -929,31 +689,24 @@ class GHSLDataHandler(BaseHandler):
         Args:
             source: The data source specification
             ensure_available: If True, ensure data is downloaded before loading
-            **kwargs: Additional parameters passed to load methods
+            **kwargs: Handler options go to ``load_data``, the rest to
+                ``TifProcessor.to_geodataframe``.
 
         Returns:
             GeoDataFrame containing the GHSL data
         """
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
             source=source,
             crop_to_source=crop_to_source,
             ensure_available=ensure_available,
-            **kwargs,
+            **load_kwargs,
         )
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_geodataframe(**kwargs)
+            return tif_processors.to_geodataframe(**frame_kwargs)
         return pd.concat(
-            [tp.to_geodataframe(**kwargs) for tp in tif_processors], ignore_index=True
+            [tp.to_geodataframe(**frame_kwargs) for tp in tif_processors],
+            ignore_index=True,
         )
-
-    def get_available_data_info(
-        self,
-        source: Union[
-            str,  # country
-            List[Union[tuple, Point]],  # points
-            BaseGeometry,  # geometry
-            gpd.GeoDataFrame,  # geodataframe
-        ],
-        **kwargs,
-    ) -> dict:
-        return super().get_available_data_info(source, file_ext=".tif", **kwargs)

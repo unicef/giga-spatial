@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giga-spatial"
-description = "A package for spatial data download & processing"
+description = "Acquires published geospatial datasets into a data store you control, loads them for a source, and processes them."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
@@ -15,7 +15,7 @@ authors = [
 keywords = [
     "gigaspatial", "spatial", "geospatial", "gis", "remote sensing",
     "data processing", "download", "openstreetmap", "osm", "ghsl",
-    "grid", "point of interest", "POI", "raster", "vector",
+    "grid", "h3", "worldpop", "buildings", "point of interest", "POI", "raster", "vector",
     "school connectivity", "unicef", "giga", "mapping", "analysis", "python"
 ]
 classifiers = [
@@ -69,7 +69,7 @@ Documentation = "https://unicef.github.io/giga-spatial/"
 Source = "https://github.com/unicef/giga-spatial"
 "Issue Tracker" = "https://github.com/unicef/giga-spatial/issues"
 Discussions = "https://github.com/unicef/giga-spatial/discussions"
-Changelog = "https://unicef.github.io/giga-spatial/changelog"
+Changelog = "https://unicef.github.io/giga-spatial/latest/changelog"
 
 [project.optional-dependencies]
 gee = [

@@ -2,7 +2,7 @@
 Tests for NasaSRTMConfig HTTPS tile URL builder.
 
 Run with:
-    pytest tests/handlers/srtm/test_nasa_srtm_urls.py -v
+    pytest tests/handlers/nasa/test_nasa_srtm_urls.py -v
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from gigaspatial.handlers.nasa.srtm import NasaSRTMConfig
 
 @pytest.fixture
 def mock_global_config():
-    with patch("gigaspatial.handlers.srtm.nasa_srtm.global_config") as mock_cfg:
+    with patch("gigaspatial.handlers.nasa.srtm.global_config") as mock_cfg:
         mock_cfg.EARTHDATA_USERNAME = "user"
         mock_cfg.EARTHDATA_PASSWORD = "pass"
         mock_cfg.LPDAAC_S3_REGION = "us-west-2"

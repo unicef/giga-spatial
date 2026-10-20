@@ -2,14 +2,15 @@
 Module for local filesystem DataStore implementation.
 Provides access to local files and directories using a consistent DataStore interface.
 """
+
 from pathlib import Path
 import os
 import shutil
-from typing import Any, List, Generator, Tuple, Union, IO
+from typing import Any, List, Generator, Tuple, Union, IO, Optional
 from os import PathLike
 from typing import Union
 
-from .data_store import DataStore
+from gigaspatial.core.io.data_store import DataStore
 
 Pathish = Union[str, PathLike[str]]
 
@@ -37,41 +38,41 @@ class LocalDataStore(DataStore):
         # Otherwise, resolve relative to base_path
         return (self.base_path / path_obj).resolve()
 
-    def read_file(self, path: str) -> bytes:
+    def read_file(self, path: str, encoding: Optional[str] = None) -> Union[str, bytes]:
         """
-        Read contents of a file as bytes.
-
-        Args:
-            path: Path to the file.
-
-        Returns:
-            File contents in bytes.
+        Read contents of a file. Returns bytes unless `encoding` is given.
         """
         full_path = self._resolve_path(path)
         with open(full_path, "rb") as f:
-            return f.read()
+            data = f.read()
+        return data.decode(encoding) if encoding else data
 
-    def write_file(self, path: str, data: Union[bytes, str]) -> None:
+    def write_file(
+        self,
+        path: str,
+        data: Union[bytes, str, IO[bytes]],
+        encoding: Optional[str] = None,
+    ) -> None:
         """
-        Write data (string or bytes) to a file.
+        Write data (str, bytes, or a readable binary stream) to a file.
         Automatically creates parent directories if they don't exist.
-
-        Args:
-            path: Path where to write.
-            data: Data to write (str or bytes).
         """
         full_path = self._resolve_path(path)
         self.mkdir(str(full_path.parent), exist_ok=True)
 
         if isinstance(data, str):
-            mode = "w"
-            encoding = "utf-8"
+            with open(full_path, "w", encoding=encoding or self.DEFAULT_ENCODING) as f:
+                f.write(data)
+        elif hasattr(data, "read"):
+            with open(full_path, "wb") as f:
+                shutil.copyfileobj(data, f)
+        elif isinstance(data, bytes):
+            with open(full_path, "wb") as f:
+                f.write(data)
         else:
-            mode = "wb"
-            encoding = None
-
-        with open(full_path, mode, encoding=encoding) as f:
-            f.write(data)
+            raise ValueError(
+                "Unsupported data type. Accepted: 'str', 'bytes', or a readable binary stream."
+            )
 
     def file_exists(self, path: str) -> bool:
         """Checks if file exists at path."""
@@ -129,20 +130,15 @@ class LocalDataStore(DataStore):
 
         return [d.name for d in full_path.iterdir() if d.is_dir()]
 
-    def open(self, path: str, mode: str = "r") -> IO:
+    def open(self, path: str, mode: str = "r", encoding: Optional[str] = None) -> IO:
         """
         Open a file-like object using the local filesystem.
-
-        Args:
-            path: File path.
-            mode: Open mode.
-
-        Returns:
-            File descriptor.
         """
         full_path = self._resolve_path(path)
         self.mkdir(str(full_path.parent), exist_ok=True)
-        return open(full_path, mode)
+        if "b" in mode:
+            return open(full_path, mode)
+        return open(full_path, mode, encoding=encoding or self.DEFAULT_ENCODING)
 
     def is_file(self, path: str) -> bool:
         """Checks if path is a file."""

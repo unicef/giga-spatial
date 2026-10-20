@@ -21,19 +21,20 @@ from pydantic.dataclasses import dataclass
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry import Point
 
-from gigaspatial.grid.mercator_tiles import MercatorTiles, CountryMercatorTiles
+from gigaspatial.grid.mercator_tiles import MercatorTiles
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.config import config
 from gigaspatial.handlers.base import BaseHandlerConfig
 from gigaspatial.handlers.base import BaseHandlerDownloader
 from gigaspatial.handlers.base import BaseHandlerReader
 from gigaspatial.handlers.base import BaseHandler
+from gigaspatial.handlers.base import DownloadOptions, ReadOptions, ResolveOptions
+from gigaspatial.handlers.base.fetch import stream_to_store
 
 import logging
-from tqdm import tqdm
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"), kw_only=True)
 class OoklaSpeedtestConfig(BaseHandlerConfig):
     """
     Configuration for Ookla Speedtest dataset access.
@@ -58,11 +59,12 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
     BASE_URL = "https://ookla-open-data.s3.amazonaws.com/parquet/performance"
 
     base_path: Path = Field(default=config.get_path("ookla_speedtest", "bronze"))
-    n_workers: int = 1 # Ookla data is not parallelizable beyond single file, so just iterate.
 
     type: Literal["fixed", "mobile"] = Field(...)
     year: Optional[int] = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     quarter: Optional[int] = Field(default=None, ge=0, le=4)
+
+    options_type = ResolveOptions
 
     def __post_init__(self):
         if self.year is None:
@@ -123,40 +125,31 @@ class OoklaSpeedtestConfig(BaseHandlerConfig):
 
         return ookla_tiles
 
-    def get_relevant_data_units(self, source=None, **kwargs):
-        """
-        Identify the Parquet URL for the configured year and quarter.
+    def get_search_key(self, source, options: ResolveOptions) -> None:
+        """Ookla data is one global file per quarter: no source narrows it."""
+        return None
 
-        Args:
-            source: Geographic source (ignored as Ookla data is global).
-            **kwargs: Additional parameters.
-
-        Returns:
-            A list containing the single dataset URL.
-        """
-        return [self.DATASET_URL]
-
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame] = None, **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key, options: ResolveOptions
     ) -> List[str]:
         """
-        Identify relevant data units by geometry.
+        Return the Parquet URL for the configured year and quarter.
 
         Args:
-            geometry: Boundary to filter by.
-            **kwargs: Additional parameters.
+            search_key: Always None; the dataset is a single global file.
+            options: The resolve options (unused).
 
         Returns:
             A list of dataset URLs.
         """
         return [self.DATASET_URL]
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str, options=None) -> Path:
         """Resolves a remote Ookla dataset URL to its local storage path.
 
         Args:
             unit: The remote Parquet URL.
-            **kwargs: Additional context.
+            options: The resolve options (unused).
 
         Returns:
             Absolute path to the local data file.
@@ -171,6 +164,8 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
     Acquires performance tiles from AWS S3 and persists them to local storage.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Union[OoklaSpeedtestConfig, dict[str, Union[str, int]]],
@@ -184,43 +179,26 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
         )
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, url: str, **kwargs) -> Optional[Path]:
+    def download_data_unit(self, url: str, options: DownloadOptions) -> Path:
         """
         Download a single Ookla Parquet file.
 
         Args:
             url: Remote S3 URL.
-            **kwargs: Downloading parameters.
+            options: ``show_progress`` controls the progress bar.
 
         Returns:
-            Local path to the downloaded file, or None on failure.
+            The stored file path.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
-        output_path = self.config.get_data_unit_path(url)
-
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-
-            total_size = int(response.headers.get("content-length", 0))
-
-            with self.data_store.open(str(output_path), "wb") as file:
-                for chunk in tqdm(
-                    response.iter_content(chunk_size=8192),
-                    total=total_size // 8192,
-                    unit="KB",
-                    desc=f"Downloading {output_path.name}",
-                ):
-                    file.write(chunk)
-
-            self.logger.info(f"Successfully downloaded: {url} to {output_path}")
-            return output_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to download {url}: {str(e)}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading {url}: {str(e)}")
-            return None
+        return stream_to_store(
+            url,
+            self.config.get_data_unit_path(url),
+            self.data_store,
+            show_progress=options.show_progress,
+        )
 
 
 class OoklaSpeedtestReader(BaseHandlerReader):
@@ -229,6 +207,9 @@ class OoklaSpeedtestReader(BaseHandlerReader):
 
     Loads and processes performance tiles into tabular formats.
     """
+
+    QUADKEY_ZOOM_LEVEL = 16
+    options_type = ReadOptions
 
     def __init__(
         self,
@@ -244,20 +225,37 @@ class OoklaSpeedtestReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: ReadOptions
     ) -> pd.DataFrame:
         """
         Load Ookla data from local Parquet files.
 
         Args:
             source_data_path: List of local file paths.
-            **kwargs: Loading parameters.
+            options: The read options.
 
         Returns:
             A pandas DataFrame of speedtest results.
         """
         result = self._load_tabular_data(file_paths=source_data_path)
         return result
+
+    def crop_to_geometry(self, data, geometry, **kwargs) -> pd.DataFrame:
+        """
+        Keep the rows whose zoom 16 quadkey tile intersects the geometry.
+
+        Args:
+            data: Ookla rows with a ``quadkey`` column.
+            geometry: Search geometry in EPSG:4326.
+            **kwargs: Ignored.
+
+        Returns:
+            The matching rows, re-indexed from zero.
+        """
+        quadkeys = MercatorTiles.from_spatial(
+            geometry, zoom_level=self.QUADKEY_ZOOM_LEVEL
+        ).quadkeys
+        return data[data["quadkey"].isin(quadkeys)].reset_index(drop=True)
 
     def load(
         self,
@@ -321,6 +319,7 @@ class OoklaSpeedtestHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     def create_config(
@@ -368,6 +367,7 @@ class OoklaSpeedtestHandler(BaseHandler):
             str,  # path
             List[Union[str, Path]],
         ] = None,
+        crop_to_source: bool = True,
         process_geospatial: bool = False,
         ensure_available: bool = True,
         **kwargs,
@@ -376,69 +376,23 @@ class OoklaSpeedtestHandler(BaseHandler):
         Acquire and filter Ookla Speedtest data.
 
         Args:
-            source: Geographic filter (country, geometry) or direct file paths.
+            source: Geographic filter (country, geometry, points) or direct
+                file paths. None loads the whole quarter.
+            crop_to_source: If True, keeps only the tiles intersecting the
+                source. Path sources and None are never cropped.
             process_geospatial: If True, returns a GeoDataFrame with tile geometries.
             ensure_available: If True, executes download if data is missing locally.
-            **kwargs: Filtering and processing parameters.
+            **kwargs: Handler options (e.g. ``show_progress``).
 
         Returns:
             Tabular or geospatial data for the requested area.
         """
-
-        if source is None or (
-            isinstance(source, (str, Path))
-            and (
-                self.data_store.file_exists(str(source))
-                or str(source).endswith(".parquet")
-            )
-            or (
-                isinstance(source, List)
-                and all(isinstance(p, (str, Path)) for p in source)
-            )
-        ):
-            # If no source or source is a direct path, load without filtering
-            result = super().load_data(source, ensure_available, **kwargs)
-        else:
-            # Load the entire dataset and then apply Mercator tile filtering
-            full_dataset = super().load_data(
-                None, ensure_available, **kwargs
-            )  # Load the full dataset (uses DATASET_URL)
-
-            key = self.config._cache_key(source, **kwargs)
-
-            # Check cache unless forced recompute
-            if (
-                not kwargs.get("force_recompute", False)
-                and key in self.config._unit_cache
-            ):
-                self.logger.debug(
-                    f"Using cached quadkeys for {key[0]}: {key[1][:50]}..."
-                )
-                quadkeys = self.config._unit_cache[key]
-
-            else:
-
-                if isinstance(source, str):  # country
-                    mercator_tiles = CountryMercatorTiles.create(
-                        source, zoom_level=16, **kwargs
-                    )
-                elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame, List)):
-                    mercator_tiles = MercatorTiles.from_spatial(
-                        source, zoom_level=16, **kwargs
-                    )
-                else:
-                    raise ValueError(
-                        f"Unsupported source type for filtering: {type(source)}"
-                    )
-
-                quadkeys = mercator_tiles.quadkeys
-
-                # Cache the result
-                self.config._unit_cache[key] = quadkeys
-
-            result = full_dataset[full_dataset["quadkey"].isin(quadkeys)].reset_index(
-                drop=True
-            )
+        result = super().load_data(
+            source,
+            crop_to_source=crop_to_source and source is not None,
+            ensure_available=ensure_available,
+            **kwargs,
+        )
 
         if process_geospatial:
             # Convert 'tile' column from WKT to geometry

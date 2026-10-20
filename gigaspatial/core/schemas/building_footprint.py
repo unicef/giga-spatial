@@ -13,7 +13,7 @@ import pandas as pd
 
 from gigaspatial.config import config
 from gigaspatial.core.io.data_store import DataStore
-from .entity import GEO_ENTITY_CONFIG, GigaGeoEntity, EntityTable
+from gigaspatial.core.schemas.entity import GEO_ENTITY_CONFIG, GigaGeoEntity, EntityTable
 from gigaspatial.processing.entity_processor import EntityProcessor
 
 

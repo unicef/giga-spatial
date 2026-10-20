@@ -1,31 +1,41 @@
-# Welcome to GigaSpatial
+<div class="gs-hero" markdown>
 
-GigaSpatial is a powerful Python package designed for spatial data analysis and processing, providing efficient tools and utilities for handling geographic information systems (GIS) data.
+# GigaSpatial
 
-## Features
+GigaSpatial acquires published geospatial datasets into a data store you control, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. The result is a view: those places with attributes from the datasets attached.
 
-- **Efficient Data Processing**: Fast and memory-efficient processing of large spatial datasets
-- **Multiple Format Support**: Support for various spatial data formats
-- **Advanced Analysis Tools**: Comprehensive set of spatial analysis tools
-- **Easy Integration**: Seamless integration with popular GIS and data science libraries
-- **Scalable Solutions**: Designed to handle both small and large-scale spatial data processing tasks
+[Tutorial](getting-started/quickstart.md){ .md-button .gs-button }
+[API reference](api/index.md){ .md-button }
 
-## Quick Links
+</div>
 
-- [Installation Guide](getting-started/installation.md)
-- [Quick Start Tutorial](getting-started/quickstart.md)
-- [API Reference](api/index.md)
-- [Example Gallery](examples/)
+```python
+from gigaspatial import H3ViewGenerator
 
-## Getting Help
+zones = H3ViewGenerator(source="RWA", resolution=6)
+view = zones.map_wp_pop(country="RWA")
+print(view.head())
+```
 
-If you need help using GigaSpatial, please check out our:
+<div class="grid cards" markdown>
 
-- [User Guide](user-guide/index.md) for detailed usage instructions
-- [API Reference](api/index.md) for detailed function and class documentation
-- [GitHub Issues](https://github.com/unicef/giga-spatial/issues) for bug reports and feature requests
-- [Contributing Guide](contributing.md) for guidelines on how to contribute to the project
+-   <a class="gs-card-link" href="getting-started/datasets/"><span class="gs-card-title">Acquire a dataset</span>A handler stores a published dataset and loads it for a source. A fetcher queries an API or a database and returns records.</a>
 
-## License
+-   <a class="gs-card-link" href="getting-started/quickstart/"><span class="gs-card-title">Map it onto places</span>A generator attaches a dataset to points of interest or zones. The result is a view.</a>
 
-GigaSpatial is released under the AGPL-3.0 License. See the LICENSE file for more details. 
+-   <a class="gs-card-link" href="user-guide/processing/"><span class="gs-card-title">Process the files</span>Read a raster or a table yourself when you want the stored files rather than a view.</a>
+
+-   <a class="gs-card-link" href="about/"><span class="gs-card-title">About GigaSpatial</span>Started inside UNICEF's Giga initiative. Who maintains it, and where it is going.</a>
+
+</div>
+
+## Guides
+
+- [Points and nearest buildings](user-guide/points-and-buildings.md)
+- [Population around points](user-guide/population-accessibility.md)
+- [OSM places](user-guide/osm-places.md)
+- [Processing a raster or a table](user-guide/processing.md)
+- [Settlement](user-guide/settlement-characterization.md)
+- [Infrastructure files](user-guide/infrastructure-normalization.md)
+
+The [API reference](api/index.md) lists the classes a caller imports. The [handler base](api/handler-base.md) is for adding a dataset to this library.

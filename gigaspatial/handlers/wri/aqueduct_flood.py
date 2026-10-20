@@ -17,8 +17,6 @@ import logging
 from pathlib import Path
 from typing import List, Literal, Optional, Union, ClassVar
 
-import requests
-from tqdm import tqdm
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 from shapely.geometry.base import BaseGeometry
@@ -33,7 +31,12 @@ from gigaspatial.handlers.base import (
     BaseHandlerConfig,
     BaseHandlerDownloader,
     BaseHandlerReader,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import stream_to_store
+from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.processing.tif_processor import TifProcessor
 
 # ---------------------------------------------------------------------------
@@ -152,7 +155,7 @@ _HADGEM2_2080_MISSING_RPS: frozenset[str] = frozenset({"rp00500", "rp01000"})
 # ---------------------------------------------------------------------------
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class AqueductFloodConfig(BaseHandlerConfig):
     """Configuration for WRI Aqueduct flood hazard raster access.
 
@@ -193,6 +196,8 @@ class AqueductFloodConfig(BaseHandlerConfig):
             Required when ``flood_type="inunriver"``.
         base_path: Root directory for downloaded raster files.
     """
+
+    options_type = ResolveOptions
 
     # ── Required ────────────────────────────────────────
     flood_type: FloodType = "inunriver"
@@ -415,37 +420,24 @@ class AqueductFloodConfig(BaseHandlerConfig):
     # BaseHandlerConfig interface
     # ────────────────────────────────────────────────────
 
-    def get_relevant_data_units(self, source=None, **kwargs) -> List[str]:
-        """Return the S3 download URL for the configured dataset.
+    def get_search_key(self, source, options: ResolveOptions) -> None:
+        """Aqueduct rasters are global: no source narrows the files to fetch."""
+        return None
 
-        Aqueduct rasters are global; geometry does not filter the units.
-
-        Args:
-            source: Ignored; present for interface compatibility.
-
-        Returns:
-            Single-element list containing the S3 URL.
-        """
-        return [self.DATASET_URL]
-
-    def get_relevant_data_units_by_geometry(
-        self,
-        geometry: Union[BaseGeometry, gpd.GeoDataFrame],
-        **kwargs,
+    def get_relevant_data_units_by_key(
+        self, search_key, options: ResolveOptions
     ) -> List[str]:
         """Return the S3 download URL for the configured dataset.
 
-        Aqueduct rasters are global; geometry does not filter the units.
-
         Args:
-            geometry: Ignored; present for interface compatibility.
+            search_key: Always None; the dataset is a single global file.
 
         Returns:
             Single-element list containing the S3 URL.
         """
         return [self.DATASET_URL]
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str, options=None) -> Path:
         """Resolve an S3 URL to its local storage path.
 
         Args:
@@ -496,6 +488,8 @@ class AqueductFloodDownloader(BaseHandlerDownloader):
     configured ``DataStore``.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Optional[AqueductFloodConfig] = None,
@@ -505,45 +499,24 @@ class AqueductFloodDownloader(BaseHandlerDownloader):
         config = config or AqueductFloodConfig()
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, url: str, **kwargs) -> Optional[Path]:
+    def download_data_unit(self, url: str, options: DownloadOptions) -> Path:
         """Download a single Aqueduct raster file.
 
         Args:
             url: S3 URL of the raster to download.
-            **kwargs: Ignored.
+            options: The download options.
 
         Returns:
-            Local path to the downloaded file, or ``None`` on failure.
+            The stored file path.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
         output_path = self.config.get_data_unit_path(url)
         self.logger.info(f"Downloading {output_path.name} from {url}")
-
-        try:
-            response = requests.get(url, stream=True, timeout=60)
-            response.raise_for_status()
-            import math
-
-            total_size = int(response.headers.get("content-length", 0))
-            total_chunks = math.ceil(total_size / 8192) if total_size else 0
-
-            with self.data_store.open(str(output_path), "wb") as fh:
-                for chunk in tqdm(
-                    response.iter_content(chunk_size=8192),
-                    total=total_chunks,
-                    unit="chunk",
-                    desc=output_path.name,
-                ):
-                    fh.write(chunk)
-
-            self.logger.info(f"Saved: {output_path}")
-            return output_path
-
-        except requests.exceptions.RequestException as exc:
-            self.logger.error(f"Failed to download {url}: {exc}")
-            return None
-        except Exception as exc:
-            self.logger.error(f"Unexpected error downloading {url}: {exc}")
-            return None
+        return stream_to_store(
+            url, output_path, self.data_store, show_progress=options.show_progress
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +526,8 @@ class AqueductFloodDownloader(BaseHandlerDownloader):
 
 class AqueductFloodReader(BaseHandlerReader):
     """Reader for WRI Aqueduct Global Flood Hazard GeoTIFFs."""
+
+    options_type = ReadOptions
 
     def __init__(
         self,
@@ -564,20 +539,18 @@ class AqueductFloodReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self,
-        source_data_path: List[Union[str, Path]],
-        **kwargs,
+        self, source_data_path: List[Union[str, Path]], options: ReadOptions
     ) -> List[TifProcessor]:
         """Initialise a ``TifProcessor`` for each raster path.
 
         Args:
             source_data_path: List of ``.tif`` paths.
-            **kwargs: Forwarded to ``_load_raster_data``.
+            options: The read options.
 
         Returns:
             A list of ``TifProcessor`` instances.
         """
-        return self._load_raster_data(source_data_path, merge_rasters=False, **kwargs)
+        return self._load_raster_data(source_data_path, merge_rasters=False)
 
 
 # ---------------------------------------------------------------------------
@@ -678,6 +651,7 @@ class AqueductFloodHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------
@@ -768,17 +742,20 @@ class AqueductFloodHandler(BaseHandler):
         min_value: float = 0,
         **kwargs,
     ):
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
             source=source,
             crop_to_source=crop_to_source,
             ensure_available=ensure_available,
-            **kwargs,
+            **load_kwargs,
         )
 
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_dataframe(min_value=min_value, **kwargs)
+            return tif_processors.to_dataframe(min_value=min_value, **frame_kwargs)
         return pd.concat(
-            [tp.to_dataframe(min_value=min_value, **kwargs) for tp in tif_processors],
+            [tp.to_dataframe(min_value=min_value, **frame_kwargs) for tp in tif_processors],
             ignore_index=True,
         )
 
@@ -796,18 +773,21 @@ class AqueductFloodHandler(BaseHandler):
         min_value: float = 0,
         **kwargs,
     ):
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
             source=source,
             crop_to_source=crop_to_source,
             ensure_available=ensure_available,
-            **kwargs,
+            **load_kwargs,
         )
 
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_geodataframe(min_value=min_value, **kwargs)
+            return tif_processors.to_geodataframe(min_value=min_value, **frame_kwargs)
         return pd.concat(
             [
-                tp.to_geodataframe(min_value=min_value, **kwargs)
+                tp.to_geodataframe(min_value=min_value, **frame_kwargs)
                 for tp in tif_processors
             ],
             ignore_index=True,

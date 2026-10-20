@@ -11,7 +11,7 @@ from dataclasses import field
 from pydantic.dataclasses import dataclass
 from pydantic import ConfigDict
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Iterable
+from typing import List, Optional, Union, Dict
 import numpy as np
 import pandas as pd
 from shapely.geometry.base import BaseGeometry
@@ -20,6 +20,7 @@ import pycountry
 import requests
 import logging
 import geopandas as gpd
+import re
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.grid.mercator_tiles import (
@@ -31,11 +32,16 @@ from gigaspatial.handlers.base import (
     BaseHandlerConfig,
     BaseHandlerDownloader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
+from gigaspatial.handlers.base.source import SourceKind, classify_source
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class MSBuildingsConfig(BaseHandlerConfig):
     """
     Configuration for Microsoft Global Buildings dataset.
@@ -50,10 +56,15 @@ class MSBuildingsConfig(BaseHandlerConfig):
         LOCATION_MAPPING_FILE: Path to the cached location mapping JSON.
     """
 
-    TILE_URLS: str = (
-        "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
+    README_URL = (
+        "https://raw.githubusercontent.com/"
+        "microsoft/GlobalMLBuildingFootprints/main/README.md"
     )
+    MANIFEST_URL: Optional[str] = None
+
     MERCATOR_ZOOM_LEVEL: int = 9
+    units_match_country = True
+
     base_path: Path = global_config.get_path("microsoft_global_buildings", "bronze")
 
     LOCATION_MAPPING_FILE: Path = base_path / "location_mapping.json"
@@ -89,22 +100,88 @@ class MSBuildingsConfig(BaseHandlerConfig):
     )
     CUSTOM_MAPPING: Optional[Dict[str, str]] = None
 
+    options_type = ResolveOptions
+
     def __post_init__(self):
         """Initialize the configuration, load tile URLs, and set up location mapping."""
         super().__post_init__()
-        self._load_tile_urls()
-        self.upload_date = self.df_tiles.upload_date[0]
+        manifest_url = (
+            self.MANIFEST_URL if self.MANIFEST_URL else self.get_latest_manifest_url()
+        )
+        self.MANIFEST_URL = manifest_url
+        self.manifest_date = self._get_manifest_date(manifest_url)
+
+        self._load_tile_urls(manifest_url)
         self._setup_location_mapping()
 
-    def _load_tile_urls(self):
-        """Loads dataset links from the remote CSV file.
+    @classmethod
+    def get_latest_manifest_url(cls) -> str:
+        """
+        Discover the latest Microsoft Global Buildings dataset manifest.
+
+        Returns:
+            URL of the latest ``dataset-links.csv`` manifest.
 
         Raises:
-            requests.exceptions.RequestException: If the remote file cannot be fetched.
+            RuntimeError: If no manifest URL can be found.
+            requests.HTTPError: If the README cannot be retrieved.
         """
+        response = requests.get(cls.README_URL, timeout=30)
+        response.raise_for_status()
+
+        pattern = re.compile(
+            r"https://bfppub\.blob\.core\.windows\.net/"
+            r"\%24web/(\d{4}-\d{2}-\d{2})/dataset-links\.csv"
+        )
+
+        matches = pattern.findall(response.text)
+
+        if not matches:
+            raise RuntimeError("No Microsoft Buildings dataset manifest found.")
+
+        latest_date = max(matches)
+
+        return (
+            "https://bfppub.blob.core.windows.net/"
+            f"$web/{latest_date}/dataset-links.csv"
+        )
+
+    @staticmethod
+    def _get_manifest_date(manifest_url: str) -> str:
+        """Extract the dataset manifest date from its URL.
+
+        Args:
+            manifest_url: URL of the Microsoft Buildings dataset manifest.
+
+        Returns:
+            Manifest date in ``YYYY-MM-DD`` format.
+
+        Raises:
+            ValueError: If the URL does not contain a valid manifest date.
+        """
+        match = re.search(
+            r"/(\d{4}-\d{2}-\d{2})/dataset-links\.csv(?:\?.*)?$",
+            manifest_url,
+        )
+
+        if not match:
+            raise ValueError(
+                f"Could not extract manifest date from URL: {manifest_url}"
+            )
+
+        return match.group(1)
+
+    def _load_tile_urls(self, url: str):
+        """Load dataset links from the remote manifest."""
         self.df_tiles = pd.read_csv(
-            self.TILE_URLS,
-            names=["location", "quadkey", "url", "size", "upload_date"],
+            url,
+            names=[
+                "location",
+                "quadkey",
+                "url",
+                "size",
+                "upload_date",
+            ],
             dtype={"quadkey": str},
             header=0,
         )
@@ -199,30 +276,25 @@ class MSBuildingsConfig(BaseHandlerConfig):
 
         return location_mapping
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: Union[BaseGeometry, gpd.GeoDataFrame], **kwargs
+    def get_relevant_data_units_by_key(
+        self, search_key: Union[str, BaseGeometry], options: ResolveOptions
     ) -> List[dict]:
         """
-        Find Microsoft Building tiles intersecting a geographic area.
+        Find Microsoft Building tiles for a country or a geographic area.
 
-        If the source is a country code, it first attempts to look up tiles
-        via the location mapping. Otherwise, it uses Mercator quadkey overlaps.
+        A country is looked up in the location mapping first. Otherwise, and
+        for geometries, tiles are found by Mercator quadkey overlap.
 
         Args:
-            geometry: Spatial area of interest (geometry, GDF, or country code).
-            **kwargs: Additional filtering parameters.
+            search_key: ISO 3166-1 alpha-3 country code, or a search geometry.
+            options: The country boundary options, for countries missing
+                from the location mapping.
 
         Returns:
             List of tile records containing quadkey, URL, and country metadata.
         """
-        source = geometry
-
-        if isinstance(source, str):
-            try:
-                country_code = pycountry.countries.lookup(source).alpha_3
-            except:
-                raise ValueError("Invalid`country` value!")
-
+        if isinstance(search_key, str):
+            country_code = search_key
             mask = self.df_tiles["country"] == country_code
 
             if any(mask):
@@ -236,11 +308,14 @@ class MSBuildingsConfig(BaseHandlerConfig):
             )
 
             source_tiles = CountryMercatorTiles.create(
-                country_code, self.MERCATOR_ZOOM_LEVEL
+                country_code,
+                self.MERCATOR_ZOOM_LEVEL,
+                data_store=options.country_data_store,
+                country_geom_path=options.country_geom_path,
             )
         else:
             source_tiles = MercatorTiles.from_spatial(
-                source=source, zoom_level=self.MERCATOR_ZOOM_LEVEL
+                source=search_key, zoom_level=self.MERCATOR_ZOOM_LEVEL
             )
 
         filtered_tiles = source_tiles.filter_quadkeys(self.df_tiles.quadkey)
@@ -251,27 +326,28 @@ class MSBuildingsConfig(BaseHandlerConfig):
             mask, ["quadkey", "url", "country", "location"]
         ].to_dict("records")
 
-    def get_data_unit_path(self, unit: Union[pd.Series, dict], **kwargs) -> Path:
+    def get_data_unit_path(self, unit: Union[pd.Series, dict], options=None) -> Path:
 
         tile_location = unit["country"] if unit["country"] else unit["location"]
 
         return (
             self.base_path
             / tile_location
-            / self.upload_date
+            / self.manifest_date
             / f'{unit["quadkey"]}.csv.gz'
         )
 
-    def get_data_unit_paths(
-        self, units: Union[pd.DataFrame, Iterable[dict]], **kwargs
-    ) -> List:
-        if isinstance(units, pd.DataFrame):
-            return [self.get_data_unit_path(row) for _, row in units.iterrows()]
-        return super().get_data_unit_paths(units)
-
-    def extract_search_geometry(self, source, **kwargs):
-        """Override the method since geometry will be extracted by MercatorTiles"""
-        return source
+    def get_search_key(self, source, options: ResolveOptions) -> Union[str, BaseGeometry]:
+        """
+        Return the ISO 3166-1 alpha-3 code of a country source, so its tiles
+        can be looked up by country; other sources use the search geometry.
+        """
+        if classify_source(source) is SourceKind.COUNTRY:
+            try:
+                return pycountry.countries.lookup(source).alpha_3
+            except LookupError:
+                raise ValueError(f"Invalid country: {source}")
+        return self.extract_search_geometry(source, options)
 
 
 class MSBuildingsDownloader(BaseHandlerDownloader):
@@ -281,6 +357,8 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
     Handles the parallel acquisition of gzipped building footprint CSVs
     from Azure Open Datasets.
     """
+
+    options_type = DownloadOptions
 
     def __init__(
         self,
@@ -306,44 +384,28 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
     def download_data_unit(
         self,
         tile_info: Union[pd.Series, dict],
-        **kwargs,
-    ) -> Optional[str]:
+        options: DownloadOptions,
+    ) -> Path:
         """
         Download a single building footprint tile.
 
         Args:
             tile_info: Metropolitan or quadkey-specific metadata including 'url' and 'quadkey'.
-            **kwargs: Additional parameters.
+            options: The download options.
 
         Returns:
-            The path to the local gzipped CSV file on success, or None on failure.
+            The path to the stored gzipped CSV file.
+
+        Raises:
+            requests.RequestException: If the download fails.
         """
 
-        tile_url = tile_info["url"]
-
-        try:
-            response = requests.get(tile_url, stream=True)
-            response.raise_for_status()
-
-            file_path = str(self.config.get_data_unit_path(tile_info))
-
-            with self.data_store.open(file_path, "wb") as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
-
-                self.logger.debug(
-                    f"Successfully downloaded tile: {tile_info['quadkey']}"
-                )
-                return file_path
-
-        except requests.exceptions.RequestException as e:
-            self.logger.error(
-                f"Failed to download tile {tile_info['quadkey']}: {str(e)}"
-            )
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading dataset: {str(e)}")
-            return None
+        return stream_to_store(
+            tile_info["url"],
+            self.config.get_data_unit_path(tile_info),
+            self.data_store,
+            show_progress=options.show_progress,
+        )
 
     def download_by_country(
         self,
@@ -363,7 +425,7 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
             A list of local paths to the successfully downloaded tiles.
         """
         return self.download(
-            source=country, data_store=data_store, path=country_geom_path
+            country, country_data_store=data_store, country_geom_path=country_geom_path
         )
 
 
@@ -375,6 +437,8 @@ class MSBuildingsReader(BaseHandlerReader):
     handling the conversion of string-based geometry into Shapely objects.
     """
 
+    options_type = ReadOptions
+
     def __init__(
         self,
         config: Optional[MSBuildingsConfig] = None,
@@ -385,14 +449,14 @@ class MSBuildingsReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: ReadOptions
     ) -> gpd.GeoDataFrame:
         """
         Load building data from specific file paths.
 
         Args:
             source_data_path: List of local paths to building data files.
-            **kwargs: Additional parameters for `read_ms_dataset`.
+            options: The read options.
 
         Returns:
             A GeoDataFrame containing the aggregated building data.

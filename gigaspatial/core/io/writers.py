@@ -9,8 +9,10 @@ from pathlib import Path
 import json
 import io
 
-from .data_store import DataStore
-from .local_data_store import LocalDataStore
+from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.core.io.local_data_store import LocalDataStore
+
+__all__ = ["write_json", "write_dataset", "write_datasets"]
 
 
 def write_json(data, data_store: DataStore = None, path=None, **kwargs):

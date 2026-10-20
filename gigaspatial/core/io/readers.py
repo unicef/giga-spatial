@@ -3,6 +3,7 @@ Module for reading geospatial and tabular datasets from a DataStore.
 Supports various formats including CSV, Excel, KML, KMZ, GeoJSON, Parquet, and Shapefiles,
 with automatic compression detection (gzip, bz2, xz).
 """
+
 import gzip
 import io
 import json
@@ -11,16 +12,34 @@ import tempfile
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Union
+from typing import Any, Iterator, Optional, Union
 
 import geopandas as gpd
 import pandas as pd
+import fiona
 
-from .data_store import DataStore
-from .local_data_store import LocalDataStore
+from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.config import config
 
 logger = config.get_logger(__name__)
+
+__all__ = [
+    "read_json",
+    "read_kmz",
+    "read_gzipped_json_or_csv",
+    "iter_field_from_gzipped_jsonl",
+    "read_field_from_gzipped_jsonl",
+    "read_dataset",
+    "read_datasets",
+]
+
+try:
+    import orjson
+
+    _json_loads = orjson.loads
+except ImportError:
+    _json_loads = json.loads
 
 
 # ---------------------------------------------------------------------------
@@ -45,44 +64,76 @@ def read_json(path: str, data_store: DataStore = None) -> dict:
         return json.load(f)
 
 
-def read_kmz(file_obj, **kwargs) -> gpd.GeoDataFrame:
+def read_kmz(file_obj, layer: str = None, **kwargs) -> gpd.GeoDataFrame:
     """
-    Read a KMZ file and return a GeoDataFrame.
+    Read a KMZ file stream and return a combined GeoDataFrame across all KML layers.
 
     Args:
-        file_obj: A file-like object pointing to a KMZ archive.
+        file_obj: Binary file-like object or BytesIO pointing to a KMZ archive.
+        layer: Specific layer name to extract. If None, extracts and merges all layers.
         **kwargs: Additional keyword arguments passed to `geopandas.read_file`.
 
     Returns:
-        The geospatial data extracted from the KMZ.
-
-    Raises:
-        ValueError: If no KML file is found in the archive or if content is empty.
-        RuntimeError: For unexpected errors during KMZ processing.
+        gpd.GeoDataFrame: Combined geospatial data extracted from the KMZ archive.
     """
+    gdfs = []
+
     try:
         with zipfile.ZipFile(file_obj) as kmz:
-            kml_filename = next(
-                (name for name in kmz.namelist() if name.endswith(".kml")), None
+            kml_filenames = [name for name in kmz.namelist() if name.endswith(".kml")]
+            if not kml_filenames:
+                raise ValueError("No KML files found in the KMZ archive.")
+
+            for kml_name in kml_filenames:
+                kml_bytes = kmz.read(kml_name)
+
+                # Write KML to a temp file so fiona/GDAL can list and extract layers reliably
+                with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as tmp:
+                    tmp.write(kml_bytes)
+                    tmp_path = tmp.name
+
+                try:
+                    available_layers = fiona.listlayers(tmp_path)
+
+                    # If specific layer requested, only load that layer
+                    target_layers = (
+                        [layer]
+                        if layer and layer in available_layers
+                        else available_layers
+                    )
+
+                    for lyr in target_layers:
+                        try:
+                            gdf = gpd.read_file(tmp_path, layer=lyr, **kwargs)
+                            if not gdf.empty:
+                                gdf["_kml_file"] = Path(kml_name).name
+                                gdf["_layer_name"] = lyr
+                                gdfs.append(gdf)
+                        except Exception as layer_err:
+                            warnings.warn(
+                                f"Skipping layer '{lyr}' in '{kml_name}': {layer_err}",
+                                UserWarning,
+                            )
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+
+        if not gdfs:
+            raise ValueError(
+                "The KMZ archive contains no valid or readable geospatial layers."
             )
-            if kml_filename is None:
-                raise ValueError("No KML file found in the KMZ archive.")
 
-            kml_content = io.BytesIO(kmz.read(kml_filename))
-            gdf = gpd.read_file(kml_content, **kwargs)
-
-            if gdf.empty:
-                raise ValueError(
-                    "The KML file is empty or does not contain valid geospatial data."
-                )
-        return gdf
+        # Combine into a unified GeoDataFrame (retaining CRS of the first layer)
+        crs = gdfs[0].crs
+        combined_gdf = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=crs)
+        return combined_gdf
 
     except zipfile.BadZipFile:
-        raise ValueError("The provided file is not a valid KMZ file.")
+        raise ValueError("The provided file is not a valid KMZ archive.")
     except ValueError:
         raise
     except Exception as e:
-        raise RuntimeError(f"An error occurred reading KMZ: {e}") from e
+        raise RuntimeError(f"An error occurred reading KMZ archive: {e}") from e
 
 
 def read_gzipped_json_or_csv(
@@ -113,6 +164,52 @@ def read_gzipped_json_or_csv(
     except pd.errors.ParserError:
         logger.error("Could not parse '%s' as JSON lines or CSV.", file_path)
         return None
+
+
+def iter_field_from_gzipped_jsonl(
+    file_path: Union[str, Path],
+    field: str,
+    data_store: Optional[DataStore] = None,
+    default: Any = None,
+    ignore_missing: bool = False,
+) -> Iterator[Any]:
+    """
+    Stream a specific field line-by-line from a gzipped JSON Lines (.jsonl.gz) file.
+
+    Memory-efficient generator that iterates through records without loading
+    the entire dataset into memory.
+
+    Args:
+        file_path: Path to the .gz file in the DataStore.
+        field: Key to extract from each JSON object.
+        data_store: DataStore instance. If None, LocalDataStore is used.
+        default: Default value yielded when `field` is missing and `ignore_missing` is False.
+        ignore_missing: If True, skips records where `field` is not present.
+
+    Yields:
+        The extracted field value for each record.
+    """
+    data_store = data_store or LocalDataStore()
+
+    with data_store.open(file_path, "rb") as raw_f:
+        with gzip.GzipFile(fileobj=raw_f, mode="rb") as gz_f:
+            for line in gz_f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                record = _json_loads(line)
+
+                if field in record:
+                    yield record[field]
+                elif ignore_missing:
+                    continue
+                else:
+                    yield default
+
+
+# Alias for readability and backwards compatibility
+read_field_from_gzipped_jsonl = iter_field_from_gzipped_jsonl
 
 
 # ---------------------------------------------------------------------------

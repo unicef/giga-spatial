@@ -8,6 +8,7 @@ This module provides handlers for interacting with the WorldPop repository. It s
 - REST API integration for automated dataset discovery and metadata retrieval.
 """
 
+import dataclasses
 from pydantic.dataclasses import dataclass
 from pydantic import (
     Field,
@@ -22,10 +23,7 @@ import pandas as pd
 import geopandas as gpd
 import pycountry
 import requests
-from tqdm import tqdm
 import logging
-import zipfile
-import tempfile
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.processing.tif_processor import TifProcessor
@@ -34,7 +32,12 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    RasterReadOptions,
+    ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import extract_zip_to_store, stream_to_store
+from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.config import config as global_config
 
 
@@ -375,7 +378,7 @@ AVAILABLE_RESOLUTIONS: List[int] = [100, 1000]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DemographicPathFilter — value object, replaces legacy methods:  _filter_age_sex_paths + side-channel
+# DemographicPathFilter — value object for demographic file filtering
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -384,8 +387,8 @@ class DemographicPathFilter:
     """
     Immutable value object encapsulating all demographic path-filtering logic.
 
-    Constructed from caller kwargs and passed explicitly to the reader, replacing
-    the ``_temp_age_sex_filters`` side-channel dictionary.
+    Built from the demographic resolve options (`WPResolveOptions`) and
+    applied when a country's files are resolved.
 
     Attributes:
         sex_filters:   Set of sex codes to keep (``"M"``, ``"F"``, ``"T"``, ``"F_M"``).
@@ -587,6 +590,48 @@ class DemographicPathFilter:
             filtered.append(p)
 
         return filtered
+
+
+@dataclasses.dataclass(frozen=True)
+class WPResolveOptions(ResolveOptions):
+    """
+    Resolve options of WorldPop datasets: the demographic cohorts to keep.
+
+    They select which age-structure files a country resolves to, so files
+    outside the cohorts are neither downloaded nor loaded.
+
+    Attributes:
+        sex: Sex code(s) to keep (``"M"``, ``"F"``, ``"T"``, ``"F_M"``).
+        education_level: Education level(s) to keep (``"PRIMARY"``,
+            ``"SECONDARY"``); ``level`` is an alias.
+        ages: Exact age value(s) to keep.
+        min_age: Inclusive lower bound on age.
+        max_age: Inclusive upper bound on age.
+    """
+
+    sex: Any = None
+    education_level: Any = None
+    level: Any = None
+    ages: Any = None
+    min_age: Optional[int] = None
+    max_age: Optional[int] = None
+
+    def __post_init__(self):
+        for name in ("sex", "education_level", "level", "ages"):
+            value = getattr(self, name)
+            if isinstance(value, (list, tuple, set)):
+                object.__setattr__(self, name, frozenset(value))
+
+    @property
+    def demographic_filter(self) -> DemographicPathFilter:
+        return DemographicPathFilter.from_kwargs(
+            sex=self.sex,
+            education_level=self.education_level,
+            level=self.level,
+            ages=self.ages,
+            min_age=self.min_age,
+            max_age=self.max_age,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -821,7 +866,7 @@ def resolve_dataset_category(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True), kw_only=True)
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"), kw_only=True)
 class WPPopulationConfig(BaseHandlerConfig):
     """
     Configuration for WorldPop dataset retrieval.
@@ -834,8 +879,6 @@ class WPPopulationConfig(BaseHandlerConfig):
     :func:`resolve_dataset_category` and:
 
     * Populates ``dataset_category`` with the resolved string.
-    * Populates ``demographic_filter`` with a :class:`DemographicPathFilter`
-      (or ``None`` if not yet constructed from kwargs).
     * Applies normalised field overrides (e.g. ``year``, ``resolution``) and
       logs any resulting warnings.
 
@@ -850,10 +893,11 @@ class WPPopulationConfig(BaseHandlerConfig):
         under_18:           If ``True``, filters for under-18 demographic cohorts.
         dug_level:          Urbanisation classification level (``"L1"`` or ``"L2"``).
         dataset_category:   Resolved category string (populated by validator).
-        demographic_filter: Active path filter (populated by :meth:`get_data_unit_paths`).
     """
 
     client = WorldPopRestClient()
+    units_match_country = True
+    options_type = WPResolveOptions
 
     # ── Module-level constants re-exported as class attributes ───────────────
     AVAILABLE_YEARS_GR1: List[int] = Field(
@@ -899,9 +943,6 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     # ── Derived / internal fields ─────────────────────────────────────────────
     dataset_category: str = Field(default="", init=False)
-    demographic_filter: Optional[DemographicPathFilter] = Field(
-        default=None, init=False, repr=False
-    )
 
     # ── Simple field validators ───────────────────────────────────────────────
 
@@ -968,29 +1009,33 @@ class WPPopulationConfig(BaseHandlerConfig):
 
     # ── Path resolution ───────────────────────────────────────────────────────
 
-    def get_relevant_data_units_by_geometry(
-        self, geometry: str, **kwargs
-    ) -> List[Dict[str, Any]]:
+    def get_relevant_data_units_by_key(
+        self, search_key: str, options: WPResolveOptions
+    ) -> List[str]:
         """
-        Identify relevant WorldPop datasets for a given geographic area.
+        Identify the WorldPop files of a country.
+
+        For ``age_structures``, ``.tif`` files outside the demographic
+        cohorts in ``options`` are left out. Zip resources are kept; their
+        extracted files are filtered by :meth:`get_stored_paths`.
 
         Args:
-            geometry: ISO 3166-1 alpha-3 country code.
-            **kwargs: Additional filtering context.
+            search_key: ISO 3166-1 alpha-3 country code.
+            options: The resolve options.
 
         Returns:
-            A list of dictionary metadata for relevant datasets.
+            The URLs of the relevant files.
         """
         api_dataset_type = (
             "dug" if self.project == "degree_of_urbanization" else self.project
         )
         datasets = self.client.search_datasets(
-            api_dataset_type, self.dataset_category, geometry, self.year
+            api_dataset_type, self.dataset_category, search_key, self.year
         )
 
         if not datasets:
             raise RuntimeError(
-                f"No WorldPop datasets found for country: {geometry}, "
+                f"No WorldPop datasets found for country: {search_key}, "
                 f"project: {self.project}, category: {self.dataset_category}, year: {self.year}. "
                 "Please check the configuration parameters."
             )
@@ -1010,129 +1055,94 @@ class WPPopulationConfig(BaseHandlerConfig):
                 if (self.dataset_category in ZIP_CATEGORIES or file.endswith(".tif"))
             ]
 
+        dem_filter = options.demographic_filter
+        if self.project == "age_structures" and dem_filter.has_filters:
+            kept = set(
+                dem_filter.filter_paths(
+                    [Path(f) for f in files if not self._is_archive(f)],
+                    project=self.project,
+                    school_age=self.school_age,
+                    _logger=self.logger,
+                )
+            )
+            files = [f for f in files if self._is_archive(f) or Path(f) in kept]
+
         return files
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str, options=None) -> Path:
         """
         Resolve a WorldPop file URL to its local storage path.
 
         Args:
             unit:     The remote file URL.
-            **kwargs: Additional resolution context.
+            options:  The resolve options (unused).
 
         Returns:
             Absolute local path for the data file.
         """
         return self.base_path / unit.split("GIS/")[1]
 
-    def get_data_unit_paths(self, units: Union[List[str], str], **kwargs) -> List[Path]:
+    def get_stored_paths(
+        self, unit: str, options: Optional[WPResolveOptions] = None
+    ) -> List[Path]:
         """
-        Resolve one or more WorldPop URLs to local file paths, applying filters.
+        Return the stored files of a WorldPop resource.
 
-        For **school-age** and **under-18** datasets (zip archives already
-        extracted), constructs a :class:`DemographicPathFilter` from ``kwargs``
-        and stores it on ``self.demographic_filter`` for the reader to consume.
-        For non-school-age ``age_structures`` the filter is stored without
-        immediately applying it (deferred to the reader), replacing the former
-        ``_temp_age_sex_filters`` side-channel.
+        A ``.tif`` resource is stored as itself. A zip resource (school-age
+        and under-18 cohorts) is stored as the ``.tif`` files extracted from
+        it, filtered for ``age_structures`` by the demographic cohorts in
+        ``options``; their names are known only after extraction, so this is
+        empty before download.
 
         Args:
-            units:    Single URL or list of URLs for WorldPop resources.
-            **kwargs: Filtering criteria forwarded to
-                      :meth:`DemographicPathFilter.from_kwargs`.
+            unit:     Remote URL of the resource.
+            options:  The resolve options.
 
         Returns:
-            A list of :class:`~pathlib.Path` objects for the resolved local files.
+            The resource's stored file paths.
         """
-        if not isinstance(units, list):
-            units = [units]
+        if not self._is_archive(unit):
+            return [self.get_data_unit_path(unit)]
 
-        dem_filter = DemographicPathFilter.from_kwargs(**kwargs)
-
-        # ── School-age / under-18 branch (zip → extracted tifs) ──────────────
-        if self.project == "age_structures" and (self.school_age or self.under_18):
-            # Store the filter so the reader can access it if it needs to re-filter
-            object.__setattr__(self, "demographic_filter", dem_filter)
-
-            resolved_paths: List[Path] = []
-            for url in units:
-                output_dir = self.get_data_unit_path(url).parent
-                if self.data_store.is_dir(str(output_dir)):
-                    try:
-                        all_extracted_tifs = [
-                            Path(f)
-                            for f in self.data_store.list_files(str(output_dir))
-                            if f.lower().endswith(".tif")
-                        ]
-                        filtered_tifs = dem_filter.filter_paths(
-                            all_extracted_tifs,
-                            project=self.project,
-                            school_age=self.school_age,
-                            _logger=self.logger,
-                        )
-                        resolved_paths.extend(filtered_tifs)
-                    except Exception:
-                        resolved_paths.append(self.get_data_unit_path(url))
-                else:
-                    resolved_paths.append(self.get_data_unit_path(url))
-
-            return resolved_paths
-
-        # ── Non-school_age age_structures (deferred filter via demographic_filter) ──
-        if self.project == "age_structures" and not self.school_age:
-            # Store the filter for the reader; return all potential paths
-            object.__setattr__(self, "demographic_filter", dem_filter)
-            return [self.get_data_unit_path(unit) for unit in units]
-
-        # ── All other datasets ────────────────────────────────────────────────
-        return [self.get_data_unit_path(unit) for unit in units]
-
-    # ── Backward-compatibility shim ───────────────────────────────────────────
-
-    def _filter_age_sex_paths(self, paths: List[Path], filters: Dict) -> List[Path]:
-        """
-        Filter demographic file paths — **backward-compatibility shim**.
-
-        Constructs a :class:`DemographicPathFilter` from the legacy ``filters``
-        dict and delegates immediately.  New code should construct
-        :class:`DemographicPathFilter` directly and call
-        :meth:`~DemographicPathFilter.filter_paths`.
-
-        Args:
-            paths:   List of local paths to WorldPop demographic TIFs.
-            filters: Legacy dict with keys ``sex_filters``, ``level_filters``,
-                     ``ages_filter``, ``min_age``, ``max_age``.
-
-        Returns:
-            A filtered list of paths.
-        """
-
-        def _fs(v) -> Optional[frozenset]:
-            return frozenset(v) if v is not None else None
-
-        compat_filter = DemographicPathFilter(
-            sex_filters=_fs(filters.get("sex_filters")),
-            level_filters=_fs(filters.get("level_filters")),
-            ages_filter=_fs(filters.get("ages_filter")),
-            min_age=filters.get("min_age"),
-            max_age=filters.get("max_age"),
-        )
-        return compat_filter.filter_paths(
-            paths,
+        tifs = self._extracted_tifs(unit)
+        if self.project != "age_structures":
+            return tifs
+        return (options or WPResolveOptions()).demographic_filter.filter_paths(
+            tifs,
             project=self.project,
             school_age=self.school_age,
             _logger=self.logger,
         )
 
-    # ── Geometry extraction ───────────────────────────────────────────────────
+    def is_unit_available(self, unit: str, paths: List[Path]) -> bool:
+        """A zip resource is available once any of its ``.tif`` files is extracted."""
+        if self._is_archive(unit):
+            return bool(self._extracted_tifs(unit))
+        return super().is_unit_available(unit, paths)
 
-    def extract_search_geometry(self, source, **kwargs) -> str:
+    @staticmethod
+    def _is_archive(unit: str) -> bool:
+        return unit.lower().endswith(".zip")
+
+    def _extracted_tifs(self, unit: str) -> List[Path]:
+        output_dir = self.get_data_unit_path(unit).parent
+        if not self.data_store.is_dir(str(output_dir)):
+            return []
+        return [
+            Path(f)
+            for f in self.data_store.list_files(str(output_dir))
+            if f.lower().endswith(".tif")
+        ]
+
+    # ── Search key ────────────────────────────────────────────────────────────
+
+    def get_search_key(self, source, options: WPResolveOptions) -> str:
         """
         Identify the country code from a geographic source for dataset search.
 
         Args:
             source:   Country name or ISO code.
-            **kwargs: Additional context.
+            options:  The resolve options.
 
         Returns:
             The ISO 3166-1 alpha-3 country code.
@@ -1173,6 +1183,8 @@ class WPPopulationDownloader(BaseHandlerDownloader):
     including specialized logic for extracting zipped age structures.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Union[WPPopulationConfig, dict[str, Union[str, int]]],
@@ -1194,119 +1206,45 @@ class WPPopulationDownloader(BaseHandlerDownloader):
         )
         super().__init__(config=config, data_store=data_store, logger=logger)
 
-    def download_data_unit(self, url: str, **kwargs):
+    def download_data_unit(self, url: str, options: DownloadOptions):
         """
         Download a WorldPop data resource (TIF or ZIP).
 
         Args:
             url: Remote URL of the resource.
-            **kwargs: Acquisition parameters.
+            options: The download options.
 
         Returns:
-            The local path(s) to the downloaded resource(s).
+            The stored path, or for a zip the paths of its extracted ``.tif``
+            files.
+
+        Raises:
+            requests.RequestException: If the download fails.
+            zipfile.BadZipFile: If a zip download is not a zip archive.
+            FileNotFoundError: If a zip holds no ``.tif`` file.
         """
-        # If the resource is a zip (e.g., school age datasets), download to temp and extract .tif files
+        fetch = dict(
+            session=self.config.client.session,
+            show_progress=options.show_progress,
+            timeout=self.config.client.timeout,
+        )
+        stored = self.config.get_data_unit_path(url)
         if url.lower().endswith(".zip"):
-            temp_downloaded_path: Optional[Path] = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".zip"
-                ) as temp_file:
-                    temp_downloaded_path = Path(temp_file.name)
-                    response = self.config.client.session.get(
-                        url, stream=True, timeout=self.config.client.timeout
-                    )
-                    response.raise_for_status()
-
-                    total_size = int(response.headers.get("content-length", 0))
-
-                    with tqdm(
-                        total=total_size,
-                        unit="B",
-                        unit_scale=True,
-                        desc=f"Downloading {os.path.basename(temp_downloaded_path)}",
-                    ) as pbar:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                temp_file.write(chunk)
-                                pbar.update(len(chunk))
-
-                extracted_files: List[Path] = []
-                output_dir = self.config.get_data_unit_path(url).parent
-                with zipfile.ZipFile(str(temp_downloaded_path), "r") as zip_ref:
-                    members = [
-                        m for m in zip_ref.namelist() if m.lower().endswith(".tif")
-                    ]
-                    for member in members:
-                        extracted_path = output_dir / Path(member).name
-                        with zip_ref.open(member) as source:
-                            file_content = source.read()
-                            self.data_store.write_file(
-                                str(extracted_path), file_content
-                            )
-                        extracted_files.append(extracted_path)
-                        self.logger.info(f"Extracted {member} to {extracted_path}")
-
-                return extracted_files
-
-            except requests.RequestException as e:
-                self.logger.error(f"Failed to download {url}: {e}")
-                return None
-            except zipfile.BadZipFile:
-                self.logger.error("Downloaded file is not a valid zip archive.")
-                return None
-            except Exception as e:
-                self.logger.error(f"Unexpected error processing zip for {url}: {e}")
-                return None
-            finally:
-                if temp_downloaded_path and temp_downloaded_path.exists():
-                    try:
-                        temp_downloaded_path.unlink()
-                    except OSError as e:
-                        self.logger.warning(
-                            f"Could not delete temporary file {temp_downloaded_path}: {e}"
-                        )
-
-        # Otherwise, download as a regular file (e.g., .tif)
-        try:
-            response = self.config.client.session.get(
-                url, stream=True, timeout=self.config.client.timeout
+            return extract_zip_to_store(
+                url, stored.parent, self.data_store, r"(?i).*\.tif$", **fetch
             )
-            response.raise_for_status()
-
-            total_size = int(response.headers.get("content-length", 0))
-            file_path = self.config.get_data_unit_path(url)
-
-            with self.data_store.open(str(file_path), "wb") as file:
-                with tqdm(
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    desc=f"Downloading {os.path.basename(file_path)}",
-                ) as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            file.write(chunk)
-                            pbar.update(len(chunk))
-
-            self.logger.info(f"Successfully downloaded: {file_path}")
-            return file_path
-
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to download {url}: {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error downloading {url}: {e}")
-            return None
+        return stream_to_store(url, stored, self.data_store, **fetch)
 
 
 class WPPopulationReader(BaseHandlerReader):
     """
     Reader for WorldPop datasets.
 
-    Interfaces with local demographic rasters to facilitate data loading,
-    cohort filtering, and spatial aggregation.
+    Interfaces with local demographic rasters to facilitate data loading
+    and spatial aggregation.
     """
+
+    options_type = RasterReadOptions
 
     def __init__(
         self,
@@ -1330,57 +1268,21 @@ class WPPopulationReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self,
-        source_data_path: List[Union[str, Path]],
-        merge_rasters: bool = False,
-        **kwargs,
+        self, source_data_path: List[Union[str, Path]], options: RasterReadOptions
     ) -> Union[List[TifProcessor], TifProcessor]:
         """
         Load WorldPop rasters from local storage.
 
         Args:
             source_data_path: List of absolute paths to demographic TIFs.
-            merge_rasters: If True, aggregates all rasters into a single processor.
-            **kwargs: Additional parameters passed to the internal raster loader.
+            options: ``merge_rasters`` aggregates all rasters into a single processor.
 
         Returns:
             A TifProcessor or list of TifProcessors for the requested data.
         """
-        # Apply deferred age/sex filters if present and applicable
-        dem_filter = (
-            self.config.demographic_filter
-            or DemographicPathFilter.from_kwargs(**kwargs)
-        )
-
-        if (
-            self.config.project == "age_structures"
-            and not self.config.school_age
-            and dem_filter.has_filters
-        ):
-            source_data_path = [
-                Path(p) if isinstance(p, str) else p for p in source_data_path
-            ]
-            filtered_paths = dem_filter.filter_paths(
-                source_data_path,
-                project=self.config.project,
-                school_age=self.config.school_age,
-                _logger=self.logger,
-            )
-            # Consume the filter - reset to None so it isn't re-applied on subsequent calls
-            object.__setattr__(self.config, "demographic_filter", None)
-            if not filtered_paths:
-                self.logger.warning(
-                    "No WorldPop age_structures paths matched the applied filters."
-                )
-                return []
-            source_data_path = filtered_paths
-
         return self._load_raster_data(
-            raster_paths=source_data_path, merge_rasters=merge_rasters
+            raster_paths=source_data_path, merge_rasters=options.merge_rasters
         )
-
-    def load(self, source, merge_rasters: bool = False, **kwargs):
-        return super().load(source=source, merge_rasters=merge_rasters, **kwargs)
 
 
 class WPPopulationHandler(BaseHandler):
@@ -1444,6 +1346,7 @@ class WPPopulationHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     def create_config(
@@ -1533,19 +1436,23 @@ class WPPopulationHandler(BaseHandler):
         Args:
             source: Geographic area (country ISO3).
             ensure_available: If True, executes download if data is missing locally.
-            **kwargs: Parameters passed to the data loading pipeline.
+            **kwargs: Handler options go to ``load_data``, the rest to
+                ``TifProcessor.to_dataframe``.
 
         Returns:
             A pandas DataFrame containing demographic data.
         """
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
-            source=source, ensure_available=ensure_available, **kwargs
+            source=source, ensure_available=ensure_available, **load_kwargs
         )
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_dataframe(**kwargs)
+            return tif_processors.to_dataframe(**frame_kwargs)
 
         return pd.concat(
-            [tp.to_dataframe(**kwargs) for tp in tif_processors], ignore_index=True
+            [tp.to_dataframe(**frame_kwargs) for tp in tif_processors], ignore_index=True
         )
 
     def load_into_geodataframe(
@@ -1560,17 +1467,21 @@ class WPPopulationHandler(BaseHandler):
         Args:
             source: Geographic area (country ISO3).
             ensure_available: If True, executes download if data is missing locally.
-            **kwargs: Parameters passed to the data loading pipeline.
+            **kwargs: Handler options go to ``load_data``, the rest to
+                ``TifProcessor.to_geodataframe``.
 
         Returns:
             A GeoDataFrame containing demographic data with geometries.
         """
+        load_kwargs, frame_kwargs = split_kwargs(
+            kwargs, self.config, self.downloader, self.reader
+        )
         tif_processors = self.load_data(
-            source=source, ensure_available=ensure_available, **kwargs
+            source=source, ensure_available=ensure_available, **load_kwargs
         )
         if isinstance(tif_processors, TifProcessor):
-            return tif_processors.to_geodataframe(**kwargs)
+            return tif_processors.to_geodataframe(**frame_kwargs)
 
         return pd.concat(
-            [tp.to_geodataframe(**kwargs) for tp in tif_processors], ignore_index=True
+            [tp.to_geodataframe(**frame_kwargs) for tp in tif_processors], ignore_index=True
         )

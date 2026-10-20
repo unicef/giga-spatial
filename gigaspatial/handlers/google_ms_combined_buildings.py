@@ -1,3 +1,4 @@
+import dataclasses
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -19,8 +20,28 @@ from gigaspatial.handlers.base import (
     BaseHandlerDownloader,
     BaseHandlerReader,
     BaseHandler,
+    DownloadOptions,
+    ReadOptions,
+    ResolveOptions,
 )
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
+
+
+@dataclasses.dataclass(frozen=True)
+class GoogleMSReadOptions(ReadOptions):
+    """
+    Read options of the Google-Microsoft combined buildings.
+
+    Attributes:
+        source_filter: Keep only buildings from this source ('google' or
+            'microsoft'); None keeps both.
+        min_confidence: Keep only buildings with at least this confidence
+            score (0.0-1.0); None keeps all.
+    """
+
+    source_filter: Optional[Literal["google", "microsoft"]] = None
+    min_confidence: Optional[float] = None
 
 
 def get_available_iso3s(
@@ -80,7 +101,7 @@ def get_available_s2_files(
     return sorted(list(s2_file_names))
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
 class GoogleMSBuildingsConfig(BaseHandlerConfig):
     """
     Configuration for Google-Microsoft Combined Buildings Handler.
@@ -108,6 +129,9 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
         "s3://us-west-2.opendata.source.coop/vida/google-microsoft-open-buildings"
     )
 
+    units_match_country = True
+    options_type = ResolveOptions
+
     # Metadata
     dataset_name: str = "Google-Microsoft Combined Buildings"
     dataset_id: str = "google_microsoft_combined_buildings"
@@ -128,16 +152,19 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
             f"partition_strategy={self.partition_strategy}"
         )
 
-    def get_relevant_data_units_by_geometry(self, geometry, **kwargs):
+    def get_relevant_data_units_by_key(
+        self, search_key: str, options: Optional[ResolveOptions] = None
+    ):
         """
-        Get relevant data partitions (by country or S2 grid) that intersect geometry.
+        Get the data partitions (whole country or its S2 grid cells) of a country.
 
         Args:
-            geometry: Shapely geometry object
+            search_key: ISO 3166-1 alpha-3 country code.
 
         Returns:
-            List of partition identifiers (ISO codes or S2 grid IDs)
+            List of partition URLs/URIs.
         """
+        iso3 = search_key
 
         access_uri = (
             self.storage_url if self.download_strategy == "https" else self.cloud_uri
@@ -145,10 +172,10 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
 
         if self.partition_strategy == "s2_grid":
             s2_tiles = get_available_s2_files(
-                iso3=geometry, data_format=self.data_format
+                iso3=iso3, data_format=self.data_format
             )
             return [
-                f"{access_uri}/{self.data_format}/by_country_s2/country_iso={geometry}/{tile}"
+                f"{access_uri}/{self.data_format}/by_country_s2/country_iso={iso3}/{tile}"
                 for tile in s2_tiles
             ]
 
@@ -161,7 +188,7 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
                 file_ext = ".pmtiles"
 
         return [
-            f"{access_uri}/{self.data_format}/by_country/country_iso={geometry}/{geometry}{file_ext}"
+            f"{access_uri}/{self.data_format}/by_country/country_iso={iso3}/{iso3}{file_ext}"
         ]
 
     def get_available_units(self, iso3: str = None) -> List[str]:
@@ -177,28 +204,28 @@ class GoogleMSBuildingsConfig(BaseHandlerConfig):
 
         if iso3:
             # Get units for specific country
-            return self.get_relevant_data_units_by_geometry(iso3)
+            return self.get_relevant_data_units_by_key(iso3)
         else:
             # Get all available countries
-            available_iso3s = get_available_iso3s(data_format=self.config.data_format)
+            available_iso3s = get_available_iso3s(data_format=self.data_format)
             self.logger.info(f"Found {len(available_iso3s)} available countries")
 
             all_units = []
             for country_iso3 in available_iso3s:
-                units = self.get_relevant_data_units_by_geometry(country_iso3)
+                units = self.get_relevant_data_units_by_key(country_iso3)
                 all_units.extend(units)
 
             return all_units
 
-    def get_data_unit_path(self, unit: str, **kwargs) -> Path:
+    def get_data_unit_path(self, unit: str, options=None) -> Path:
         return self.base_path / unit.split("google-microsoft-open-buildings/")[
             1
         ].replace("country_iso=", "")
 
-    def extract_search_geometry(self, source, **kwargs):
+    def get_search_key(self, source, options: ResolveOptions) -> str:
         """
-        Override the method since geometry extraction does not apply.
-        Returns country iso3 for url extraction
+        Return the ISO 3166-1 alpha-3 code of a country source; the data is
+        partitioned by country.
         """
         if not isinstance(source, str):
             raise ValueError(
@@ -233,6 +260,8 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
                 named after the module is created and used.
     """
 
+    options_type = DownloadOptions
+
     def __init__(
         self,
         config: Optional[GoogleMSBuildingsConfig] = None,
@@ -249,28 +278,27 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
             f"download_strategy={config.download_strategy}"
         )
 
-    def download_data_unit(self, unit: str) -> Path:
+    def download_data_unit(self, unit: str, options: DownloadOptions) -> Path:
         """
         Download a single data unit (partition file).
 
         Args:
             unit: Full URL/URI to the data unit (from get_relevant_data_units)
+            options: The download options.
 
         Returns:
             Path to the downloaded file
+
+        Raises:
+            Exception: If the download fails.
         """
 
-        file_path = str(self.config.get_data_unit_path(unit))
-
-        try:
-            if self.config.download_strategy == "s3":
-                return self._download_from_s3(unit, file_path)
-            else:  # https
-                return self._download_from_https(unit, file_path)
-
-        except Exception as e:
-            self.logger.error(f"Error downloading unit {unit}: {e}")
-            raise
+        file_path = self.config.get_data_unit_path(unit)
+        if self.config.download_strategy == "s3":
+            return self._download_from_s3(unit, str(file_path))
+        return stream_to_store(
+            unit, file_path, self.data_store, show_progress=options.show_progress
+        )
 
     def _download_from_s3(self, s3_uri: str, save_path: Path) -> Path:
         """
@@ -301,41 +329,7 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
             self.logger.info(f"Downloaded from S3: {save_path}")
             return save_path
 
-        except Exception as e:
-            self.logger.error(f"S3 download failed for {s3_uri}: {e}")
-            # Clean up partial download
-            if self.data_store.file_exists(save_path):
-                self.data_store.remove(save_path)
-            raise
-
-    def _download_from_https(self, https_url: str, save_path: Path) -> Path:
-        """
-        Download file from HTTPS.
-
-        Args:
-            https_url: HTTPS URL
-            save_path: Path to save file
-
-        Returns:
-            Path to downloaded file
-        """
-        import requests
-
-        try:
-            response = requests.get(https_url, stream=True, timeout=30)
-            response.raise_for_status()
-
-            with self.data_store.open(save_path, "wb") as file:
-                # Stream in chunks
-                for chunk in response.iter_content(chunk_size=8192 * 1024):
-                    if chunk:
-                        file.write(chunk)
-
-            self.logger.info(f"Downloaded from HTTPS: {save_path}")
-            return save_path
-
-        except Exception as e:
-            self.logger.error(f"HTTPS download failed for {https_url}: {e}")
+        except BaseException:
             # Clean up partial download
             if self.data_store.file_exists(save_path):
                 self.data_store.remove(save_path)
@@ -473,6 +467,8 @@ class GoogleMSBuildingsReader(BaseHandlerReader):
     - Geometry cropping
     """
 
+    options_type = GoogleMSReadOptions
+
     def __init__(
         self,
         config: Optional[GoogleMSBuildingsConfig] = None,
@@ -484,16 +480,21 @@ class GoogleMSBuildingsReader(BaseHandlerReader):
         super().__init__(config=config, data_store=data_store, logger=logger)
 
     def load_from_paths(
-        self, source_data_path: List[Union[str, Path]], **kwargs
+        self, source_data_path: List[Union[str, Path]], options: GoogleMSReadOptions
     ) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
         """
         Args:
             source_data_path: List of file paths to load
+            options: The source and confidence filters.
         Returns:
             DataFrame containing building data
         """
-        result = self._load_tabular_data(file_paths=source_data_path, **kwargs)
-        return result
+        result = self._load_tabular_data(file_paths=source_data_path)
+        return self._apply_filters(
+            result,
+            source_filter=options.source_filter,
+            min_confidence=options.min_confidence,
+        )
 
     def _apply_filters(
         self,
@@ -597,6 +598,7 @@ class GoogleMSBuildingsHandler(BaseHandler):
             reader=reader,
             data_store=data_store,
             logger=logger,
+            **kwargs,
         )
 
     def create_config(
@@ -699,8 +701,9 @@ class GoogleMSBuildingsHandler(BaseHandler):
         if not self.ensure_data_available(source, **kwargs):
             raise RuntimeError("Could not ensure data availability for loading")
 
-        source_data_paths = self.reader.resolve_source_paths(source, **kwargs)
-        processed_paths = self.reader._pre_load_hook(source_data_paths, **kwargs)
+        processed_paths = self.reader.resolve_source_paths(
+            source, **self.select_options(kwargs, self.config)
+        )
 
         cache_paths = []
 
@@ -765,14 +768,15 @@ class GoogleMSBuildingsHandler(BaseHandler):
         Args:
             source: specification of the data to load (e.g., iso3 code, geometry).
             force: If True, forces regeneration of the cache.
-            **kwargs: Additional parameters passed to the path resolver.
+            **kwargs: Resolve and download options.
 
         Returns:
             Dictionary containing combined numpy arrays (e.g., {'coords': np.ndarray})
         """
         # 1. Resolve what the base parquet files *should* be for this source
-        source_data_paths = self.reader.resolve_source_paths(source, **kwargs)
-        processed_paths = self.reader._pre_load_hook(source_data_paths, **kwargs)
+        processed_paths = self.reader.resolve_source_paths(
+            source, **self.select_options(kwargs, self.config)
+        )
 
         if not processed_paths:
             self.logger.warning("No valid paths to load centroids from.")

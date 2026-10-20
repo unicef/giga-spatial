@@ -74,7 +74,7 @@ class BigQueryClient:
     A generalizable Google BigQuery client for GigaSpatial.
 
     Provides generic, dataset-agnostic methods for schema inspection and
-    query execution. Dataset-specific handlers (e.g. MLabHandler) should
+    query execution. Dataset-specific fetchers (e.g. MLabFetcher) should
     compose this client rather than reimplement it.
 
     Parameters

@@ -1,60 +1,24 @@
-# API Reference
+# API reference
 
-Welcome to the API reference for the `gigaspatial` package. This documentation provides detailed information about the modules, classes, and functions available in the package.
+These pages list the classes and functions a caller imports. Each entry is one class or function, generated from its docstring.
 
-## Modules
+Each page opens with the imports to use. Classes you create in a script, such as handlers, fetchers, generators, grids, and data stores, import from `gigaspatial`. Their building blocks, such as a handler's config, downloader, and reader, import from the subpackage: `gigaspatial.handlers`, `gigaspatial.fetchers`, `gigaspatial.image_downloaders`, `gigaspatial.generators`, `gigaspatial.grid`, `gigaspatial.processing`, `gigaspatial.core.io`, `gigaspatial.core.http`, or `gigaspatial.core.schemas`. Any other module path is internal and may change between releases.
 
-The `gigaspatial` package is organized into several modules, each serving a specific purpose:
+The [handler base](handler-base.md) is last. It is for adding a dataset to this library, and it is the page that explains a search key and a search geometry.
 
-### 1. **Handlers**
-The `handlers` module contains classes for downloading and processing geospatial data from various sources, such as OpenStreetMap (OSM) and the Global Human Settlement Layer (GHSL).
+## Callers
 
-- **OSMLocationFetcher**: Fetches and processes location data from OpenStreetMap.
-- **GHSLDataDownloader**: Downloads and processes data from the Global Human Settlement Layer.
+- [Handlers](handlers.md): datasets published as files
+- [Fetchers](fetchers.md): datasets served as a query
+- [Generators](generators.md)
+- [Grids](grid.md)
+- [Data stores](data-stores.md)
+- [Clients](clients.md)
+- [Boundaries](boundaries.md)
+- [Earth Engine](earth-engine.md)
+- [Processing](processing.md)
+- [Image downloaders](image-downloaders.md)
 
-[Learn more about the Handlers module](handlers.md)
+## Adding a dataset
 
-### 2. **Processing**
-The `processing` module provides tools for processing geospatial data, such as GeoTIFF files.
-
-- **TifProcessor**: Processes GeoTIFF files and extracts relevant data.
-
-[Learn more about the Processing module](processing.md)
-
-### 3. **Core**
-The `core` module contains essential utilities and base classes used throughout the package.
-
-- **DataStore**: Handles the storage and retrieval of geospatial data in various formats.
-- **Config**: Manages configuration settings, such as paths and API keys.
-
-[Learn more about the Core module](core.md)
-
-### 4. **Generators**
-The `generators` module includes tools for generating geospatial data, such as grids and synthetic datasets.
-
-[Learn more about the Generators module](generators.md)
-
-### 5. **Grid**
-The `grid` module provides utilities for working with geospatial grids, such as creating and manipulating grid-based data.
-
-[Learn more about the Grid module](grid.md)
-
----
-
-## Getting Started
-
-To get started with the `gigaspatial` package, follow the [Quick Start Guide](../getting-started/quickstart.md).
-
----
-
-## Additional Resources
-
-- [Examples](../examples/): Real-world examples and use cases.
-- [Changelog](../changelog.md): Information about the latest updates and changes.
-- [Contributing](../contributing.md): Guidelines for contributing to the project.
-
----
-
-## Support
-
-If you encounter any issues or have questions, feel free to [open an issue](https://github.com/unicef/giga-spatial/issues) or [join our Discord community](https://discord.com/invite/NStBwE7kyv).
+- [Handler base](handler-base.md)
