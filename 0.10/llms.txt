@@ -1,0 +1,32 @@
+# GigaSpatial
+
+> Acquires published geospatial datasets into a data store you control, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. The result is a view.
+
+The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a dataset published as files. A fetcher is a dataset served as a query. A source is the place or file paths you load for. A data store holds a handler's files.
+
+## Start
+
+- [Tutorial](https://unicef.github.io/giga-spatial/latest/getting-started/quickstart/): WorldPop population on an H3 grid for one country
+- [Datasets](https://unicef.github.io/giga-spatial/latest/getting-started/datasets/): handlers, fetchers, sources, cropping
+- [Installation](https://unicef.github.io/giga-spatial/latest/getting-started/installation/): `pip install giga-spatial`
+- [Configuration](https://unicef.github.io/giga-spatial/latest/getting-started/configuration/): data directory and API keys
+
+## Guides
+
+- [Points and nearest buildings](https://unicef.github.io/giga-spatial/latest/user-guide/points-and-buildings/)
+- [Population around points](https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/)
+- [OSM places](https://unicef.github.io/giga-spatial/latest/user-guide/osm-places/)
+- [Processing a raster or a table](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)
+- [Settlement](https://unicef.github.io/giga-spatial/latest/user-guide/settlement-characterization/)
+- [Infrastructure files](https://unicef.github.io/giga-spatial/latest/user-guide/infrastructure-normalization/)
+
+## Reference
+
+- [API reference](https://unicef.github.io/giga-spatial/latest/api/): classes a caller imports
+- [Handler base](https://unicef.github.io/giga-spatial/latest/api/handler-base/): for adding a dataset to this library, not a stable API for other packages
+- [PyPI](https://pypi.org/project/giga-spatial/)
+- [Source](https://github.com/unicef/giga-spatial)
+
+## Optional
+
+- [Full primer](https://unicef.github.io/giga-spatial/latest/llms-full.txt): the tutorial and the datasets page in one file
