@@ -6,27 +6,27 @@ The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a
 
 ## Start
 
-- [Tutorial](https://unicef.github.io/giga-spatial/getting-started/quickstart/): WorldPop population on an H3 grid for one country
-- [Datasets](https://unicef.github.io/giga-spatial/getting-started/datasets/): handlers, fetchers, sources, cropping
-- [Installation](https://unicef.github.io/giga-spatial/getting-started/installation/): `pip install giga-spatial`
-- [Configuration](https://unicef.github.io/giga-spatial/getting-started/configuration/): data directory and API keys
+- [Tutorial](https://unicef.github.io/giga-spatial/latest/getting-started/quickstart/): WorldPop population on an H3 grid for one country
+- [Datasets](https://unicef.github.io/giga-spatial/latest/getting-started/datasets/): handlers, fetchers, sources, cropping
+- [Installation](https://unicef.github.io/giga-spatial/latest/getting-started/installation/): `pip install giga-spatial`
+- [Configuration](https://unicef.github.io/giga-spatial/latest/getting-started/configuration/): data directory and API keys
 
 ## Guides
 
-- [Points and nearest buildings](https://unicef.github.io/giga-spatial/user-guide/points-and-buildings/)
-- [Population around points](https://unicef.github.io/giga-spatial/user-guide/population-accessibility/)
-- [OSM places](https://unicef.github.io/giga-spatial/user-guide/osm-places/)
-- [Processing a raster or a table](https://unicef.github.io/giga-spatial/user-guide/processing/)
-- [Settlement](https://unicef.github.io/giga-spatial/user-guide/settlement-characterization/)
-- [Infrastructure files](https://unicef.github.io/giga-spatial/user-guide/infrastructure-normalization/)
+- [Points and nearest buildings](https://unicef.github.io/giga-spatial/latest/user-guide/points-and-buildings/)
+- [Population around points](https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/)
+- [OSM places](https://unicef.github.io/giga-spatial/latest/user-guide/osm-places/)
+- [Processing a raster or a table](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)
+- [Settlement](https://unicef.github.io/giga-spatial/latest/user-guide/settlement-characterization/)
+- [Infrastructure files](https://unicef.github.io/giga-spatial/latest/user-guide/infrastructure-normalization/)
 
 ## Reference
 
-- [API reference](https://unicef.github.io/giga-spatial/api/): classes a caller imports
-- [Handler base](https://unicef.github.io/giga-spatial/api/handler-base/): for adding a dataset to this library, not a stable API for other packages
+- [API reference](https://unicef.github.io/giga-spatial/latest/api/): classes a caller imports
+- [Handler base](https://unicef.github.io/giga-spatial/latest/api/handler-base/): for adding a dataset to this library, not a stable API for other packages
 - [PyPI](https://pypi.org/project/giga-spatial/)
 - [Source](https://github.com/unicef/giga-spatial)
 
 ## Optional
 
-- [Full primer](https://unicef.github.io/giga-spatial/llms-full.txt): the tutorial and the datasets page in one file
+- [Full primer](https://unicef.github.io/giga-spatial/latest/llms-full.txt): the tutorial and the datasets page in one file

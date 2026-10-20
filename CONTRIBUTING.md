@@ -4,7 +4,7 @@ Thank you for considering contributing to Giga! We value your input and aim to m
 
 ## Adding a dataset
 
-A dataset published as files is a handler. A dataset served as a query is a fetcher. The handler base, including the search key and the search geometry, is documented in the API reference: [Handler base](https://unicef.github.io/giga-spatial/api/handler-base/). That section is for contributors to this repository. It is not a stable API for other packages.
+A dataset published as files is a handler. A dataset served as a query is a fetcher. The handler base, including the search key and the search geometry, is documented in the API reference: [Handler base](https://unicef.github.io/giga-spatial/latest/api/handler-base/). That section is for contributors to this repository. It is not a stable API for other packages.
 
 Where a new dataset goes:
 

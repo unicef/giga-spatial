@@ -71,8 +71,8 @@ Pass `data_store=` when you construct a handler or a generator to choose the sto
 
 # Where to read more
 
-- Tutorial: https://unicef.github.io/giga-spatial/getting-started/quickstart/
-- Datasets: https://unicef.github.io/giga-spatial/getting-started/datasets/
-- API reference: https://unicef.github.io/giga-spatial/api/
-- Handler base: https://unicef.github.io/giga-spatial/api/handler-base/
+- Tutorial: https://unicef.github.io/giga-spatial/latest/getting-started/quickstart/
+- Datasets: https://unicef.github.io/giga-spatial/latest/getting-started/datasets/
+- API reference: https://unicef.github.io/giga-spatial/latest/api/
+- Handler base: https://unicef.github.io/giga-spatial/latest/api/handler-base/
 - Source: https://github.com/unicef/giga-spatial
