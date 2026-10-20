@@ -1,55 +1,27 @@
-# Settlement Characterization
+# Settlement
 
-To design efficient connectivity solutions, it is essential to distinguish between urban centers and remote rural outposts. GigaSpatial leverages the Global Human Settlement Layer (GHSL) to characterize any POI based on its built environment.
+GHSL's settlement model (`GHS_SMOD`) classifies each cell as a kind of built-up area, from rural to urban centre. Mapping it onto points attaches that class to each point. The result is a view.
 
-## The "Why": Building vs. Population Scenarios
-
-- **GHSL** provides a standardized, global view of the earth's surface, classified into different settlement types (SMOD - Settlement Model).
-- **PoiViewGenerator** allows you to "drape" your POIs over this global layer to inherit their local settlement classification.
-
-Integrating these two allows for automated stratification of your data (e.g., analyzing school connectivity costs specifically for *Rural* vs *Semi-Dense Urban* areas).
-
-## The Workflow
-
-### 1. Initialize the GHSL Handler
-
-The `GHSLDataHandler` manages the downloading and reading of global settlement rasters.
-
-```python
-from gigaspatial import GHSLDataHandler
-
-# Initialize handler for the Settlement Model (SMOD) product
-ghsl_handler = GHSLDataHandler(product="GHS_SMOD", year=2020)
-```
-
-### 2. Identify Urban/Rural contexts
-
-We use the `PoiViewGenerator` to map these global classifications to our specific points of interest.
+The first run downloads the settlement raster. It does not need an API key.
 
 ```python
 from gigaspatial import PoiViewGenerator
 
-# Assume gdf_schools is our GeoDataFrame of school locations
-view = PoiViewGenerator(gdf_schools)
-
-# Enrich the schools with GHSL SMOD categories
-# This resolves to the SMOD (Settlement Model) for each point
-enriched_schools = view.map_smod(stat="median")
+points = [(-1.9441, 30.0619), (-1.9500, 30.1000)]
+places = PoiViewGenerator(points)
+view = places.map_smod()
+print(view[["smod_class"]].head())
 ```
 
-## Understanding SMOD Classifications
+`map_smod` uses the 2020 release at 1000 m. `stat="median"` is the class at the point.
 
-GHSL SMOD data provides values that correspond to standard settlement types:
+The same method exists on a zone generator. After the [tutorial](../getting-started/quickstart.md), `zones.map_smod()` adds `smod_class` to the H3 view.
 
-| Value | Classification | Context |
-| :--- | :--- | :--- |
-| 30 | **Urban Centre** | High-density metropolitan areas |
-| 23 | **Dense Urban Cluster** | Suburban or high-density outskirts |
-| 11 | **Small Settlement** | Rural villages and dispersed clusters |
-| 10 | **Rural Grid Cell** | Sparse population areas |
+To load the raster yourself, construct the handler:
 
-## Rationale for this Combination
+```python
+from gigaspatial import GHSLDataHandler
 
-Manual classification of thousands of sites is impossible. By combining a **Global Handler** (GHSL) with a **Local View Generator**, GigaSpatial allows you to perform "Site Stratification" at the click of a button.
-
-This becomes especially powerful when combined with WorldPop data to calculate not just *where* a settlement is, but *how many people* live in the surrounding urban/rural cluster.
+settlement = GHSLDataHandler(product="GHS_SMOD", year=2020, resolution=1000)
+frame = settlement.load_into_dataframe("RWA")
+```

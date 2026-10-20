@@ -1,5 +1,5 @@
-site_name: "Documentation"
-site_description: "A powerful Python package for geospatial data analysis and processing"
+site_name: "GigaSpatial"
+site_description: "Acquires published geospatial datasets into a data store you control, loads them for a source, and processes them."
 site_author: "Utku Can Ozturk"
 
 theme:
@@ -7,6 +7,8 @@ theme:
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-auto
         name: Switch to light mode
@@ -14,6 +16,8 @@ theme:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
@@ -21,17 +25,22 @@ theme:
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
 
-  logo: assets/logo.png
-  favicon: assets/GIGA_horizontal_notext_white.webp
+  logo: assets/gigaspatial-logo-no-background.png
+  favicon: assets/gigaspatial-icon.png
+  icon:
+    repo: fontawesome/brands/github
   features:
     - navigation.tabs
     - navigation.sections
     - navigation.top
     - navigation.tracking
+    - toc.follow
     - navigation.indexes
     - navigation.instant
     - navigation.footer
@@ -51,35 +60,39 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: getting-started/installation.md
-      - Quick Start: getting-started/quickstart.md
+      - Tutorial: getting-started/quickstart.md
+      - Datasets: getting-started/datasets.md
       - Configuration: getting-started/configuration.md
   - User Guide:
-      - Overview: user-guide/index.md
-      - School Proximity: user-guide/school-proximity.md
-      - Infrastructure Normalization: user-guide/infrastructure-normalization.md
-      - Settlement Characterization: user-guide/settlement-characterization.md
-      - Population Accessibility: user-guide/population-accessibility.md
-      - Zonal Statistics on Grids: user-guide/zonal-statistics-grids.md
+      - user-guide/index.md
+      - Points and nearest buildings: user-guide/points-and-buildings.md
+      - Population around points: user-guide/population-accessibility.md
+      - OSM places: user-guide/osm-places.md
+      - Processing: user-guide/processing.md
+      - Settlement: user-guide/settlement-characterization.md
+      - Infrastructure files: user-guide/infrastructure-normalization.md
   - API Reference:
-      - Overview: api/index.md
+      - api/index.md
       - Handlers: api/handlers.md
-      - Processing: api/processing.md
-      - Core: api/core.md
+      - Fetchers: api/fetchers.md
       - Generators: api/generators.md
-      - Grid: api/grid.md
-    #- Core Functions: api/core.md
-    #- Utilities: api/utils.md
-    #- Data Types: api/data-types.md
-  - Examples:
-      - Overview: examples/index.md
+      - Grids: api/grid.md
+      - Data stores: api/data-stores.md
+      - Clients: api/clients.md
+      - Boundaries: api/boundaries.md
+      - Earth Engine: api/earth-engine.md
+      - Processing: api/processing.md
+      - Image downloaders: api/image-downloaders.md
+      - Handler base: api/handler-base.md
   - Contributing:
       - How to Contribute: contributing.md
-    #- Development Setup: contributing/development-setup.md
-    #- Code Style Guide: contributing/code-style.md
   - About:
+      - about/index.md
+      - Team: about/team.md
+      - Roadmap: about/roadmap.md
+  - Project:
       - Changelog: changelog.md
       - License: license.md
-    #- Credits: credits.md
 
 markdown_extensions:
   - admonition
@@ -151,6 +164,10 @@ extra:
       link: https://github.com/unicef/giga-spatial
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/giga-spatial/
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/Gigaglobal
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/gigaglobal/
   version:
     provider: mike
 
@@ -159,4 +176,4 @@ extra:
 extra_css:
   - stylesheets/extra.css
 
-copyright: Copyright &copy; 2025 Giga
+copyright: '&copy; Copyright 2025 - , UNICEF Digital Inclusion and Giga, Applied Science Devs'

@@ -1,189 +1,29 @@
-# Quick Start Guide
+# Tutorial
 
-This guide will walk you through the basic usage of the `gigaspatial` package. By the end of this guide, you will be able to download, process, and store geospatial data using the package.
+This tutorial builds H3 cells for Rwanda and attaches WorldPop population to each cell. The result is a view.
 
-## Prerequisites
+The first run downloads the country's population raster into the data store. That can take a few minutes. Later runs read the stored files. WorldPop does not need an API key.
 
-Before you begin, ensure that you have installed the `gigaspatial` package. If you haven't installed it yet, follow the [Installation Guide](installation.md).
-
-## Importing the Package
-
-Start by importing the `gigaspatial` package:
+## Build the view
 
 ```python
-import gigaspatial as gs
+from gigaspatial import H3ViewGenerator
+
+zones = H3ViewGenerator(source="RWA", resolution=6)
+view = zones.map_wp_pop(country="RWA")
+print(view.head())
 ```
 
-## Setting Up Configuration
+`source` is the country the cells cover. `resolution=6` is the H3 size: about 36 km² per cell. `map_wp_pop` loads the WorldPop raster for that country and sums it onto the cells. `view` is a table of cells with a `population` column and a geometry.
 
-The `gigaspatial` package uses a unified configuration system to manage paths, API keys, and other settings.
+`S2ViewGenerator` and `MercatorViewGenerator` follow the same pattern: construct them with a country, then call `map_wp_pop`.
 
-- **Environment Variables:** Most configuration is handled via environment variables, which can be set in a `.env` file at the project root. For a full list of supported variables and their descriptions, see the [Configuration Guide](../user-guide/configuration.md).
-- **Defaults:** If not set, sensible defaults are used for all paths and keys.
-- **Manual Overrides:** You can override data directory paths in your code using `config.set_path`.
+## What happened
 
-### Example `.env` File
+A handler acquired the WorldPop files and stored them. The generator mapped that dataset onto zones. The view is those zones with population attached. That attachment is enrichment.
 
-```bash
-BRONZE_DIR=/path/to/your/bronze_tier_data
-SILVER_DIR=/path/to/your/silver_tier_data
-GOLD_DIR=/path/to/your/gold_tier_data
-VIEWS_DIR=/path/to/your/views_data
-CACHE_DIR=/path/to/your/cache
-ADMIN_BOUNDARIES_DIR=/path/to/your/admin_boundaries
-MAPBOX_ACCESS_TOKEN=your_mapbox_token_here
-# ... other keys ...
-```
+The next pages name those pieces, then show other uses:
 
-### Setting Paths Programmatically
-
-```python
-from gigaspatial.config import config
-
-config.set_path("bronze", "/path/to/your/bronze_tier_data")
-config.set_path("gold", "/path/to/your/gold_tier_data")
-config.set_path("views", "/path/to/your/views_data")
-```
-
-> For more details and troubleshooting, see the [full configuration guide](../user-guide/configuration.md).
-
-## Downloading and Processing Geospatial Data
-
-The `gigaspatial` package provides several handlers for different types of geospatial data. Here are examples for two commonly used handlers:
-
-### GHSL (Global Human Settlement Layer) Data
-
-The `GHSLDataHandler` provides access to various GHSL products including built-up surface, building height, population, and settlement model data:
-
-```python
-from gigaspatial.handlers import GHSLDataHandler
-
-# Initialize the handler with desired product and parameters
-ghsl_handler = GHSLDataHandler(
-    product="GHS_BUILT_S",  # Built-up surface
-    year=2020,
-    resolution=100,  # 100m resolution
-)
-
-# Download data for a specific country
-country_code = "TUR"
-downloaded_files = ghsl_handler.load_data(country_code, ensure_available = True)
-
-# Load the data into a DataFrame
-df = ghsl_handler.load_into_dataframe(country_code, ensure_available = True)
-print(df.head())
-
-# You can also load data for specific points or geometries
-points = [(38.404581,27.4816677), (39.8915702, 32.7809618)]
-df_points = ghsl_handler.load_into_dataframe(points, ensure_available = True)
-```
-
-### Google Open Buildings Data
-
-The `GoogleOpenBuildingsHandler` provides access to Google's Open Buildings dataset, which includes building footprints and points:
-
-```python
-from gigaspatial.handlers import GoogleOpenBuildingsHandler
-
-# Initialize the handler
-gob_handler = GoogleOpenBuildingsHandler()
-
-# Download and load building polygons for a country
-country_code = "TUR"
-polygons_gdf = gob_handler.load_polygons(country_code, ensure_available = True)
-
-# Download and load building points for a country
-points_gdf = gob_handler.load_points(country_code, ensure_available = True)
-
-# You can also load data for specific points or geometries
-points = [(38.404581, 27.4816677), (39.8915702, 32.7809618)]
-polygons_gdf = gob_handler.load_polygons(points, ensure_available = True)
-```
-
-### Passing options to a handler
-
-`load_data`, `download_and_load`, `ensure_data_available` and the reader's and downloader's own entry points take options as keyword arguments. Each handler declares the options it understands, and a keyword it doesn't recognize raises a `TypeError` instead of being silently ignored:
-
-```python
-from gigaspatial.handlers import OpenCellIDHandler
-
-handler = OpenCellIDHandler()
-
-# Read options: keep only towers created from 2020 on
-towers = handler.load_data("KEN", created_newer=2020)
-
-# A misspelled option fails right away
-handler.load_data("KEN", created_newr=2020)  # TypeError
-```
-
-Options every handler accepts:
-
-- `crs`: the CRS of a geometry, point list or DataFrame source that carries none (default `EPSG:4326`).
-- `country_geom_path` and `country_data_store`: where to read a country's boundary from, instead of the default admin boundaries.
-- `show_progress`: show download progress bars (default `True`).
-
-Handler-specific options include WorldPop's `sex`, `ages`, `min_age` and `max_age`, Google Open Buildings' `data_type`, Google-MS combined's `source_filter` and `min_confidence`, OpenCellID's `created_newer`, `created_before` and `drop_duplicates`, HDX's `key`, `exact_match`, `token_match` and `read_kwargs`, and `merge_rasters` for GHSL and WorldPop rasters.
-
-With `crop_to_source=True`, the loaded data is cropped to the source's geometry. Path sources are returned as loaded. Country sources on datasets published per country (WorldPop, OpenCellID, Google-MS combined, Microsoft Buildings, HDX and RWI) are not cropped, since the files already cover that country.
-
-Config fields such as `base_path` or `n_workers` can be passed to the handler's constructor, for example `GHSLDataHandler(product="GHS_POP", base_path="/data/ghsl", n_workers=4)`. A field the config doesn't define raises a `TypeError`.
-
-Downloads run in `config.n_workers` threads. A data unit that fails to download is logged and skipped while the others continue; `ensure_data_available` then returns `False`, and `load_data` raises a `RuntimeError`.
-
-## Storing Geospatial Data
-
-You can store the processed data in various formats using the `DataStore` class from the `core.io` module. Here's an example of saving data to a parquet file:
-
-```python
-from gigaspatial.core.io import LocalDataStore
-
-# Initialize the data store
-data_store = LocalDataStore()
-
-# Save the processed data to a parquet file
-with data_store.open("/path/to/your/output/processed_data.parquet", "rb") as f:
-    processed_data.to_parquet(f)
-```
-
-If your dataset is already a `pandas.DataFrame` or `geopandas.GeoDataFrame`, `write_dataset` method from the `core.io.writers` module can be used to write the dataset in various formats. 
-
-```python
-from gigaspatial.core.io.writers import write_dataset
-
-# Save the processed data to a GeoJSON file
-write_dataset(data=processed_data, data_store=data_store, path="/path/to/your/output/processed_data.geojson")
-```
-
-## Visualizing Geospatial Data
-
-To visualize the geospatial data, you can use libraries like `geopandas` and `matplotlib`. Here's an example of plotting the processed data on a map:
-
-```python
-import geopandas as gpd
-import matplotlib.pyplot as plt
-
-# Load the GeoJSON file
-gdf = gpd.read_file("/path/to/your/output/processed_data.geojson")
-
-# Plot the data
-gdf.plot()
-plt.show()
-```
-
-`geopandas.GeoDataFrame.explore` can also be used to visualise the data on interactive map based on `GeoPandas` and `folium/leaflet.js`:
-```python
-# Visualize the data
-gdf.explore("population", cmap="Blues")
-```
-
-## Next Steps
-
-Now that you have a basic understanding of how to use the `gigaspatial` package, you can explore more advanced features and configurations. Check out the [User Guide](../user-guide/index.md) for detailed documentation and examples.
-
----
-
-### Additional Resources
-
-- [API Documentation](../api/index.md): Detailed documentation of all classes and functions.
-- [Examples](../examples/basic.md): Real-world examples and use cases.
-- [Changelog](../changelog.md): Information about the latest updates and changes.
+- [Datasets](datasets.md): handlers, fetchers, and cropping to a source
+- [Points and nearest buildings](../user-guide/points-and-buildings.md)
+- [Processing a raster or a table](../user-guide/processing.md), when you want the files themselves rather than a view
