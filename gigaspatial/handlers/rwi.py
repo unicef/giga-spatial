@@ -10,7 +10,7 @@ Index datasets hosted on HDX. It extends the HDX handler to support:
 
 import dataclasses
 import logging
-from typing import Optional, Union, Literal
+from typing import Optional, Literal
 from pydantic.dataclasses import dataclass
 from datetime import datetime
 
@@ -113,14 +113,7 @@ class RWIDownloader(HDXDownloader):
     Handles acquisition of wealth index CSVs from the HDX platform.
     """
 
-    def __init__(
-        self,
-        config: Union[RWIConfig, dict] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config if isinstance(config, RWIConfig) else RWIConfig(**config)
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = RWIConfig
 
 
 class RWIReader(HDXReader):
@@ -130,14 +123,7 @@ class RWIReader(HDXReader):
     Parses wealth index CSVs into tabular formats, ensuring quadkey consistency.
     """
 
-    def __init__(
-        self,
-        config: Union[RWIConfig, dict] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config if isinstance(config, RWIConfig) else RWIConfig(**config)
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = RWIConfig
 
 
 class RWIHandler(HDXHandler):

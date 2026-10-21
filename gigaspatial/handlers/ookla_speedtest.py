@@ -166,18 +166,7 @@ class OoklaSpeedtestDownloader(BaseHandlerDownloader):
 
     options_type = DownloadOptions
 
-    def __init__(
-        self,
-        config: Union[OoklaSpeedtestConfig, dict[str, Union[str, int]]],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = (
-            config
-            if isinstance(config, OoklaSpeedtestConfig)
-            else OoklaSpeedtestConfig(**config)
-        )
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = OoklaSpeedtestConfig
 
     def download_data_unit(self, url: str, options: DownloadOptions) -> Path:
         """
@@ -211,18 +200,7 @@ class OoklaSpeedtestReader(BaseHandlerReader):
     QUADKEY_ZOOM_LEVEL = 16
     options_type = ReadOptions
 
-    def __init__(
-        self,
-        config: Union[OoklaSpeedtestConfig, dict[str, Union[str, int]]],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = (
-            config
-            if isinstance(config, OoklaSpeedtestConfig)
-            else OoklaSpeedtestConfig(**config)
-        )
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = OoklaSpeedtestConfig
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], options: ReadOptions

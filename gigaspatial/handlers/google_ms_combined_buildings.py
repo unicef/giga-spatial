@@ -261,21 +261,15 @@ class GoogleMSBuildingsDownloader(BaseHandlerDownloader):
     """
 
     options_type = DownloadOptions
+    config_type = GoogleMSBuildingsConfig
 
-    def __init__(
-        self,
-        config: Optional[GoogleMSBuildingsConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """Initialize downloader with configuration."""
-        config = config or GoogleMSBuildingsConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
         self.logger.info(
             f"GoogleMSBuildingsDownloader initialized with "
-            f"format={config.data_format}, partition_strategy={config.partition_strategy}, "
-            f"download_strategy={config.download_strategy}"
+            f"format={self.config.data_format}, partition_strategy={self.config.partition_strategy}, "
+            f"download_strategy={self.config.download_strategy}"
         )
 
     def download_data_unit(self, unit: str, options: DownloadOptions) -> Path:
@@ -469,15 +463,7 @@ class GoogleMSBuildingsReader(BaseHandlerReader):
 
     options_type = GoogleMSReadOptions
 
-    def __init__(
-        self,
-        config: Optional[GoogleMSBuildingsConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """Initialize reader with configuration."""
-        config = config or GoogleMSBuildingsConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = GoogleMSBuildingsConfig
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], options: GoogleMSReadOptions

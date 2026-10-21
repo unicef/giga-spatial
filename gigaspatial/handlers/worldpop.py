@@ -1185,26 +1185,7 @@ class WPPopulationDownloader(BaseHandlerDownloader):
 
     options_type = DownloadOptions
 
-    def __init__(
-        self,
-        config: Union[WPPopulationConfig, dict[str, Union[str, int]]],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """
-        Initialize the WorldPop downloader.
-
-        Args:
-            config: WorldPop configuration object or parameter dictionary.
-            data_store: Storage interface for local persistence.
-            logger: Component logger instance.
-        """
-        config = (
-            config
-            if isinstance(config, WPPopulationConfig)
-            else WPPopulationConfig(**config)
-        )
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = WPPopulationConfig
 
     def download_data_unit(self, url: str, options: DownloadOptions):
         """
@@ -1246,26 +1227,7 @@ class WPPopulationReader(BaseHandlerReader):
 
     options_type = RasterReadOptions
 
-    def __init__(
-        self,
-        config: Union[WPPopulationConfig, dict[str, Union[str, int]]],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """
-        Initialize the WorldPop reader.
-
-        Args:
-            config: WorldPop configuration object or parameter dictionary.
-            data_store: Storage interface for local persistence.
-            logger: Component logger instance.
-        """
-        config = (
-            config
-            if isinstance(config, WPPopulationConfig)
-            else WPPopulationConfig(**config)
-        )
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = WPPopulationConfig
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], options: RasterReadOptions

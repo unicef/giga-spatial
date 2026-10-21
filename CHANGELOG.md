@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+-   **Handler downloaders and readers build their own config (`gigaspatial/handlers/`)**
+    -   Every downloader and reader declares its config class as `config_type`, and the base builds it: pass a config, a dict of its fields, or nothing for its defaults. Before, some components accepted only a dict and others only `None`; all now accept both. The 20 per-handler `__init__` methods that did this are gone.
+    -   OpenCellID's downloader and reader, which took only a config, now accept a dict or nothing as well.
+
 ## [v0.10.0] - 2026-10-20
 
 ### Added
