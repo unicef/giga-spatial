@@ -2,13 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [v0.10.1] - 2026-10-21
 
 ### Changed
 
 -   **Handler downloaders and readers build their own config (`gigaspatial/handlers/`)**
     -   Every downloader and reader declares its config class as `config_type`, and the base builds it: pass a config, a dict of its fields, or nothing for its defaults. Before, some components accepted only a dict and others only `None`; all now accept both. The 20 per-handler `__init__` methods that did this are gone.
     -   OpenCellID's downloader and reader, which took only a config, now accept a dict or nothing as well.
+
+### Development
+
+-   **Live tests are opt-in.** Tests marked `live` reach a real data source over the network and are skipped by default; run them with `pytest -m live`.
+-   **Agent skills for adding a handler.** The team's coding-agent skills come from the `di-applied-science-skills` submodule under `.agents/vendor/`, and `CONTRIBUTING.md` explains how to install them. The handler contract they check against lives in `.agents/reference/handler-contract.md`.
 
 ## [v0.10.0] - 2026-10-20
 
