@@ -1,7 +1,9 @@
 *.egg-info/
 *.egg
 *.agent/
-*.agents/
+.agents/*
+!.agents/reference/
+!.agents/vendor/
 dist/
 build/
 /__pycache__
