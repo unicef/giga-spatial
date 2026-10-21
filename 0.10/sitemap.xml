@@ -2,138 +2,138 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/changelog/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/contributing/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/license/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/about/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/about/roadmap/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/about/team/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/adr/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/adr/0001-search-key-and-search-geometry/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/adr/0002-handler-base-in-the-api-reference/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/adr/0003-public-import-paths/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/boundaries/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/clients/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/data-stores/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/earth-engine/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/fetchers/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/generators/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/grid/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/handler-base/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/handlers/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/image-downloaders/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/api/processing/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/getting-started/configuration/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/getting-started/datasets/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/getting-started/installation/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/getting-started/quickstart/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/user-guide/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/user-guide/infrastructure-normalization/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/user-guide/osm-places/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/user-guide/points-and-buildings/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/user-guide/population-accessibility/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/user-guide/processing/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
     <url>
          <loc>https://unicef.github.io/giga-spatial/0.10/user-guide/settlement-characterization/</loc>
-         <lastmod>2026-10-20</lastmod>
+         <lastmod>2026-10-21</lastmod>
     </url>
 </urlset>
