@@ -360,26 +360,7 @@ class MSBuildingsDownloader(BaseHandlerDownloader):
 
     options_type = DownloadOptions
 
-    def __init__(
-        self,
-        config: Optional[MSBuildingsConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """
-        Initialize the downloader.
-
-        Args:
-            config: Optional configuration for customizing download behavior and file paths.
-                    If None, a default `MSBuildingsConfig` is used.
-            data_store: Optional instance of a `DataStore` for managing data storage.
-                        If provided, it overrides the `data_store` in the `config`.
-                        If None, the `data_store` from the `config` is used.
-            logger: Optional custom logger instance. If None, a default logger
-                    named after the module is created and used.
-        """
-        config = config or MSBuildingsConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = MSBuildingsConfig
 
     def download_data_unit(
         self,
@@ -439,14 +420,7 @@ class MSBuildingsReader(BaseHandlerReader):
 
     options_type = ReadOptions
 
-    def __init__(
-        self,
-        config: Optional[MSBuildingsConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config or MSBuildingsConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = MSBuildingsConfig
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], options: ReadOptions

@@ -20,6 +20,8 @@ Anything that changes which file is fetched belongs on the data unit, not in an 
 
 `BaseHandler` is what a caller holds. `load_data` ensures the files are stored, then reads them. `BaseHandlerConfig` resolves a source into data units and stored paths. `BaseHandlerDownloader` fetches units. `BaseHandlerReader` loads stored paths and may crop.
 
+A downloader or reader declares its config class as `config_type`, so it can also be built on its own from a config, a dict of config fields, or nothing.
+
 Keyword arguments stop at those public methods. Each class declares an options type: `ResolveOptions`, `DownloadOptions`, or `ReadOptions`. An unknown keyword raises `TypeError`.
 
 ::: gigaspatial.handlers.base.handler.BaseHandler

@@ -14,7 +14,7 @@ from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.processing.tif_processor import TifProcessor
-from gigaspatial.handlers.base.config import BaseHandlerConfig
+from gigaspatial.handlers.base.config import BaseHandlerConfig, build_component_config
 from gigaspatial.handlers.base.options import ReadOptions, sort_options
 from gigaspatial.handlers.base.source import SourceKind, classify_source, is_path_source
 
@@ -32,16 +32,27 @@ class BaseHandlerReader(ABC):
         data_store: Abstraction for file-system access.
         logger: Logger instance for tracking data loading.
         options_type: The `ReadOptions` subclass ``load_from_paths`` takes.
+        config_type: The config class built when the reader is given a dict
+            or no config.
     """
 
     options_type: ClassVar[Type[ReadOptions]] = ReadOptions
+    config_type: ClassVar[Optional[Type[BaseHandlerConfig]]] = None
 
     def __init__(
         self,
-        config: Optional[BaseHandlerConfig] = None,
+        config: Union[BaseHandlerConfig, dict, None] = None,
         data_store: Optional[DataStore] = None,
         logger: Optional[logging.Logger] = None,
     ):
+        """
+        Args:
+            config: The handler's config, a dict of ``config_type`` fields, or
+                None for a default ``config_type``.
+            data_store: Data store to read from; defaults to the config's.
+            logger: Logger; defaults to the config's.
+        """
+        config = build_component_config(self.config_type, config)
         self.config = config
         if data_store:
             self.data_store = data_store

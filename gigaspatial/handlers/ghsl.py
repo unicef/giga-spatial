@@ -324,24 +324,7 @@ class GHSLDataDownloader(BaseHandlerDownloader):
 
     options_type = GHSLDownloadOptions
 
-    def __init__(
-        self,
-        config: Union[GHSLDataConfig, dict[str, Union[str, int]]],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """
-        Initialize the downloader.
-
-        Args:
-            config: Configuration for the GHSL dataset, either as a GHSLDataConfig object or a dictionary of parameters
-            data_store: Optional data storage interface. If not provided, uses LocalDataStore.
-            logger: Optional custom logger. If not provided, uses default logger.
-        """
-        config = (
-            config if isinstance(config, GHSLDataConfig) else GHSLDataConfig(**config)
-        )
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = GHSLDataConfig
 
     def download_data_unit(
         self, tile_id: str, options: GHSLDownloadOptions
@@ -425,24 +408,7 @@ class GHSLDataReader(BaseHandlerReader):
 
     options_type = RasterReadOptions
 
-    def __init__(
-        self,
-        config: Union[GHSLDataConfig, dict[str, Union[str, int]]],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """
-        Initialize the reader.
-
-        Args:
-            config: Configuration for the GHSL dataset, either as a GHSLDataConfig object or a dictionary of parameters
-            data_store: Optional data storage interface. If not provided, uses LocalDataStore.
-            logger: Optional custom logger. If not provided, uses default logger.
-        """
-        config = (
-            config if isinstance(config, GHSLDataConfig) else GHSLDataConfig(**config)
-        )
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = GHSLDataConfig
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], options: RasterReadOptions

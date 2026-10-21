@@ -163,3 +163,13 @@ def test_option_hooks_take_no_raw_kwargs(cls):
 @pytest.mark.parametrize("cls", HANDLER_CONFIGS, ids=lambda c: c.__qualname__)
 def test_default_resolve_options_are_hashable(cls):
     hash(cls.options_type())
+
+
+HANDLER_PARTS = _handler_subclasses(BaseHandlerDownloader, BaseHandlerReader)
+
+
+@pytest.mark.parametrize("cls", HANDLER_PARTS, ids=lambda c: c.__qualname__)
+def test_component_declares_its_config_type(cls):
+    assert cls.config_type is not None
+    assert issubclass(cls.config_type, BaseHandlerConfig)
+    assert cls.config_type.__module__ == cls.__module__

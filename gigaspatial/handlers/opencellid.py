@@ -202,6 +202,7 @@ class OpenCellIDDownloader(BaseHandlerDownloader):
     """
 
     options_type = DownloadOptions
+    config_type = OpenCellIDConfig
 
     def download_data_unit(self, unit: dict, options: DownloadOptions) -> Path:
         """
@@ -235,6 +236,7 @@ class OpenCellIDReader(BaseHandlerReader):
     """
 
     options_type = OpenCellIDReadOptions
+    config_type = OpenCellIDConfig
 
     def load_from_paths(
         self,

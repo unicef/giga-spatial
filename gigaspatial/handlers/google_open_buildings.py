@@ -123,25 +123,7 @@ class GoogleOpenBuildingsDownloader(BaseHandlerDownloader):
 
     options_type = DownloadOptions
 
-    def __init__(
-        self,
-        config: Optional[GoogleOpenBuildingsConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        """
-        Initialize the downloader.
-
-        Args:
-            config: Optional configuration for file paths and download settings.
-                    If None, a default `GoogleOpenBuildingsConfig` is used.
-            data_store: Optional instance of a `DataStore` for managing data
-                        storage. If None, a `LocalDataStore` is used.
-            logger: Optional custom logger instance. If None, a default logger
-                    named after the module is created and used.
-        """
-        config = config or GoogleOpenBuildingsConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = GoogleOpenBuildingsConfig
 
     def download_data_unit(
         self, tile_info: Union[pd.Series, dict], options: DownloadOptions
@@ -217,14 +199,7 @@ class GoogleOpenBuildingsReader(BaseHandlerReader):
 
     options_type = ReadOptions
 
-    def __init__(
-        self,
-        config: Optional[GoogleOpenBuildingsConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config or GoogleOpenBuildingsConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = GoogleOpenBuildingsConfig
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], options: ReadOptions
