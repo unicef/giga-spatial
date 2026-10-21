@@ -14,6 +14,24 @@ Where a new dataset goes:
 
 Those `__init__.py` files load names lazily. Each one also repeats its names in an `if TYPE_CHECKING:` block, and `tests/test_public_api.py` fails if the two lists differ. Code inside the package uses absolute imports (`from gigaspatial.handlers.ghsl import ...`). The reasons are in [Public import paths](https://github.com/unicef/giga-spatial/blob/main/docs/adr/0003-public-import-paths.md).
 
+### With a coding agent
+
+Team members can install agent skills for this repository from the team's skills repository, a submodule at `.agents/vendor/di-applied-science-skills`. From the repository root:
+
+```bash
+git submodule update --init
+python .agents/vendor/di-applied-science-skills/install.py giga-spatial
+```
+
+The skills land in `.agents/skills/`, which Cursor and Codex read and git ignores. Invoke them by name:
+
+- `build-handler` probes a dataset's source, interviews you on the design, and writes the handler, its registrations, and its tests.
+- `judge-handler-base` reviews a new handler, or a change to the handler base, against the contract in `.agents/reference/handler-contract.md`.
+
+The contract lives here because it describes this repository's code; update it with any change to the handler base. The skills themselves are edited in the skills repository. After the submodule moves to a newer commit, run `install.py` again with no arguments.
+
+Tests marked `live` reach real data sources and are skipped by default. Run them with `pytest -m live`.
+
 ## How to Contribute to our Giga Project?
 
 1. **Familiarize Yourself:** Before contributing, familiarize yourself with the project by reviewing the README, code of conduct, and existing issues or pull requests.
