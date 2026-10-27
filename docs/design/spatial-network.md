@@ -151,18 +151,25 @@ Algorithms take `weight=None`, which means the network's `weight` (by default `"
 
 ```
 insert_points(points, id_column=None, max_distance=None, snap_to_node=5.0,
-              chain=False, return_unmerged=False) -> SpatialNetwork | tuple
+              chain=False, return_skipped=False) -> SpatialNetwork | tuple
 ```
+
+`return_skipped` was `return_unmerged` in the interview; it was renamed because the glossary avoids "merging". The method lives in `gigaspatial/processing/network/insertion.py`, a mixin of `SpatialNetwork`.
 
 - IDs come from `id_column`, or from the frame's index if it is `None`. They must be unique and must not collide with existing node IDs; a collision raises.
 - The columns of the points frame are carried onto their nodes. A collision with reserved columns (`x`, `y`, `kind`) raises.
 - Each point is joined to its nearest edge at the foot of the perpendicular. The edge is split there, a split node is added (`kind="split"`), and a connection edge (`kind="connection"`) joins the point (`kind="point"`) to the split node.
 - If the foot is within `snap_to_node` meters (haversine) of one of the edge's endpoints, the point connects to that node instead and no split happens.
-- Points farther than `max_distance` from any road are left out. A warning gives their count, and `return_unmerged=True` returns `(network, unmerged_points)`.
+- Points farther than `max_distance` from any road are left out. A warning gives their count, and `return_skipped=True` returns `(network, skipped_points)`: the skipped rows of a frame, or the skipped items of a list.
 - With `chain=True`, points are handled in order of their distance to the road. A point connects to an already-inserted point (`kind="point_link"`) when that point is closer than any road. This reproduces rule (i) of the old `merge_points_to_graph`. Candidates come from a KD-tree on the points, querying k neighbours and doubling k only for points whose k-th neighbour is still closer than their road.
 - Split nodes get negative integer IDs, decreasing from the lowest existing negative ID, as OSM does for new objects.
 - In a directed network, a two-way road is two rows with reversed geometries. Both rows must be split at the same split nodes, and connection edges are added in both directions.
 - Lengths follow section 4: haversine for connections, and split pieces rescaled to the original length.
+
+- Points join road edges only: edges of kind `connection` and `point_link` from earlier insertions are never split.
+- In a directed network, the other direction of a two-way road is the row from `v` to `u` whose geometry is the reverse (or both straight). One-way roads are split in their one direction only; connections still run both ways.
+- When the network's weight is not `length`, road pieces get their share of the road's weight in proportion to length, and connection edges get the weight equal to their length.
+- The UTM projection of the road edges and its STRtree are cached per network (`_projected_roads`), built on the first insertion. The EPSG:4326 STRtree used by `clip` is not used here: in degrees, a road 100 m east looks farther than one 150 m north at 60° latitude.
 
 The work is done in one batch:
 
@@ -293,7 +300,7 @@ Targets on the simplified Rwanda network unless stated. A pull request that miss
 | `to_networkx()` | under 3 s | 2.5 s |
 | Conversion from an osmnx graph | under 2 s | 0.9 s column-wise; 4.0 s with `graph_to_gdfs` |
 | `shortest_path_lengths`, 100 by 1,000 | under 3 s with scipy | scipy 2.4 s; pandana 1.4 s build plus 0.19 s; networkx about 29 s |
-| `insert_points`, 10,000 points | under 10 s | the old function is measured in sub-task 7 |
+| `insert_points`, 10,000 points | under 10 s | 1.8 s, plus 1.3 s once per network for the UTM road index; the old function took 292 s for 1,000 points |
 | `simplify` of unsimplified Rwanda | faster than osmnx | osmnx `simplify_graph` 197 s; `simplify` 9.1 s, same result |
 
 ## 10. Tests and benchmarks
