@@ -98,6 +98,8 @@ nav:
           - Search key and search geometry: adr/0001-search-key-and-search-geometry.md
           - Handler base in the API reference: adr/0002-handler-base-in-the-api-reference.md
           - Public import paths: adr/0003-public-import-paths.md
+          - Columnar spatial network: adr/0004-columnar-spatial-network.md
+          - Spatial network storage: adr/0005-spatial-network-storage.md
       - License: license.md
 
 markdown_extensions:
