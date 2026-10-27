@@ -99,7 +99,7 @@ Because networks never change, these caches never need to be invalidated.
 ### Constructors
 
 - `SpatialNetwork(nodes, edges, directed=True, crs="EPSG:4326", weight="length", metadata=None)` validates and adopts the two tables. Validation checks that IDs are unique, edges reference existing nodes, `x` and `y` are present, and `length` is present or computable. Missing lengths are computed with haversine.
-- `SpatialNetwork.from_networkx(G)` takes osmnx graphs or any networkx graph whose nodes have `x` and `y`. `directed` comes from `G.is_directed()`, and the CRS from `G.graph["crs"]` (EPSG:4326 if absent). Missing keys become 0. Attributes are extracted column by column with `np.fromiter` and comprehensions, not with `ox.graph_to_gdfs`: on the Rwanda network that took 0.9 s against 4.0 s.
+- `SpatialNetwork.from_networkx(G)` takes osmnx graphs or any networkx graph whose nodes have `x` and `y`. `directed` comes from `G.is_directed()`, and the CRS from `G.graph["crs"]` (EPSG:4326 if absent). Missing keys become 0. Directed graphs are read from networkx's adjacency dictionaries rather than its edge views, attributes go through `DataFrame.from_records`, and Python's cyclic garbage collector is paused during the conversion (and in `to_networkx`): collections triggered by millions of new objects tripled the time on unsimplified Rwanda.
 - `SpatialNetwork.from_points(points, connect="knn", k=5, max_distance=None, id_column=None, weight="length", weight_func=None)` builds a network whose nodes are the points. `connect="knn"` joins each point to its k nearest neighbours. `connect="distance"` joins every pair within `max_distance` meters. Both use a `cKDTree`, like `build_distance_graph`, and never connect all pairs. Edges get `length` in meters. `weight_func(nodes_u, nodes_v, length) -> array` optionally computes another weight column at construction. The network is undirected.
 - `SpatialNetwork.load(path, data_store=None)` (section 7).
 
@@ -266,9 +266,10 @@ How a source becomes the queried area:
 | Points, or a frame of points | `area="hull"` (default): convex hull; `"bbox"`: bounding rectangle; `"buffers"`: union of a buffer per point. Buffered by `buffer` meters through UTM (`buffer_geodataframe`), never degrees. |
 
 - Point tuples are `(lat, lon)`.
-- Reuse the library's source classification (`classify_source`). If `BaseHandlerConfig.extract_search_geometry` cannot be used without a handler config, move its body into a function both can call, without changing handler behaviour.
+- The library's source classification (`classify_source`) decides the kind. The body of `BaseHandlerConfig.extract_search_geometry` moved into `source_geometry(source, crs, options)` in `gigaspatial/handlers/base/config.py`; the method calls it, and so does the fetcher. Lines are buffered like points, and a single point or a line with `buffer=0` raises. `query_area(source)` is public, so users can see what will be queried.
 - The query is `ox.graph_from_polygon(polygon, network_type=..., simplify=..., retain_all=..., truncate_by_edge=..., custom_filter=...)`. Set `ox.settings` for the Overpass URL (`overpass_url` or `config.OVERPASS_URL`) and the timeout inside a context manager that restores the previous settings. osmnx's HTTP cache is left as the user configured it.
-- Transient failures are retried up to `max_retries` times with backoff. Errors name the Overpass URL and suggest a mirror.
+- osmnx's `overpass_url` is the API base, while `OVERPASS_URL` is the full endpoint, so a trailing `/interpreter` is removed for osmnx.
+- Transient failures are retried up to `max_retries` times, pausing `retry_delay` seconds and doubling each time: connection errors and timeouts (`requests.RequestException`) and osmnx's `ResponseStatusCodeError`. osmnx already retries 429 and 504 itself. osmnx's `InsufficientResponseError` (no matching roads) becomes a `ValueError` and is not retried. The last error names the Overpass URL and suggests a mirror.
 - Warn when the area is large (above about 50,000 km²): Overpass is slow at country scale and has fair-use limits, and the Geofabrik handler will be the faster route.
 - Normalisation before building the network, with `normalize_attributes(edges, int_lists=("osmid",))`, so saving does not repeat it (ADR 0005):
   - `osmid` becomes a list of int64 on every edge.
@@ -298,7 +299,7 @@ Targets on the simplified Rwanda network unless stated. A pull request that miss
 | `clip` of 4% of the area | under 0.1 s | 0.03 s; 1.6 to 3.0 s from networkx |
 | `adjacency()` | under 0.3 s | 0.14 s |
 | `to_networkx()` | under 3 s | 2.5 s |
-| Conversion from an osmnx graph | under 2 s | 0.9 s column-wise; 4.0 s with `graph_to_gdfs` |
+| Conversion from an osmnx graph | under 2 s | 0.81 s; 14.5 s for unsimplified Rwanda (4.5 million edges), once 49 s; 4.0 s with `graph_to_gdfs` |
 | `shortest_path_lengths`, 100 by 1,000 | under 3 s with scipy | scipy 2.4 s; pandana 1.4 s build plus 0.19 s; networkx about 29 s |
 | `insert_points`, 10,000 points | under 10 s | 1.8 s, plus 1.3 s once per network for the UTM road index; the old function took 292 s for 1,000 points |
 | `simplify` of unsimplified Rwanda | faster than osmnx | osmnx `simplify_graph` 197 s; `simplify` 9.1 s, same result |

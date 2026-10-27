@@ -1,5 +1,7 @@
 """Spatial networks: places as nodes with coordinates, joined by weighted edges."""
 
+import gc
+from contextlib import contextmanager
 from functools import cached_property
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Union
 
@@ -125,20 +127,19 @@ class SpatialNetwork(EditingMixin, AlgorithmsMixin, ReductionMixin, InsertionMix
         """
         if not isinstance(G, nx.Graph):
             raise TypeError(f"Expected a networkx graph, got {type(G).__name__}")
-        nodes = pd.DataFrame.from_dict(dict(G.nodes(data=True)), orient="index")
-        if G.number_of_nodes() and nodes.empty:
-            nodes = pd.DataFrame(index=pd.Index(list(G.nodes)))
-        if G.is_multigraph():
-            rows = list(G.edges(keys=True, data=True))
-        else:
-            rows = [(u, v, 0, d) for u, v, d in G.edges(data=True)]
-        edges = pd.DataFrame.from_records([r[3] for r in rows], index=pd.RangeIndex(len(rows)))
-        clash = [c for c in _EDGE_ID_COLUMNS if c in edges.columns]
+        with _collector_paused():
+            nodes = pd.DataFrame.from_records(list(G._node.values()), index=pd.Index(list(G._node)))
+            rows = list(_edge_rows(G))
+            ends, attributes = zip(*rows) if rows else ((), ())
+            u, v, key = zip(*ends) if ends else ((), (), ())
+            table = pd.DataFrame.from_records(list(attributes), index=pd.RangeIndex(len(rows)))
+            del rows, ends, attributes
+        clash = [c for c in _EDGE_ID_COLUMNS if c in table.columns]
         if clash:
             raise ValueError(f"Edge attributes {clash} clash with the edge identifier columns")
-        edges.insert(0, "u", [r[0] for r in rows])
-        edges.insert(1, "v", [r[1] for r in rows])
-        edges.insert(2, "key", [r[2] for r in rows])
+        columns = {"u": pd.Series(u).to_numpy(), "v": pd.Series(v).to_numpy(), "key": pd.Series(key).to_numpy()}
+        columns.update({c: table[c] for c in table.columns})
+        edges = pd.DataFrame(columns, index=table.index, copy=False)
         metadata = {k: v for k, v in G.graph.items() if k != "crs"}
         return cls(
             nodes,
@@ -512,22 +513,23 @@ class SpatialNetwork(EditingMixin, AlgorithmsMixin, ReductionMixin, InsertionMix
         G.graph.update(self._metadata)
         G.graph["crs"] = WGS84
 
-        G.add_nodes_from(zip(self._nodes.index.tolist(), _records(self._nodes)))
+        with _collector_paused():
+            G.add_nodes_from(zip(self._nodes.index.tolist(), _records(self._nodes)))
 
-        attributes = self._edges.drop(columns=list(_EDGE_ID_COLUMNS))
-        records = _records(attributes)
-        u = self._edges["u"].tolist()
-        v = self._edges["v"].tolist()
-        keys = self._edges["key"].tolist()
-        G.add_edges_from(zip(u, v, keys, records))
-        if directed and not self._directed:
-            reverse = [dict(r) for r in records]
-            if "geometry" in attributes.columns:
-                geoms = attributes["geometry"].to_numpy(dtype=object)
-                present = np.flatnonzero(~pd.isna(geoms))
-                for i, g in zip(present, shapely.reverse(geoms[present])):
-                    reverse[i]["geometry"] = g
-            G.add_edges_from(zip(v, u, keys, reverse))
+            attributes = self._edges.drop(columns=list(_EDGE_ID_COLUMNS))
+            records = _records(attributes)
+            u = self._edges["u"].tolist()
+            v = self._edges["v"].tolist()
+            keys = self._edges["key"].tolist()
+            G.add_edges_from(zip(u, v, keys, records))
+            if directed and not self._directed:
+                reverse = [dict(r) for r in records]
+                if "geometry" in attributes.columns:
+                    geoms = attributes["geometry"].to_numpy(dtype=object)
+                    present = np.flatnonzero(~pd.isna(geoms))
+                    for i, g in zip(present, shapely.reverse(geoms[present])):
+                        reverse[i]["geometry"] = g
+                G.add_edges_from(zip(v, u, keys, reverse))
         return G
 
 
@@ -666,6 +668,47 @@ def _prepare_edges(
     if not pd.api.types.is_numeric_dtype(prepared[weight]):
         raise ValueError(f"The weight column {weight!r} must be numeric")
     return prepared, (as_positions(pu, len(index)), as_positions(pv, len(index)))
+
+
+@contextmanager
+def _collector_paused():
+    """Pause Python's cyclic garbage collector while millions of small objects are created.
+
+    Converting a graph creates no reference cycles, but each batch of new
+    objects triggers a collection over everything alive; on unsimplified
+    Rwanda (4.5 million edges) that tripled the conversion time.
+    """
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def _edge_rows(G: nx.Graph):
+    """``((u, v, key), attributes)`` for every edge.
+
+    Directed graphs are read from networkx's adjacency dictionaries, which is
+    several times faster than its edge views on graphs with millions of edges.
+    Undirected graphs store each edge twice there, so they use the edge view.
+    """
+    if G.is_directed() and G.is_multigraph():
+        for u, neighbours in G._succ.items():
+            for v, by_key in neighbours.items():
+                for k, data in by_key.items():
+                    yield (u, v, k), data
+    elif G.is_directed():
+        for u, neighbours in G._succ.items():
+            for v, data in neighbours.items():
+                yield (u, v, 0), data
+    elif G.is_multigraph():
+        for u, v, k, data in G.edges(keys=True, data=True):
+            yield (u, v, k), data
+    else:
+        for u, v, data in G.edges(data=True):
+            yield (u, v, 0), data
 
 
 def _counts(kinds: pd.Series) -> Dict[str, int]:

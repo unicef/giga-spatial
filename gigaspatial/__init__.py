@@ -36,6 +36,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
         # fetchers
         "gigaspatial.fetchers.osm": ["OSMLocationFetcher"],
+        "gigaspatial.fetchers.osm_roads": ["OSMRoadsFetcher"],
         "gigaspatial.fetchers.overture": ["OvertureAmenityFetcher"],
         "gigaspatial.fetchers.healthsites": ["HealthSitesFetcher"],
         "gigaspatial.fetchers.giga.school_locations": ["GigaSchoolLocationFetcher"],
@@ -110,6 +111,7 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
     from gigaspatial.fetchers.osm import OSMLocationFetcher
+    from gigaspatial.fetchers.osm_roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
     from gigaspatial.fetchers.healthsites import HealthSitesFetcher
     from gigaspatial.fetchers.giga.school_locations import GigaSchoolLocationFetcher

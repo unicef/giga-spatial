@@ -107,6 +107,29 @@ def f3(x):
     return f"{x:.3f}"
 
 
+def convert(graphs):
+    """from_networkx and to_networkx on each graph, best of two runs."""
+    rows = []
+    for g in graphs:
+        G = load_graph(g)
+        gc.collect()
+        t, net = timeit(lambda: SpatialNetwork.from_networkx(G), reps=2)
+        rows.append([f"from_networkx, {g} ({G.number_of_edges():,} edges)", f3(t), "under 2 s" if g == "G_large" else ""])
+        del G
+        gc.collect()
+        t, _ = timeit(net.to_networkx)
+        rows.append([f"to_networkx, {g}", f3(t), "under 3 s" if g == "G_large" else ""])
+        del net
+        gc.collect()
+    log("\n### Sub-task 8 — networkx conversion after the speed-up\n")
+    table(["operation", "s", "target"], rows)
+
+
 if __name__ == "__main__":
-    mode, graph = sys.argv[1], sys.argv[2]
-    mem_child(graph) if mode == "mem" else run(graph)
+    mode, graphs = sys.argv[1], sys.argv[2:]
+    if mode == "mem":
+        mem_child(graphs[0])
+    elif mode == "convert":
+        convert(graphs)
+    else:
+        run(graphs[0])

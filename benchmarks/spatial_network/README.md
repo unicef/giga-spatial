@@ -23,6 +23,7 @@ Run from this folder, in order. Each script appends its tables to `$GS_BENCH_DIR
 | `partA.py run <graph> [reps]` | Storage formats: write and read time, size, memory, and how list-valued attributes survive. |
 | `partB.py b1 <graph>`, `conv <graph>`, `algo <graph>` | Memory of each representation, conversion costs, and routing with scipy, pandana, networkx, and igraph. |
 | `partC.py` | Package versions and wheel coverage from PyPI, and pandana's maintenance activity from GitHub. Needs the network. |
+| `core.py convert <graph> [<graph> ...]` | `from_networkx` and `to_networkx` on each graph. Last run in [`results/conversion.md`](results/conversion.md). |
 | `core.py run <graph>` | `SpatialNetwork` construction, memory, accessors, `to_networkx`, and `from_points` against the section 9 targets. Needs `partA.py` to have written `fmt/<graph>/lean_f64`. Last run in [`results/core.md`](results/core.md). |
 | `storage.py <graph> [reps]` | `SpatialNetwork.save` and `load` against the section 9 targets, starting from raw osmnx attributes. Last run in [`results/storage.md`](results/storage.md). |
 | `editing.py <graph> [reps]` | Editing methods: `clip`, `nearest_nodes`, filters, attribute updates, `add_weighted_edges`, `to_undirected`, `concat`. Last run in [`results/editing.md`](results/editing.md). |
