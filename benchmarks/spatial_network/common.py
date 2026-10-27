@@ -4,11 +4,14 @@ import pandas as pd
 import pyarrow as pa
 import psutil
 
-ROOT = "/tmp/gs_bench"
+ROOT = os.environ.get("GS_BENCH_DIR", "/tmp/gs_bench")
 OUT = f"{ROOT}/out"
 REPORT = f"{OUT}/report.md"
-PY = "/Users/utkucanozturk/miniforge3/envs/py310/bin/python"
+PY = sys.executable
 PROC = psutil.Process()
+os.makedirs(OUT, exist_ok=True)
+if os.path.isdir(f"{ROOT}/pylib"):
+    sys.path.insert(0, f"{ROOT}/pylib")
 
 
 def log(s=""):

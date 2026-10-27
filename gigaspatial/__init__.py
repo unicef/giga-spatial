@@ -63,6 +63,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.grid.s2": ["S2Cells"],
         # processing
         "gigaspatial.processing.tif_processor": ["TifProcessor"],
+        "gigaspatial.processing.network": ["SpatialNetwork"],
         "gigaspatial.processing.geo": [
             "convert_to_geodataframe",
             "buffer_geodataframe",
@@ -132,6 +133,7 @@ if TYPE_CHECKING:
     from gigaspatial.grid.h3 import H3Hexagons
     from gigaspatial.grid.s2 import S2Cells
     from gigaspatial.processing.tif_processor import TifProcessor
+    from gigaspatial.processing.network import SpatialNetwork
     from gigaspatial.processing.geo import (
         convert_to_geodataframe,
         buffer_geodataframe,

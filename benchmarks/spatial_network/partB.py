@@ -7,7 +7,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-sys.path.insert(0, "/tmp/gs_bench")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import *  # noqa
 
 FMT = f"{ROOT}/fmt"

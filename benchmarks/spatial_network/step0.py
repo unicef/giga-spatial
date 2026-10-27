@@ -1,9 +1,16 @@
-import time, os, pickle, re, sys
+"""Step 0: build the benchmark networks from the Geofabrik Rwanda extract, without Overpass."""
+import time, os, pickle, re, sys, urllib.request
+
+ROOT = os.environ.get("GS_BENCH_DIR", "/tmp/gs_bench")
+if os.path.isdir(f"{ROOT}/pylib"):
+    sys.path.insert(0, f"{ROOT}/pylib")
 import osmium
 
-PBF = "/tmp/gs_bench/rwanda.osm.pbf"
-XML = "/tmp/gs_bench/rwanda_drive.osm"
-REPORT = "/tmp/gs_bench/out/report.md"
+PBF_URL = "https://download.geofabrik.de/africa/rwanda-latest.osm.pbf"
+PBF = f"{ROOT}/rwanda.osm.pbf"
+XML = f"{ROOT}/rwanda_drive.osm"
+REPORT = f"{ROOT}/out/report.md"
+os.makedirs(f"{ROOT}/out", exist_ok=True)
 
 EXCL_HW = set("abandoned|bridleway|bus_guideway|construction|corridor|cycleway|elevator|escalator|footway|no|path|pedestrian|planned|platform|proposed|raceway|razed|steps|track".split("|"))
 EXCL_SERVICE = set("emergency_access|parking|parking_aisle|private".split("|"))
@@ -31,6 +38,8 @@ def log(s):
 
 
 if __name__ == "__main__":
+    if not os.path.exists(PBF):
+        urllib.request.urlretrieve(PBF_URL, PBF)
     t0 = time.perf_counter()
     refs = set()
     nways = 0
@@ -64,14 +73,17 @@ if __name__ == "__main__":
     Graw = ox.graph_from_xml(XML, simplify=False, retain_all=False)
     traw = time.perf_counter() - t
     log(f"- ox.graph_from_xml(simplify=False): {traw:.2f} s -> G_large_raw {Graw.number_of_nodes():,} nodes, {Graw.number_of_edges():,} edges")
-    with open("/tmp/gs_bench/G_large_raw.pkl", "wb") as f:
+    # graph_from_xml does not set street_count, which graph_from_polygon does.
+    nx.set_node_attributes(Graw, ox.stats.count_streets_per_node(Graw), "street_count")
+    with open(f"{ROOT}/G_large_raw.pkl", "wb") as f:
         pickle.dump(Graw, f, protocol=5)
     del Graw
     t = time.perf_counter()
     G = ox.graph_from_xml(XML, simplify=True, retain_all=False)
     ts = time.perf_counter() - t
     log(f"- ox.graph_from_xml(simplify=True): {ts:.2f} s -> G_large {G.number_of_nodes():,} nodes, {G.number_of_edges():,} edges; crs={G.graph.get('crs')}")
-    with open("/tmp/gs_bench/G_large.pkl", "wb") as f:
+    nx.set_node_attributes(G, ox.stats.count_streets_per_node(G), "street_count")
+    with open(f"{ROOT}/G_large.pkl", "wb") as f:
         pickle.dump(G, f, protocol=5)
     # Kigali box
     W, S, E, N = 29.98, -2.03, 30.20, -1.89
@@ -79,7 +91,7 @@ if __name__ == "__main__":
     Gs = ox.truncate.truncate_graph_bbox(G, (W, S, E, N), truncate_by_edge=False)
     tt = time.perf_counter() - t
     log(f"- G_small = truncate_graph_bbox(Kigali {W},{S},{E},{N}): {tt:.2f} s -> {Gs.number_of_nodes():,} nodes, {Gs.number_of_edges():,} edges")
-    with open("/tmp/gs_bench/G_small.pkl", "wb") as f:
+    with open(f"{ROOT}/G_small.pkl", "wb") as f:
         pickle.dump(Gs, f, protocol=5)
     e0 = next(iter(G.edges(keys=True, data=True)))
     log(f"- sample edge attrs: {sorted(e0[3].keys())}")

@@ -13,7 +13,7 @@ import osmnx as ox
 import networkx as nx
 import scipy.sparse as sp
 
-sys.path.insert(0, "/tmp/gs_bench")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import *  # noqa
 
 LIST_ATTRS = ["osmid", "highway", "name", "lanes", "maxspeed", "reversed", "ref"]

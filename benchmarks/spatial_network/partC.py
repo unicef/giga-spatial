@@ -1,6 +1,6 @@
-import json, re, sys, urllib.request
+import json, os, re, sys, urllib.request
 
-sys.path.insert(0, "/tmp/gs_bench")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import log, table
 
 

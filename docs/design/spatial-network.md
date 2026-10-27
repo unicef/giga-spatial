@@ -25,7 +25,7 @@ This page is not in the docs site navigation. The user guide page written in sub
 | `SpatialNetwork` | `gigaspatial/processing/network.py`, possibly split into a `gigaspatial/processing/network/` package if it grows past one module |
 | `OSMRoadsFetcher` | `gigaspatial/fetchers/osm_roads.py` |
 | Public names | `from gigaspatial import SpatialNetwork, OSMRoadsFetcher`; `gigaspatial.processing.SpatialNetwork`; `gigaspatial.fetchers.OSMRoadsFetcher` |
-| Lazy registration | Add both to the `attach` dictionaries and the `TYPE_CHECKING` blocks, per ADR 0003. `tests/test_public_api.py` checks the two lists match. |
+| Lazy registration | Add both to the `attach` dictionaries and the `TYPE_CHECKING` blocks, per ADR 0003. `tests/test_public_api.py` checks the two lists match and that every exported name resolves. `SpatialNetwork` is registered in sub-task 1; `OSMRoadsFetcher` is registered in sub-task 8, when it exists. |
 
 Dependencies:
 
@@ -221,7 +221,7 @@ Deferred: isochrone polygons, centrality (available through `to_networkx()`), an
 - `edges.parquet`: GeoParquet, WKB geometry, zstd. When the geometry has been dropped, it is a plain Parquet file with no geometry column.
 - `network.json`: `{"format": "gigaspatial.spatial_network", "format_version": 1, "directed", "crs", "weight", "metadata", "library_version", "created"}`.
 
-`load(path, data_store=None)` checks `format` and `format_version`, and raises a clear error for unknown versions. Reading a subset of columns is allowed (`columns=` for edges) for users who only need the topology.
+`load(path, data_store=None)` checks `format` and `format_version`, and raises a clear error for unknown versions. pandas reads Arrow list columns such as `osmid` back as one numpy array per row, not as Python lists; `load` and the code that uses these columns must accept that. Reading a subset of columns is allowed (`columns=` for edges) for users who only need the topology.
 
 ## 8. OSMRoadsFetcher
 
@@ -251,7 +251,7 @@ How a source becomes the queried area:
 - Normalisation before building the network, which is required for saving (ADR 0005):
   - `osmid` becomes a list of int64 on every edge.
   - List-valued text attributes (`highway`, `name`, `maxspeed`, `lanes`, `ref`, and the like) become `;`-joined strings, stored as categoricals.
-  - `oneway` and `reversed` become booleans.
+  - `oneway` and `reversed` become booleans. A list of `oneway` values is true only if every value is true; a list of `reversed` values is true if any value is true. The test fixture uses the same rules (`benchmarks/spatial_network/make_fixture.py`).
 - The network is built with the column-wise extraction of `from_networkx`. The fetch parameters and the source description go into `metadata`.
 - `directed=True` is what OSM returns. Users call `to_undirected()` when they need it.
 
@@ -294,14 +294,14 @@ Each sub-task is its own chat and pull request, with tests, in this order. The f
 
 | # | Sub-task | Delivers |
 |---|---|---|
-| 1 | Scaffolding | the `[roads]` and `[pandana]` extras; `OVERPASS_URL`; lazy-import registration and the public API test; an empty `SpatialNetwork` module; benchmark scripts tidied in `benchmarks/spatial_network/`; the Kigali fixture |
+| 1 | Scaffolding | the `[roads]` and `[pandana]` extras; `OVERPASS_URL`; `SpatialNetwork` registered for import and covered by the public API test; an empty `SpatialNetwork` module; benchmark scripts tidied in `benchmarks/spatial_network/`; the Kigali fixture in `tests/data/spatial_network/kigali/` (1,209 nodes, 2,802 edges, 264 KB) |
 | 2 | Core | tables, validation, the ID-to-position mapping, constructors (`__init__`, `from_networkx`, `from_points`), accessors, `to_networkx`, `info`, caching, haversine helper |
 | 3 | Storage | `save` and `load`, and attribute normalisation (shared with the fetcher) |
 | 4 | Editing | `nearest_nodes`, filter, remove, update and add for nodes and edges, `add_weighted_edges`, `clip`, `drop_geometry`, `to_undirected`, `concat` |
 | 5 | Algorithms | `adjacency`, shortest paths, `reachable`, `nearest_by_network`, `count_within`, components, `connect_components`, MST, `to_pandana` and the pandana backend |
 | 6 | Reduction | `simplify`, `connecting_subnetwork` |
 | 7 | Insertion | `insert_points` in one batch, including `chain=True`, benchmarked against the old `merge_points_to_graph` |
-| 8 | Fetcher | `OSMRoadsFetcher`: source to area, osmnx, normalisation, `SpatialNetwork`, retries, live test |
+| 8 | Fetcher | `OSMRoadsFetcher`: source to area, osmnx, normalisation, `SpatialNetwork`, retries, live test, and its import registration |
 | 9 | Docs | user guide page, API reference pages, changelog entry, README mention |
 
 ## 12. Deferred

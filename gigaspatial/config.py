@@ -77,6 +77,12 @@ class Config(BaseSettings):
     # Used for accessing Healthsites global health facility data
     HEALTHSITES_API_KEY: str = Field(default="", alias="HEALTHSITES_API_KEY")
 
+    # Overpass API configuration
+    # Used for fetching OpenStreetMap road networks; set a mirror when the main server is down
+    OVERPASS_URL: str = Field(
+        default="https://overpass-api.de/api/interpreter", alias="OVERPASS_URL"
+    )
+
     # Snowflake configuration
     # Used for connecting to Snowflake data warehouse
     SNOWFLAKE_ACCOUNT: str = Field(default="", alias="SNOWFLAKE_ACCOUNT")
