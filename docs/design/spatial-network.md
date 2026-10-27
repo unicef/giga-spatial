@@ -199,7 +199,13 @@ This works on the undirected form of the network. The result is contracted to th
 
 ### Algorithms
 
-Every algorithm uses scipy by default. `backend="pandana"` is available where noted, and requires `[pandana]`. Directed networks respect one-way roads unless `directed=False` is passed.
+Every algorithm uses scipy by default. `backend="pandana"` is available where noted, and requires `[pandana]`. Directed networks respect one-way roads unless `directed=False` is passed. The algorithms live in `gigaspatial/processing/network/algorithms.py`, a mixin of `SpatialNetwork`.
+
+- The adjacency matrix is cached per weight and direction, together with the edge row behind each entry, so routes can be drawn along edge geometries. Its transpose (for searches towards targets) and pandana networks are cached the same way.
+- Dijkstra runs in blocks of sources of at most `CHUNK_BYTES` (256 MiB) of distances, and `shortest_path_lengths` refuses result matrices over `MAX_MATRIX_BYTES` (1 GiB). Both are module constants.
+- Weights must be present and non-negative on every edge; zero weights are allowed. scipy's minimum spanning tree drops zero-weight entries, so they are replaced by the smallest positive float for that call only.
+- pandana reports unreachable pairs as 4294967.295; the library returns `inf`. pandana stores weights with limited precision (differences of about 0.02 m on the Kigali fixture). `to_pandana` refuses node IDs that mix integers and text.
+- `connect_components` uses Borůvka's method: each round, every component finds its nearest node outside it (a KD-tree on all nodes with a growing k for small components, a KD-tree on the component's own nodes for large ones). When the network's weight is not `length`, the links get that weight equal to their length.
 
 | Method | Result |
 |---|---|

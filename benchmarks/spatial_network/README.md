@@ -26,6 +26,7 @@ Run from this folder, in order. Each script appends its tables to `$GS_BENCH_DIR
 | `core.py run <graph>` | `SpatialNetwork` construction, memory, accessors, `to_networkx`, and `from_points` against the section 9 targets. Needs `partA.py` to have written `fmt/<graph>/lean_f64`. Last run in [`results/core.md`](results/core.md). |
 | `storage.py <graph> [reps]` | `SpatialNetwork.save` and `load` against the section 9 targets, starting from raw osmnx attributes. Last run in [`results/storage.md`](results/storage.md). |
 | `editing.py <graph> [reps]` | Editing methods: `clip`, `nearest_nodes`, filters, attribute updates, `add_weighted_edges`, `to_undirected`, `concat`. Last run in [`results/editing.md`](results/editing.md). |
+| `algorithms.py <graph> [reps]` | Adjacency, shortest paths with scipy and pandana, `reachable`, `nearest_by_network`, `count_within`, components, MST, `connect_components`. Last run in [`results/algorithms.md`](results/algorithms.md). |
 | `q2_micro.py` | A synthetic road grid comparing tables and networkx, without OSM data. Set `SIDE` for the grid size. |
 | `make_fixture.py` | Builds the Kigali test fixture in `tests/data/spatial_network/kigali/` from `G_small`. |
 
