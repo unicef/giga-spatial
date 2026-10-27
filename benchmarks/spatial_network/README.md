@@ -27,8 +27,9 @@ Run from this folder, in order. Each script appends its tables to `$GS_BENCH_DIR
 | `storage.py <graph> [reps]` | `SpatialNetwork.save` and `load` against the section 9 targets, starting from raw osmnx attributes. Last run in [`results/storage.md`](results/storage.md). |
 | `editing.py <graph> [reps]` | Editing methods: `clip`, `nearest_nodes`, filters, attribute updates, `add_weighted_edges`, `to_undirected`, `concat`. Last run in [`results/editing.md`](results/editing.md). |
 | `algorithms.py <graph> [reps]` | Adjacency, shortest paths with scipy and pandana, `reachable`, `nearest_by_network`, `count_within`, components, MST, `connect_components`. Last run in [`results/algorithms.md`](results/algorithms.md). |
+| `reduction.py simplify`, `reduction.py subnetwork [reps]` | `simplify` of unsimplified Rwanda against osmnx's `simplify_graph`, and `connecting_subnetwork` with each method. Last run in [`results/reduction.md`](results/reduction.md). |
 | `q2_micro.py` | A synthetic road grid comparing tables and networkx, without OSM data. Set `SIDE` for the grid size. |
-| `make_fixture.py` | Builds the Kigali test fixture in `tests/data/spatial_network/kigali/` from `G_small`. |
+| `make_fixture.py` | Builds the Kigali test fixture in `tests/data/spatial_network/kigali/` from `G_small`. With `raw`, builds the unsimplified fixture `kigali_raw/` from `G_large_raw` and records osmnx's simplification of it. |
 
 Example:
 

@@ -4,7 +4,11 @@ Reads G_small.pkl from step0.py, crops it to central Kigali, normalises the OSM
 attributes as section 8 of docs/design/spatial-network.md describes, and writes
 tests/data/spatial_network/kigali/{nodes.parquet, edges.parquet, network.json}.
 
-Usage: GS_BENCH_DIR=/tmp/gs_bench python make_fixture.py
+Usage: GS_BENCH_DIR=/tmp/gs_bench python make_fixture.py [raw]
+
+With ``raw``, it instead cuts the same box from G_large_raw.pkl, saves it to
+tests/data/spatial_network/kigali_raw/ with SpatialNetwork.save, and records
+what osmnx's simplify_graph makes of it in kigali_raw_osmnx.json.
 """
 import datetime
 import json
@@ -110,5 +114,28 @@ def main():
     print(f"text columns: {text_columns}")
 
 
+def raw():
+    """The same box from the unsimplified network, saved with the library, and what osmnx simplifies it to."""
+    sys.path.insert(0, REPO)
+    from gigaspatial.processing.network import SpatialNetwork
+
+    with open(f"{ROOT}/G_large_raw.pkl", "rb") as f:
+        G = pickle.load(f)
+    G = ox.truncate.truncate_graph_bbox(G, BOX, truncate_by_edge=False)
+    folder = os.path.join(REPO, "tests", "data", "spatial_network", "kigali_raw")
+    SpatialNetwork.from_networkx(G).save(folder)
+    simplified = ox.simplify_graph(G)
+    expected = {
+        "nodes": sorted(int(n) for n in simplified.nodes),
+        "edges": simplified.number_of_edges(),
+        "edge_lengths": sorted(round(float(d["length"]), 6) for *_, d in simplified.edges(data=True)),
+    }
+    with open(os.path.join(REPO, "tests", "data", "spatial_network", "kigali_raw_osmnx.json"), "w") as f:
+        json.dump(expected, f)
+    size = sum(os.path.getsize(os.path.join(folder, p)) for p in os.listdir(folder)) / 1e3
+    print(f"raw: {G.number_of_nodes():,} nodes, {G.number_of_edges():,} edges, {size:.0f} KB in {folder}")
+    print(f"osmnx simplified: {len(expected['nodes']):,} nodes, {expected['edges']:,} edges")
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(raw() if sys.argv[1:] == ["raw"] else main())

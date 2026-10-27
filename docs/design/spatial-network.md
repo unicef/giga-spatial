@@ -187,7 +187,10 @@ Problems in the old `merge_points_to_graph` that must not come back:
 - Never removes nodes of kind `point` or `split`, or nodes in `keep`.
 - Joins the edges across each removed node. Columns in `sum_columns` are added up, and so are any columns the user names as weights. Geometries are joined. Text attributes are `;`-joined when they differ. `osmid` lists are concatenated. Other numeric columns take the length-weighted mean. That last rule is a default set in this spec; revisit it in the sub-task 6 pull request if it surprises anyone.
 - A two-way road stays two-way only when both directions can be joined.
-- Suggested approach: the connected components of the subgraph of removable nodes are the chains to join, which keeps the work in scipy instead of walking chains in Python.
+- Removable nodes follow osmnx's rule, with two deliberate differences. osmnx also removes nodes between duplicated parallel ways and keeps one way; here such nodes stay. osmnx deletes rings without any junction (`remove_rings=True`); here a ring keeps one node, so no road is lost. On the unsimplified Kigali fixture and on unsimplified Rwanda, the result has the same nodes, edges, and edge lengths as `ox.simplify_graph`.
+- Joined edges always get a geometry, as in osmnx, so a network without edge geometry gains a `geometry` column, missing for edges left as they were. Edges without geometry contribute their two node positions.
+- Implemented in `gigaspatial/processing/network/reduction.py` without walking chains in Python: each edge into a removable node is linked to the edge that continues it, chains are ranked by pointer jumping, and attributes are aggregated with `reduceat` per chain. Rings are found as connected components of removable nodes that touch no other node. Undirected networks run on half-edges and keep one of each mirrored chain.
+- Tests compare against `tests/data/spatial_network/kigali_raw/` (the fixture box cut from unsimplified Rwanda, 8,266 nodes and 15,652 edges) and `kigali_raw_osmnx.json`, osmnx's result for it, both made by `make_fixture.py raw`.
 
 ### `connecting_subnetwork(terminals, sources=None, method="steiner", weight=None)`
 
@@ -196,6 +199,7 @@ This works on the undirected form of the network. The result is contracted to th
 - `method="steiner"` (the default) uses Mehlhorn's 2-approximation of the Steiner tree. One multi-source Dijkstra run from the terminals (scipy `dijkstra(min_only=True, return_predecessors=True)`) finds each node's nearest terminal. Edges between different terminals' regions give candidate links. Then come an MST over the terminals, expansion of the links into paths, a second MST, and removal of leaves that are not terminals.
 - With `sources=` given, the result is the union of each terminal's shortest path to its nearest source, using one multi-source run from the sources.
 - `method="all_pairs"` is the union of shortest paths between every terminal and every node in terminals plus sources, the behaviour of the old `create_cleaned_graph`. Its cost grows with the square of the number of terminals, which is documented.
+- Paths are collected from Dijkstra predecessor arrays with a vectorized walk back to the roots, not one path at a time. The contraction is `simplify(keep=terminals and sources)` on an undirected network of the chosen edges, so lengths and geometries are joined the same way. Terminals that cannot reach the others stay as nodes without edges.
 
 ### Algorithms
 
@@ -290,7 +294,7 @@ Targets on the simplified Rwanda network unless stated. A pull request that miss
 | Conversion from an osmnx graph | under 2 s | 0.9 s column-wise; 4.0 s with `graph_to_gdfs` |
 | `shortest_path_lengths`, 100 by 1,000 | under 3 s with scipy | scipy 2.4 s; pandana 1.4 s build plus 0.19 s; networkx about 29 s |
 | `insert_points`, 10,000 points | under 10 s | the old function is measured in sub-task 7 |
-| `simplify` of unsimplified Rwanda | faster than osmnx | osmnx about 100 s inside `graph_from_xml` |
+| `simplify` of unsimplified Rwanda | faster than osmnx | osmnx `simplify_graph` 197 s; `simplify` 9.1 s, same result |
 
 ## 10. Tests and benchmarks
 

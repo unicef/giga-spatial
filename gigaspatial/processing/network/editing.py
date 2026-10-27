@@ -10,7 +10,7 @@ import shapely
 from scipy.spatial import cKDTree
 
 from gigaspatial.config import config
-from gigaspatial.processing.network._arrays import as_positions, repeated_rows
+from gigaspatial.processing.network._arrays import as_positions, next_keys, repeated_rows
 from gigaspatial.processing.network.geodesy import WGS84, chord_to_meters, meters_to_chord, unit_vectors
 from gigaspatial.processing.network.kinds import EDGE_KINDS, NODE_KINDS, as_kinds
 from gigaspatial.processing.network.points import is_wgs84, point_coordinates, points_table
@@ -341,17 +341,9 @@ class EditingMixin:
         if not self._directed:
             new_u, new_v = np.minimum(new_u, new_v), np.maximum(new_u, new_v)
             old_u, old_v = np.minimum(old_u, old_v), np.maximum(old_u, old_v)
-        existing = (
-            pd.DataFrame({"a": old_u, "b": old_v, "key": self._edges["key"].to_numpy()})
-            .groupby(["a", "b"])["key"]
-            .max()
-            .rename("base")
-        )
-        pairs = pd.DataFrame({"a": new_u, "b": new_v})
-        base = pairs.join(existing, on=["a", "b"])["base"].fillna(-1).to_numpy() + 1
-        keys = base + pairs.groupby(["a", "b"]).cumcount().to_numpy()
+        keys = next_keys(old_u, old_v, self._edges["key"].to_numpy(), new_u, new_v)
 
-        new = pd.DataFrame({"u": u, "v": v, "key": keys.astype(np.int64), weight: weights, "kind": kind})
+        new = pd.DataFrame({"u": u, "v": v, "key": keys, weight: weights, "kind": kind})
         for name, value in attributes.items():
             new[name] = value
         if weight != "length" and "length" not in new.columns:

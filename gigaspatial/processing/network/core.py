@@ -14,6 +14,7 @@ from scipy.spatial import cKDTree
 from gigaspatial.processing.network._arrays import as_positions, repeated_rows
 from gigaspatial.processing.network.algorithms import AlgorithmsMixin
 from gigaspatial.processing.network.editing import EditingMixin
+from gigaspatial.processing.network.reduction import ReductionMixin
 from gigaspatial.processing.network.geodesy import (
     WGS84,
     haversine,
@@ -27,7 +28,7 @@ from gigaspatial.processing.network.points import RESERVED_NODE_COLUMNS, is_wgs8
 _EDGE_ID_COLUMNS = ("u", "v", "key")
 
 
-class SpatialNetwork(EditingMixin, AlgorithmsMixin):
+class SpatialNetwork(EditingMixin, AlgorithmsMixin, ReductionMixin):
     """A spatial network held as a nodes table and an edges table.
 
     Nodes carry coordinates in EPSG:4326, and edges carry a length in meters

@@ -51,7 +51,8 @@ def normalize_attributes(
         textual = column.dtype == object or (
             pd.api.types.is_string_dtype(column.dtype) and not isinstance(column.dtype, pd.CategoricalDtype)
         )
-        if name in skip or (not textual and name not in int_lists):
+        listed = isinstance(column.dtype, pd.ArrowDtype) and pa.types.is_list(column.dtype.pyarrow_dtype)
+        if name in skip or (not textual and name not in int_lists) or (name in int_lists and listed):
             columns[name] = column
         else:
             columns[name] = _normalize_column(name, column, force_int_list=name in int_lists)
@@ -63,6 +64,9 @@ def _is_missing(value: Any) -> bool:
 
 
 def _normalize_column(name: str, column: pd.Series, force_int_list: bool) -> Any:
+    if force_int_list and pd.api.types.is_integer_dtype(column.dtype) and not column.isna().any():
+        offsets = pa.array(np.arange(len(column) + 1, dtype=np.int32 if len(column) < 2**31 else np.int64))
+        return pd.arrays.ArrowExtensionArray(pa.ListArray.from_arrays(offsets, pa.array(column.to_numpy(np.int64))))
     values = column.to_numpy(dtype=object)
     inferred = pd.api.types.infer_dtype(values, skipna=True)
     if not force_int_list:

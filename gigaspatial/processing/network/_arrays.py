@@ -1,6 +1,17 @@
 """Array helpers shared by the network modules."""
 
 import numpy as np
+import pandas as pd
+
+
+def next_keys(
+    old_a: np.ndarray, old_b: np.ndarray, old_key: np.ndarray, new_a: np.ndarray, new_b: np.ndarray
+) -> np.ndarray:
+    """Keys for new edges between node positions (a, b), continuing after the existing keys of each pair."""
+    existing = pd.DataFrame({"a": old_a, "b": old_b, "key": old_key}).groupby(["a", "b"])["key"].max().rename("base")
+    pairs = pd.DataFrame({"a": new_a, "b": new_b})
+    base = pairs.join(existing, on=["a", "b"])["base"].fillna(-1).to_numpy() + 1
+    return (base + pairs.groupby(["a", "b"]).cumcount().to_numpy()).astype(np.int64)
 
 
 def as_positions(positions: np.ndarray, n_nodes: int) -> np.ndarray:

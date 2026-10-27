@@ -29,6 +29,7 @@ class Graph(NamedTuple):
     matrix: csr_matrix
     entry_keys: np.ndarray
     entry_rows: np.ndarray
+    entry_weights: np.ndarray
     n: int
 
 
@@ -79,7 +80,7 @@ class AlgorithmsMixin:
         chosen = order[first]
         entry_keys = keys[chosen]
         matrix = csr_matrix((w[chosen], (entry_keys // n, entry_keys % n)), shape=(n, n))
-        return Graph(matrix, entry_keys, r[chosen], n)
+        return Graph(matrix, entry_keys, r[chosen], w[chosen], n)
 
     def _transposed(self, weight: Optional[str], directed: Optional[bool]) -> csr_matrix:
         graph = self._graph(weight, directed)
