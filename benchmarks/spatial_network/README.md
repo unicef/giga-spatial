@@ -24,6 +24,7 @@ Run from this folder, in order. Each script appends its tables to `$GS_BENCH_DIR
 | `partB.py b1 <graph>`, `conv <graph>`, `algo <graph>` | Memory of each representation, conversion costs, and routing with scipy, pandana, networkx, and igraph. |
 | `partC.py` | Package versions and wheel coverage from PyPI, and pandana's maintenance activity from GitHub. Needs the network. |
 | `core.py run <graph>` | `SpatialNetwork` construction, memory, accessors, `to_networkx`, and `from_points` against the section 9 targets. Needs `partA.py` to have written `fmt/<graph>/lean_f64`. Last run in [`results/core.md`](results/core.md). |
+| `storage.py <graph> [reps]` | `SpatialNetwork.save` and `load` against the section 9 targets, starting from raw osmnx attributes. Last run in [`results/storage.md`](results/storage.md). |
 | `q2_micro.py` | A synthetic road grid comparing tables and networkx, without OSM data. Set `SIDE` for the grid size. |
 | `make_fixture.py` | Builds the Kigali test fixture in `tests/data/spatial_network/kigali/` from `G_small`. |
 

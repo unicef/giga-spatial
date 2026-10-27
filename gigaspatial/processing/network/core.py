@@ -1,7 +1,7 @@
 """Spatial networks: places as nodes with coordinates, joined by weighted edges."""
 
 from functools import cached_property
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Union
 
 import geopandas as gpd
 import networkx as nx
@@ -223,6 +223,57 @@ class SpatialNetwork:
         elif weight != "length":
             raise ValueError(f"weight={weight!r} needs weight_func to compute it")
         return cls(nodes, edges, directed=False, weight=weight)
+
+    @classmethod
+    def load(
+        cls,
+        path: Any,
+        data_store: Optional[Any] = None,
+        columns: Optional[Iterable[str]] = None,
+    ) -> "SpatialNetwork":
+        """Load a network saved with :meth:`save`.
+
+        List attributes such as ``osmid`` come back as one numpy array per
+        edge, and text attributes as categoricals.
+
+        Args:
+            path: Folder the network was saved to.
+            data_store: Data store to read from. The local file system otherwise.
+            columns: Edge attribute columns to read, in addition to ``u``,
+                ``v``, ``key``, ``length``, ``kind``, and the weight column.
+                Include ``"geometry"`` to keep edge geometry. All columns
+                otherwise.
+
+        Raises:
+            FileNotFoundError: If there is no saved network at ``path``.
+            ValueError: If the folder was saved by a newer format version, or
+                ``columns`` names a column that was not saved.
+        """
+        from gigaspatial.processing.network.storage import load_network
+
+        return load_network(cls, path, data_store=data_store, columns=columns)
+
+    def save(self, path: Any, data_store: Optional[Any] = None) -> None:
+        """Save the network as a folder: ``nodes.parquet``, ``edges.parquet``, and ``network.json``.
+
+        Edges are GeoParquet with WKB geometry, readable by geopandas, DuckDB,
+        and QGIS; without edge geometry, ``edges.parquet`` is plain Parquet.
+        Attributes that mix lists and single values, as osmnx produces, are
+        normalised first (see ``normalize_attributes``); the network itself is
+        not changed. Existing files in the folder are overwritten.
+
+        Args:
+            path: Folder to write.
+            data_store: Data store to write to. The local file system otherwise.
+
+        Raises:
+            ValueError: If node IDs are neither integers nor text, or a column
+                cannot be stored.
+            TypeError: If the metadata is not JSON serializable.
+        """
+        from gigaspatial.processing.network.storage import save_network
+
+        save_network(self, path, data_store=data_store)
 
     # ----- basic properties
 
@@ -488,8 +539,10 @@ def _kinds(values: Any, default: str, known: Tuple[str, ...], length: int) -> pd
     if values is None:
         codes = np.full(length, known.index(default), dtype=np.int8)
         return pd.Categorical.from_codes(codes, categories=list(known))
-    values = pd.Series(values, dtype=object).fillna(default)
-    categorical = pd.Categorical(values)
+    if isinstance(getattr(values, "dtype", None), pd.CategoricalDtype) and not values.isna().any():
+        categorical = pd.Categorical(values)
+    else:
+        categorical = pd.Categorical(pd.Series(values, dtype=object).fillna(default))
     extra = [c for c in categorical.categories if c not in known]
     return categorical.set_categories(list(known) + extra)
 
@@ -632,6 +685,13 @@ def _repeated_rows(a: np.ndarray, b: np.ndarray, k: np.ndarray) -> np.ndarray:
     """Rows whose (a, b, k) appeared in an earlier row; sorting needs far less memory than hashing."""
     repeated = np.zeros(len(a), dtype=bool)
     if len(a) < 2:
+        return repeated
+    span = int(max(a.max(), b.max())) + 1
+    if span < 2**24:
+        combined = (a.astype(np.int64) * span + b) * 2**15 + k
+        order = np.argsort(combined, kind="stable")
+        sorted_combined = combined[order]
+        repeated[order[1:][sorted_combined[1:] == sorted_combined[:-1]]] = True
         return repeated
     order = np.lexsort((k, b, a))
     same = np.ones(len(a) - 1, dtype=bool)

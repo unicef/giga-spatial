@@ -218,10 +218,13 @@ Deferred: isochrone polygons, centrality (available through `to_networkx()`), an
 `save(path, data_store=None)` writes a folder through `DataStore.open(..., "wb")`, using in-memory buffers so remote data stores work:
 
 - `nodes.parquet`: plain Parquet, zstd. The `node_id` column holds the index, plus `x`, `y`, `kind`, and attributes. Categoricals are stored as dictionaries.
-- `edges.parquet`: GeoParquet, WKB geometry, zstd. When the geometry has been dropped, it is a plain Parquet file with no geometry column.
-- `network.json`: `{"format": "gigaspatial.spatial_network", "format_version": 1, "directed", "crs", "weight", "metadata", "library_version", "created"}`.
+- `edges.parquet`: GeoParquet 1.0, WKB geometry, zstd, with the file-level `geo` metadata written by the library (not through geopandas' private writer). When the geometry has been dropped, it is a plain Parquet file with no geometry column.
+- `network.json`: `{"format": "gigaspatial.spatial_network", "format_version": 1, "directed", "crs", "weight", "node_ids", "metadata", "library_version", "created"}`. It is written last, so a folder with `network.json` always holds complete tables.
+- Node IDs are stored natively when they are all integers or all text. When they mix both, as after inserting points with text IDs into an OSM network, `node_ids` is `"mixed"`: `node_id`, `u`, and `v` are stored as text and a `node_id_is_int` column restores the integers on load. An integer and a text ID with the same digits (`5` and `"5"`) cannot be saved; other ID types raise.
+- The files carry no pandas metadata, so plain `pd.read_parquet` reads them; pandas would otherwise record dtype names it cannot parse back.
+- Before writing, `normalize_attributes` (`gigaspatial/processing/network/attributes.py`) makes every attribute column storable; the network itself is not changed. The fetcher calls the same function with `int_lists=("osmid",)`.
 
-`load(path, data_store=None)` checks `format` and `format_version`, and raises a clear error for unknown versions. pandas reads Arrow list columns such as `osmid` back as one numpy array per row, not as Python lists; `load` and the code that uses these columns must accept that. Reading a subset of columns is allowed (`columns=` for edges) for users who only need the topology.
+`load(path, data_store=None, columns=None)` checks `format` and `format_version`, and raises a clear error for unknown versions. List columns such as `osmid` load as Arrow-backed columns (`pd.ArrowDtype`), so each value reads as a Python list and the column stays compact. `columns=` names edge attributes to read on top of `u`, `v`, `key`, `length`, `kind`, and the weight column; `"geometry"` is included only if it was saved. Reading a subset of columns is allowed (`columns=` for edges) for users who only need the topology.
 
 ## 8. OSMRoadsFetcher
 
@@ -248,7 +251,7 @@ How a source becomes the queried area:
 - The query is `ox.graph_from_polygon(polygon, network_type=..., simplify=..., retain_all=..., truncate_by_edge=..., custom_filter=...)`. Set `ox.settings` for the Overpass URL (`overpass_url` or `config.OVERPASS_URL`) and the timeout inside a context manager that restores the previous settings. osmnx's HTTP cache is left as the user configured it.
 - Transient failures are retried up to `max_retries` times with backoff. Errors name the Overpass URL and suggest a mirror.
 - Warn when the area is large (above about 50,000 km²): Overpass is slow at country scale and has fair-use limits, and the Geofabrik handler will be the faster route.
-- Normalisation before building the network, which is required for saving (ADR 0005):
+- Normalisation before building the network, with `normalize_attributes(edges, int_lists=("osmid",))`, so saving does not repeat it (ADR 0005):
   - `osmid` becomes a list of int64 on every edge.
   - List-valued text attributes (`highway`, `name`, `maxspeed`, `lanes`, `ref`, and the like) become `;`-joined strings, stored as categoricals.
   - `oneway` and `reversed` become booleans. A list of `oneway` values is true only if every value is true; a list of `reversed` values is true if any value is true. The test fixture uses the same rules (`benchmarks/spatial_network/make_fixture.py`).
