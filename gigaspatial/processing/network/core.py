@@ -8,25 +8,25 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import shapely
-from pyproj import CRS, Transformer
+from pyproj import Transformer
 from scipy.spatial import cKDTree
 
-from gigaspatial.processing.geo import convert_to_geodataframe, detect_coordinate_columns
+from gigaspatial.processing.network._arrays import as_positions, repeated_rows
+from gigaspatial.processing.network.editing import EditingMixin
 from gigaspatial.processing.network.geodesy import (
+    WGS84,
     haversine,
     line_lengths,
     meters_to_chord,
     unit_vectors,
 )
+from gigaspatial.processing.network.kinds import EDGE_KINDS, NODE_KINDS, as_kinds
+from gigaspatial.processing.network.points import RESERVED_NODE_COLUMNS, is_wgs84, points_table
 
-WGS84 = "EPSG:4326"
-NODE_KINDS = ("road", "point", "split")
-EDGE_KINDS = ("road", "split", "connection", "point_link", "component_link", "added")
-_RESERVED_NODE_COLUMNS = ("x", "y", "kind")
 _EDGE_ID_COLUMNS = ("u", "v", "key")
 
 
-class SpatialNetwork:
+class SpatialNetwork(EditingMixin):
     """A spatial network held as a nodes table and an edges table.
 
     Nodes carry coordinates in EPSG:4326, and edges carry a length in meters
@@ -179,7 +179,7 @@ class SpatialNetwork:
         Returns:
             The network. Nodes have kind ``"point"`` and edges ``"point_link"``.
         """
-        nodes = _points_table(points, id_column)
+        nodes = points_table(points, id_column)
         nodes.insert(2, "kind", "point")
         lat = nodes["y"].to_numpy()
         lon = nodes["x"].to_numpy()
@@ -326,8 +326,8 @@ class SpatialNetwork:
     def _edge_positions(self) -> Tuple[np.ndarray, np.ndarray]:
         index = self._nodes.index
         return (
-            _as_positions(index.get_indexer(self._edges["u"]), len(index)),
-            _as_positions(index.get_indexer(self._edges["v"]), len(index)),
+            as_positions(index.get_indexer(self._edges["u"]), len(index)),
+            as_positions(index.get_indexer(self._edges["v"]), len(index)),
         )
 
     def _positions(self, ids: Any) -> np.ndarray:
@@ -353,9 +353,13 @@ class SpatialNetwork:
     @cached_property
     def edges_gdf(self) -> gpd.GeoDataFrame:
         """Edges as a GeoDataFrame in EPSG:4326, with straight lines where geometry is missing."""
-        geometry = self._edge_geometries(fill=True)
         table = self._edges.drop(columns="geometry", errors="ignore")
-        return gpd.GeoDataFrame(table, geometry=geometry, crs=WGS84)
+        return gpd.GeoDataFrame(table, geometry=self._filled_geometries, crs=WGS84)
+
+    @cached_property
+    def _filled_geometries(self) -> np.ndarray:
+        """Edge geometries with straight lines where they are missing."""
+        return self._edge_geometries(fill=True)
 
     def _edge_geometries(self, fill: bool) -> np.ndarray:
         if "geometry" in self._edges.columns:
@@ -527,26 +531,6 @@ class SpatialNetwork:
 # ----- table preparation
 
 
-def _is_wgs84(crs: Any) -> bool:
-    return CRS.from_user_input(crs).to_epsg() == 4326
-
-
-def _as_positions(positions: np.ndarray, n_nodes: int) -> np.ndarray:
-    return positions.astype(np.int32) if n_nodes < 2**31 else positions
-
-
-def _kinds(values: Any, default: str, known: Tuple[str, ...], length: int) -> pd.Categorical:
-    if values is None:
-        codes = np.full(length, known.index(default), dtype=np.int8)
-        return pd.Categorical.from_codes(codes, categories=list(known))
-    if isinstance(getattr(values, "dtype", None), pd.CategoricalDtype) and not values.isna().any():
-        categorical = pd.Categorical(values)
-    else:
-        categorical = pd.Categorical(pd.Series(values, dtype=object).fillna(default))
-    extra = [c for c in categorical.categories if c not in known]
-    return categorical.set_categories(list(known) + extra)
-
-
 def _prepare_nodes(nodes: pd.DataFrame, crs: Any) -> pd.DataFrame:
     if not isinstance(nodes, pd.DataFrame):
         raise TypeError(f"nodes must be a DataFrame, got {type(nodes).__name__}")
@@ -578,16 +562,16 @@ def _prepare_nodes(nodes: pd.DataFrame, crs: Any) -> pd.DataFrame:
     y = table["y"].to_numpy(dtype=np.float64)
     if np.isnan(x).any() or np.isnan(y).any():
         raise ValueError("Node coordinates must not be missing")
-    if not _is_wgs84(source_crs):
+    if not is_wgs84(source_crs):
         x, y = Transformer.from_crs(source_crs, WGS84, always_xy=True).transform(x, y)
-    kinds = _kinds(table["kind"] if "kind" in table.columns else None, "road", NODE_KINDS, len(table))
+    kinds = as_kinds(table["kind"] if "kind" in table.columns else None, "road", NODE_KINDS, len(table))
 
     columns = {
         "x": np.asarray(x, dtype=np.float64),
         "y": np.asarray(y, dtype=np.float64),
         "kind": kinds,
     }
-    columns.update({c: table[c] for c in table.columns if c not in _RESERVED_NODE_COLUMNS})
+    columns.update({c: table[c] for c in table.columns if c not in RESERVED_NODE_COLUMNS})
     return pd.DataFrame(columns, index=table.index, copy=False)
 
 
@@ -626,9 +610,9 @@ def _prepare_edges(
         raise ValueError("Edge keys must be between 0 and 32767")
     key = key.astype(np.int16)
     if directed:
-        repeated = _repeated_rows(pu, pv, key)
+        repeated = repeated_rows(pu, pv, key)
     else:
-        repeated = _repeated_rows(np.minimum(pu, pv), np.maximum(pu, pv), key)
+        repeated = repeated_rows(np.minimum(pu, pv), np.maximum(pu, pv), key)
     if repeated.any():
         sample = table.loc[repeated, ["u", "v"]].head(5).values.tolist()
         raise ValueError(f"{int(repeated.sum())} edges repeat a (u, v, key), for example {sample}")
@@ -641,7 +625,7 @@ def _prepare_edges(
         if len(present):
             if not (shapely.get_type_id(geoms[present]) == 1).all():
                 raise ValueError("Edge geometries must be LineStrings")
-            if not _is_wgs84(geometry_crs):
+            if not is_wgs84(geometry_crs):
                 geoms[present] = gpd.GeoSeries(geoms[present], crs=geometry_crs).to_crs(WGS84).to_numpy()
         table["geometry"] = geoms
     else:
@@ -660,7 +644,7 @@ def _prepare_edges(
         y = nodes["y"].to_numpy()
         length[straight] = haversine(y[pu[straight]], x[pu[straight]], y[pv[straight]], x[pv[straight]])
 
-    kinds = _kinds(table["kind"] if "kind" in table.columns else None, "road", EDGE_KINDS, len(table))
+    kinds = as_kinds(table["kind"] if "kind" in table.columns else None, "road", EDGE_KINDS, len(table))
     columns = {
         "u": table["u"].to_numpy(),
         "v": table["v"].to_numpy(),
@@ -678,28 +662,7 @@ def _prepare_edges(
         raise ValueError(f"The weight column {weight!r} is not an edge column")
     if not pd.api.types.is_numeric_dtype(prepared[weight]):
         raise ValueError(f"The weight column {weight!r} must be numeric")
-    return prepared, (_as_positions(pu, len(index)), _as_positions(pv, len(index)))
-
-
-def _repeated_rows(a: np.ndarray, b: np.ndarray, k: np.ndarray) -> np.ndarray:
-    """Rows whose (a, b, k) appeared in an earlier row; sorting needs far less memory than hashing."""
-    repeated = np.zeros(len(a), dtype=bool)
-    if len(a) < 2:
-        return repeated
-    span = int(max(a.max(), b.max())) + 1
-    if span < 2**24:
-        combined = (a.astype(np.int64) * span + b) * 2**15 + k
-        order = np.argsort(combined, kind="stable")
-        sorted_combined = combined[order]
-        repeated[order[1:][sorted_combined[1:] == sorted_combined[:-1]]] = True
-        return repeated
-    order = np.lexsort((k, b, a))
-    same = np.ones(len(a) - 1, dtype=bool)
-    for column in (a, b, k):
-        sorted_column = column[order]
-        same &= sorted_column[1:] == sorted_column[:-1]
-    repeated[order[1:][same]] = True
-    return repeated
+    return prepared, (as_positions(pu, len(index)), as_positions(pv, len(index)))
 
 
 def _counts(kinds: pd.Series) -> Dict[str, int]:
@@ -733,56 +696,6 @@ def _records(table: pd.DataFrame) -> list:
 
 
 # ----- points
-
-
-def _points_table(points: Any, id_column: Optional[str] = None) -> pd.DataFrame:
-    """Points as a table indexed by node ID, with ``x``, ``y`` in EPSG:4326 and their attributes."""
-    if isinstance(points, pd.DataFrame) and not isinstance(points, gpd.GeoDataFrame):
-        if "geometry" in points.columns:
-            points = convert_to_geodataframe(points)
-        else:
-            lat_column, lon_column = detect_coordinate_columns(points)
-            y = points[lat_column].to_numpy(dtype=np.float64)
-            x = points[lon_column].to_numpy(dtype=np.float64)
-            attributes = points.drop(columns=[lat_column, lon_column])
-    if isinstance(points, gpd.GeoDataFrame):
-        gdf = points
-        if gdf.crs is not None and not _is_wgs84(gdf.crs):
-            gdf = gdf.to_crs(WGS84)
-        if not (gdf.geometry.geom_type == "Point").all():
-            raise ValueError("Points must be Point geometries")
-        x = gdf.geometry.x.to_numpy()
-        y = gdf.geometry.y.to_numpy()
-        attributes = pd.DataFrame(gdf.drop(columns=gdf.geometry.name))
-    elif not isinstance(points, pd.DataFrame):
-        items = list(points)
-        if items and all(isinstance(p, shapely.Point) for p in items):
-            x = np.array([p.x for p in items], dtype=np.float64)
-            y = np.array([p.y for p in items], dtype=np.float64)
-        else:
-            coords = np.asarray(items, dtype=np.float64).reshape(-1, 2)
-            y, x = coords[:, 0], coords[:, 1]
-        attributes = pd.DataFrame(index=pd.RangeIndex(len(x)))
-
-    if id_column is not None:
-        if id_column not in attributes.columns:
-            raise ValueError(f"id_column {id_column!r} is not a column of the points")
-        ids = pd.Index(attributes[id_column])
-        attributes = attributes.drop(columns=id_column)
-        attributes.index = ids
-    attributes.index = attributes.index.rename("node_id")
-    if not attributes.index.is_unique:
-        duplicated = list(attributes.index[attributes.index.duplicated()].unique()[:5])
-        raise ValueError(f"Point IDs must be unique; repeated: {duplicated}")
-    clash = [c for c in _RESERVED_NODE_COLUMNS if c in attributes.columns]
-    if clash:
-        raise ValueError(f"Point columns {clash} are reserved for node coordinates and kind")
-    if np.isnan(x).any() or np.isnan(y).any():
-        raise ValueError("Point coordinates must not be missing")
-    table = attributes.copy(deep=False)
-    table.insert(0, "x", x)
-    table.insert(1, "y", y)
-    return table
 
 
 def _knn_pairs(lat: np.ndarray, lon: np.ndarray, k: int) -> Tuple[np.ndarray, np.ndarray]:

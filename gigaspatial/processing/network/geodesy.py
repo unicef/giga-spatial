@@ -5,6 +5,7 @@ import pandas as pd
 import shapely
 
 EARTH_RADIUS_M = 6_371_009.0
+WGS84 = "EPSG:4326"
 
 
 def haversine(lat1, lon1, lat2, lon2) -> np.ndarray:

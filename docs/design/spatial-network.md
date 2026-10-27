@@ -125,18 +125,20 @@ Because networks never change, these caches never need to be invalidated.
 
 ### Editing
 
-Every method takes many items at once and returns a new network.
+Every method takes many items at once and returns a new network. They live in `gigaspatial/processing/network/editing.py`, a mixin of `SpatialNetwork`. Filters and attribute edits wrap their tables with `_from_tables`, passing remapped edge positions; additions (`add_nodes`, `add_weighted_edges`, `concat`) go through the validating constructor. Geometries are in EPSG:4326, or a GeoDataFrame or GeoSeries in any CRS.
 
-- `nearest_nodes(points, max_distance=None, return_distance=False)` returns the node IDs closest to coordinates. The other "by coordinates" methods build on it.
+- `nearest_nodes(points, max_distance=None, return_distance=False)` returns a Series of the node IDs closest to coordinates, indexed like the points. Points with no node within `max_distance` get a missing ID (`<NA>` for integer IDs). The other "by coordinates" methods build on it.
 - `filter_nodes(ids=None, mask=None, geometry=None, predicate="intersects")` keeps the selected nodes and the edges between them. Exactly one selector is allowed.
 - `remove_nodes(ids=None, points=None, geometry=None, max_distance=None)` removes nodes and their edges. `points` are resolved with `nearest_nodes`.
 - `set_node_attribute(name, values)` takes a scalar, an array in node order, or a Series or dict keyed by node ID.
 - `update_nodes(frame, by="id" | "coordinates", max_distance=None)` updates several attributes. With `by="coordinates"`, rows are matched to their nearest node.
-- `add_nodes(frame)` adds nodes from a points input with IDs.
-- For edges: `filter_edges(mask=None, geometry=None, predicate=...)`, `remove_edges(edges=None, mask=None)` (where `edges` are `(u, v, key)` tuples or a frame), `set_edge_attribute(name, values)`, and `update_edges(frame)` keyed by `(u, v, key)`.
-- `add_weighted_edges(u, v, weights, weight="length", kind="added", **attributes)` mirrors networkx's `add_weighted_edges_from`, but takes arrays. When `weight != "length"`, `length` is computed with haversine.
+- `add_nodes(frame, id_column=None, kind="point")` adds nodes from a points input with IDs.
+- Attribute edits keep a column's dtype when nothing is lost (an `int16` column stays `int16`), and text columns stay categorical. `x` and `y` cannot be set, and neither can `u`, `v`, and `key`.
+- For edges: `filter_edges(mask=None, geometry=None, predicate=...)` keeps every node; `remove_edges(edges=None, mask=None)`, where `edges` are `(u, v, key)` or `(u, v)` tuples or a frame, and `(u, v)` removes every parallel edge; `set_edge_attribute(name, values)`, keyed by `(u, v, key)`; and `update_edges(frame)` keyed by `(u, v, key)`. In an undirected network, `(v, u)` matches `(u, v)`.
+- `add_weighted_edges(u, v, weights, weight="length", kind="added", **attributes)` mirrors networkx's `add_weighted_edges_from`, but takes arrays. Keys continue from the edges already between each pair. When `weight != "length"`, `length` is computed with haversine.
+- Edge predicates describe the edge's relation to the area: `intersects`, `within`, `crosses`, `touches`. Node predicates are `intersects` and `within`.
 - `drop_geometry()` removes edge geometry to save memory.
-- `to_undirected()` merges reverse and parallel edges, keeping the shortest, and records `directed=False`.
+- `to_undirected(weight=None)` merges reverse and parallel edges into the one with the smallest weight (the network's weight by default), sets every key to 0, and records `directed=False`. It also collapses parallel edges of an undirected network.
 - `SpatialNetwork.concat(networks)` combines networks. Nodes with the same ID are the same node, as when separately fetched areas share boundary nodes, and the first occurrence wins. Edges are deduplicated on `(u, v, key)`. All inputs must have the same `directed` value.
 
 ### Weights
