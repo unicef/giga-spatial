@@ -33,7 +33,7 @@ from gigaspatial import OSMLocationFetcher
 clinics = OSMLocationFetcher(country="RWA", location_types=["clinic"]).fetch_locations()
 ```
 
-`MLabFetcher` queries M-Lab speed tests in BigQuery.
+`MLabFetcher` queries M-Lab speed tests in BigQuery. `OSMRoadsFetcher` returns a road network instead of records; see [Road networks](../user-guide/road-networks.md).
 
 ## Data store
 

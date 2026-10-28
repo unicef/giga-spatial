@@ -9,7 +9,7 @@ Read first:
 - [ADR 0004](../adr/0004-columnar-spatial-network.md): a spatial network is held as tables; networkx and pandana are exports; edits return a new network.
 - [ADR 0005](../adr/0005-spatial-network-storage.md): a saved network is a folder of Parquet files.
 
-This page is not in the docs site navigation. The user guide page written in sub-task 9 is the user-facing description.
+This page is not in the docs site navigation. The user-facing description is the [road networks guide](../user-guide/road-networks.md) and the [spatial networks API page](../api/network.md).
 
 ## 1. Responsibilities
 
@@ -329,6 +329,11 @@ Each sub-task is its own chat and pull request, with tests, in this order. The f
 
 ## 12. Deferred
 
-- A Geofabrik handler for country-scale road networks from `.osm.pbf` extracts, returning the same `SpatialNetwork`. This is the first follow-up: the benchmark built all of Rwanda from the extract in 300 s while every public Overpass server was down. pyosmium (`osmium`) has wheels for Python 3.10 to 3.14; pyrosm needs 3.11 or newer.
+- A Geofabrik handler for country-scale road networks from `.osm.pbf` extracts, returning the same `SpatialNetwork`. This comes next, decided on 28 October 2026:
+  - Users need both small areas and whole countries or provinces. Overpass suits the small ones; a country-scale Overpass fetch can take hours, exceed fair-use limits, and needs osmnx's networkx graph in memory (about 2.3 GB for unsimplified Rwanda).
+  - It is a separate handler, not an option on `OSMRoadsFetcher`: an extract is a file kept in a data store and reused, which the glossary calls a handler.
+  - It reads extracts with pyosmium (`osmium`), added to `giga-spatial[roads]`; pyosmium has wheels for Python 3.10 to 3.14 on macOS, Linux, and Windows (pyrosm needs 3.11 or newer). It builds the node and edge tables directly, without osmnx or networkx, and uses `simplify`. The benchmark's route through OSM XML and osmnx took 300 s for Rwanda, most of it in osmnx; pyosmium filtered the extract in 22.5 s, and `simplify` takes 9 s.
+  - Open questions for its design round: the class name; whether it returns exactly what `OSMRoadsFetcher` returns for the same area, which means reproducing osmnx's network-type filters and one-way rules; clipping to admin areas smaller than an extract; Geofabrik's split and combined countries (its `index-v1.json` lists ISO codes); and keeping stored extracts up to date.
+  - The road networks guide says country-scale networks from Geofabrik are planned.
 - Isochrone polygons, centrality measures, and travel speeds.
 - Dropping Python 3.10 (end of life in October 2026) is a library-wide decision, outside this work.

@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+-   **Road networks from OpenStreetMap (`gigaspatial/fetchers/osm_roads.py`)**
+    -   `OSMRoadsFetcher` fetches the road network of a source (a country, a geometry, a frame, or points) through osmnx and the Overpass API, and returns a `SpatialNetwork`. Points become their convex hull, bounding box, or buffers, widened by `buffer` meters. List-valued OSM attributes are normalised so the network can be saved.
+    -   Failed requests are retried with growing pauses, and the last error suggests an Overpass mirror. Areas above 50,000 km² log a warning.
+    -   New setting `OVERPASS_URL` chooses the Overpass endpoint.
+
+-   **Spatial networks (`gigaspatial/processing/network/`)**
+    -   `SpatialNetwork` holds nodes and edges as two tables, not as a networkx graph, with lengths in meters computed as osmnx does. Every edit returns a new network. Build one from a networkx or osmnx graph, from points joined to their nearest neighbours, or from tables.
+    -   `insert_points` joins points such as schools to their nearest road in one batch, splitting each road once at all of its points. On Rwanda's roads it inserts 10,000 points in 1.8 s.
+    -   Shortest path lengths and routes, nodes reachable within a distance, nearest targets by road, counts within a distance, connected components, minimum spanning trees, and links between disconnected parts, on scipy's sparse graph routines, with pandana as an optional backend.
+    -   `simplify` removes nodes that only continue a road, with the same result as osmnx and 22 times faster on unsimplified Rwanda. `connecting_subnetwork` keeps only the roads that join a set of points: a Steiner tree, each point's path to its nearest source, or the paths between every pair.
+    -   `save` and `load` store a network as a folder of Parquet files that GIS tools, DuckDB, and pandas read directly. `to_networkx` and `to_pandana` convert it for other libraries.
+
+-   **Optional extras.** `giga-spatial[roads]` installs osmnx for `OSMRoadsFetcher`. `giga-spatial[pandana]` installs pandana for `SpatialNetwork.to_pandana` and `backend="pandana"`. Both are part of `giga-spatial[all]`.
+
+### Changed
+
+-   **Source geometry shared by handlers and fetchers (`gigaspatial/handlers/base/config.py`)**
+    -   The body of `BaseHandlerConfig.extract_search_geometry` moved into the function `source_geometry`, which the method calls. Handler behaviour is unchanged.
+
+### Documentation
+
+-   A road networks guide, an API page for spatial networks, `OSMRoadsFetcher` on the fetchers page, and the list of optional extras on the installation page.
+-   Two design decisions: ADR 0004, why a spatial network is held as tables, and ADR 0005, how a saved network is laid out.
+
 ## [v0.10.1] - 2026-10-21
 
 ### Changed

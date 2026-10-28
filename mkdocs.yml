@@ -69,6 +69,7 @@ nav:
       - Points and nearest buildings: user-guide/points-and-buildings.md
       - Population around points: user-guide/population-accessibility.md
       - OSM places: user-guide/osm-places.md
+      - Road networks: user-guide/road-networks.md
       - Processing: user-guide/processing.md
       - Settlement: user-guide/settlement-characterization.md
       - Infrastructure files: user-guide/infrastructure-normalization.md
@@ -83,6 +84,7 @@ nav:
       - Boundaries: api/boundaries.md
       - Earth Engine: api/earth-engine.md
       - Processing: api/processing.md
+      - Spatial networks: api/network.md
       - Image downloaders: api/image-downloaders.md
       - Handler base: api/handler-base.md
   - Contributing:

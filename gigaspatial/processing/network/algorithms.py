@@ -234,9 +234,11 @@ class AlgorithmsMixin:
         """Shortest paths between nodes, as node sequences or lines.
 
         Args:
-            origins, destinations: Node IDs. With ``pairwise``, ``origins[i]``
-                goes to ``destinations[i]``; otherwise every origin goes to
-                every destination, origin by origin.
+            origins: Origin node IDs.
+            destinations: Destination node IDs. With ``pairwise``,
+                ``origins[i]`` goes to ``destinations[i]``; otherwise every
+                origin goes to every destination, origin by origin.
+            pairwise: Pair origins and destinations by position.
             weight: Edge column to minimise. The network's weight otherwise.
             geometry: Return routes as lines with their lengths.
             directed: ``False`` ignores one-way restrictions.

@@ -322,7 +322,8 @@ class EditingMixin:
         computed along the given ``geometry``, or between the endpoints.
 
         Args:
-            u, v: Endpoint node IDs.
+            u: Start node IDs.
+            v: End node IDs.
             weights: The weight of each edge, stored in the ``weight`` column.
             weight: Column for ``weights``.
             kind: Kind of the new edges.

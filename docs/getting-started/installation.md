@@ -22,6 +22,26 @@ pip install giga-spatial
 
 This will install the latest stable version of the package along with all its dependencies.
 
+### Optional extras
+
+Some datasets and tools need packages that most users don't. Install them with an extra, such as `pip install "giga-spatial[roads]"`, or all of them with `giga-spatial[all]`.
+
+| Extra | Adds | Used by |
+| --- | --- | --- |
+| `roads` | osmnx | `OSMRoadsFetcher`, for OpenStreetMap road networks |
+| `pandana` | pandana | `SpatialNetwork.to_pandana` and `backend="pandana"` |
+| `gee` | earthengine-api, geemap | Google Earth Engine |
+| `bq` | google-cloud-bigquery and its auth packages | `BigQueryClient`, `MLabFetcher` |
+| `azure` | azure-storage-blob | `ADLSDataStore` |
+| `snowflake` | snowflake-connector-python | `SnowflakeDataStore` |
+| `delta` | delta-sharing | `DeltaSharingDataStore` |
+| `db` | SQLAlchemy, trino, dask | `DBConnection` |
+| `duckdb` | duckdb | `OvertureAmenityFetcher` |
+| `unicef` | unicefdata | `UnicefDataFetcher` |
+| `elevation` | itur | Refractivity in `gigaspatial.processing.elevation` |
+| `maxar` | OWSLib | `MaxarImageDownloader` |
+| `hdx` | hdx-python-api | `HDXHandler` |
+
 ## Installing from Source
 
 If you need to install a specific version or want to contribute to the development, you can install from the source:
