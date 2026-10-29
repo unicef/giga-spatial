@@ -9,7 +9,7 @@ Read first:
 - [ADR 0004](../adr/0004-columnar-spatial-network.md): a spatial network is held as tables; networkx and pandana are exports; edits return a new network.
 - [ADR 0005](../adr/0005-spatial-network-storage.md): a saved network is a folder of Parquet files.
 
-This page is not in the docs site navigation. The user-facing description is the [road networks guide](../user-guide/road-networks.md) and the [spatial networks API page](../api/network.md).
+This page is not in the docs site navigation. The user-facing description is the [road networks guide](../user-guide/road-networks.md) and the [spatial networks API page](../api/network.md). Why each part was built the way it was, with the benchmarks behind it, is in [design and algorithm decisions](spatial-networks-decisions.md).
 
 ## 1. Responsibilities
 

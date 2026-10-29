@@ -11,7 +11,7 @@ Read first:
 - [ADR 0006](../adr/0006-osm-extract-storage.md): extracts stored by date, uncropped networks beside them, cropping at load.
 - [ADR 0007](../adr/0007-osm-extract-choice.md): extracts chosen by polygon, with a curated list of multi-country extracts.
 
-This page is not in the docs site navigation.
+This page is not in the docs site navigation. Why each part was built the way it was, with the benchmarks behind it, is in [design and algorithm decisions](spatial-networks-decisions.md).
 
 ## 1. Why a handler
 
