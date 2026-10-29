@@ -5,7 +5,7 @@
 | Step | Writes | From |
 |---|---|---|
 | `index` | `geofabrik_index_subset.json`: the extracts the tests use, with their polygons. `geofabrik_index_nogeom.json`: every extract, without polygons, for the test of the curated multi-country list. | Geofabrik's `index-v1.json`, at `$GS_GEOFABRIK_INDEX` (default `/tmp/gs_geofabrik/index-v1.json`; downloaded when missing) |
-| `pbf` | `kigali.osm.pbf`: every highway way touching central Kigali, with all of its nodes and tags; `kigali.json` records its source and data date | `$GS_BENCH_DIR/rwanda.osm.pbf`, from `../spatial_network/step0.py` |
+| `pbf` | `kigali.osm.pbf`: every highway way touching central Kigali, with all of its nodes and tags, and Rwanda's replication timestamp in its header so it stands in for an extract; `kigali.json` records its source and data date | `$GS_BENCH_DIR/rwanda.osm.pbf`, from `../spatial_network/step0.py` |
 | `osmnx` | `kigali_osmnx/<network type>-<simplified or raw>/`: osmnx's own network for `kigali.osm.pbf`, saved with `SpatialNetwork.save` | `kigali.osm.pbf` |
 
 osmnx's `graph_from_xml` builds every way in a file, so the `osmnx` step first keeps the ways that pass the filter osmnx sends to Overpass for that network type (`osmnx._overpass._get_network_filter`), evaluated with Overpass's rules: a bare key must be present, and a `!~` pattern is an unanchored regular expression that a way without the key passes. `street_count` comes from the unsimplified graph, as in `graph_from_polygon`, and `ox.simplify_graph` runs with its defaults.

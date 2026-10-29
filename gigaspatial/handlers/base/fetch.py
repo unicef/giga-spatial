@@ -5,6 +5,7 @@ a zip archive into it, and selecting the tiles of a grid that a geometry hits.
 The download helpers raise on any failure and leave no partial file behind,
 which is the contract `BaseHandlerDownloader.download_data_unit` expects.
 """
+import hashlib
 import re
 import tempfile
 import zipfile
@@ -55,6 +56,7 @@ def stream_to_store(
     show_progress: bool = False,
     desc: Optional[str] = None,
     timeout: float = TIMEOUT,
+    md5: Optional[str] = None,
 ) -> Path:
     """
     Download a URL into a file of the data store.
@@ -68,6 +70,7 @@ def stream_to_store(
         show_progress: If True, shows a byte progress bar.
         desc: Progress bar label; defaults to the file name.
         timeout: Seconds to wait for the server between bytes.
+        md5: Expected MD5 hex digest of the body, checked while streaming.
 
     Returns:
         The stored path.
@@ -75,17 +78,29 @@ def stream_to_store(
     Raises:
         requests.RequestException: If the request fails. A partially written
             file is removed.
+        ValueError: If the body does not match ``md5``. The file is removed.
     """
     path = Path(path)
+    digest = hashlib.md5() if md5 else None
     try:
         with store.open(str(path), "wb") as file:
+
+            def write(chunk):
+                file.write(chunk)
+                if digest is not None:
+                    digest.update(chunk)
+
             _stream(
                 url,
-                file.write,
+                write,
                 session=session,
                 show_progress=show_progress,
                 desc=desc or path.name,
                 timeout=timeout,
+            )
+        if digest is not None and digest.hexdigest() != md5.lower():
+            raise ValueError(
+                f"{url} does not match its checksum: MD5 {digest.hexdigest()}, expected {md5}"
             )
     except BaseException:
         if store.file_exists(str(path)):

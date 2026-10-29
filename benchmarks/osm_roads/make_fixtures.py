@@ -78,8 +78,9 @@ def pbf():
     source = f"{ROOT}/rwanda.osm.pbf"
     west, south, east, north = BOX
     out = OUT / "kigali.osm.pbf"
+    cut = OUT / "kigali.cut.osm.pbf"
     OUT.mkdir(parents=True, exist_ok=True)
-    writer = osmium.BackReferenceWriter(str(out), ref_src=source, overwrite=True, remove_tags=False)
+    writer = osmium.BackReferenceWriter(str(cut), ref_src=source, overwrite=True, remove_tags=False)
     ways = 0
     entities = osmium.osm.NODE | osmium.osm.WAY
     processor = osmium.FileProcessor(source, entities).with_locations().with_filter(osmium.filter.KeyFilter("highway"))
@@ -90,8 +91,17 @@ def pbf():
             writer.add_way(way)
             ways += 1
     writer.close()
-    header = osmium.io.Reader(source, osmium.osm.NOTHING).header()
-    stamp = header.get("osmosis_replication_timestamp")
+    # BackReferenceWriter writes no header; the handler reads an extract's date from it.
+    reader = osmium.io.Reader(source, osmium.osm.NOTHING)
+    stamp = reader.header().get("osmosis_replication_timestamp")
+    reader.close()
+    header = osmium.io.Header()
+    header.set("osmosis_replication_timestamp", stamp)
+    header.add_box(osmium.osm.Box(osmium.osm.Location(west, south), osmium.osm.Location(east, north)))
+    with osmium.SimpleWriter(str(out), header=header, overwrite=True) as final:
+        for entity in osmium.FileProcessor(str(cut)):
+            final.add(entity)
+    cut.unlink()
     with open(OUT / "kigali.json", "w") as f:
         json.dump({"source": os.path.basename(source), "replication_timestamp": stamp, "bbox": list(BOX), "highway_ways": ways}, f, indent=2)
     print(f"kigali.osm.pbf: {ways:,} highway ways, {out.stat().st_size / 1e3:.0f} KB, data as of {stamp}")

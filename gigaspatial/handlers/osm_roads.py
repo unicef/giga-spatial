@@ -14,11 +14,13 @@ import dataclasses
 import datetime
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pycountry
+import requests
 import shapely
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
@@ -35,10 +37,13 @@ from gigaspatial.handlers.base import (
     ResolveOptions,
 )
 from gigaspatial.handlers.base.config import source_geometry
-from gigaspatial.handlers.base.fetch import stream_to_store
+from gigaspatial.handlers.base.fetch import TIMEOUT, stream_to_store
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 GEOFABRIK_URL = "https://download.geofabrik.de"
+LATEST = "-latest.osm.pbf"
+# An extract's header block sits in its first bytes, so its timestamp is read without the rest.
+HEADER_BYTES = 64 * 1024
 
 # Extracts holding more than one country, which a country source must be cropped from.
 # Several carry one ISO code or none in Geofabrik's index; tested against a stored copy of it.
@@ -77,11 +82,14 @@ class OSMRoadsResolveOptions(ResolveOptions):
         regions: For a country source, use the country's sub-region extracts
             instead of its country extract.
         extracts: Geofabrik extract IDs to use, overriding the choice.
-        date: Use the extracts stored on this date (``YYYY-MM-DD``), instead
-            of the newest stored ones.
-        refresh: Download today's extracts even when stored ones exist.
-        max_age_days: Download again when the stored extract is older than
-            this many days. Never, by default.
+        date: Use the extracts of this date (``YYYY-MM-DD``), stored or
+            downloaded, instead of the newest stored ones. Geofabrik keeps
+            daily files for about a week, then those of the 1st of each
+            month and of January 1st.
+        refresh: Use Geofabrik's latest extracts even when older ones are
+            stored, and download Geofabrik's index again.
+        max_age_days: Use Geofabrik's latest extracts when the newest stored
+            one is older than this many days. Never, by default.
         buffer: Meters around point and line sources.
         area: How points become an area: ``"hull"``, ``"bbox"``, or ``"buffers"``.
     """
@@ -98,6 +106,14 @@ class OSMRoadsResolveOptions(ResolveOptions):
         # Resolve options key the unit cache, so a list of extracts becomes a tuple.
         if self.extracts is not None and not isinstance(self.extracts, tuple):
             object.__setattr__(self, "extracts", tuple(self.extracts))
+        if self.date is not None:
+            try:
+                date = self.date if isinstance(self.date, datetime.date) else datetime.date.fromisoformat(self.date)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"date must be YYYY-MM-DD, got {self.date!r}") from error
+            object.__setattr__(self, "date", date.isoformat())
+            if self.refresh or self.max_age_days is not None:
+                raise ValueError("date= pins the extracts' date; refresh and max_age_days choose the newest")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -179,12 +195,16 @@ class OSMRoadsConfig(BaseHandlerConfig):
             options: The extract choice options.
 
         Returns:
-            Data units ``{"id", "url", "path", "matches_country"}``, one per
-            extract. ``matches_country`` is true when the extract is the
-            country's own file or one of its regions, so it needs no crop.
+            Data units ``{"id", "date", "url", "path", "matches_country"}``,
+            one per extract. ``date`` is the extract's date (see
+            ``choose_date``) and ``url`` its dated file. ``matches_country``
+            is true when the extract is the country's own file or one of its
+            regions, so it needs no crop.
 
         Raises:
             ValueError: If a named extract is unknown, or no extract covers the area.
+            requests.RequestException: If Geofabrik is needed for the latest
+                date and cannot be reached.
         """
         index = self.geofabrik_index(options)
         country = search_key.get("country")
@@ -204,8 +224,72 @@ class OSMRoadsConfig(BaseHandlerConfig):
                 area = source_geometry(country, "EPSG:4326")
             chosen = index.cover(area)
         matching = set(regions) | ({own} if own else set())
-        self.logger.info(f"Geofabrik extracts: {', '.join(chosen)}")
-        return [index.unit(extract, matches_country=extract in matching) for extract in chosen]
+        units = []
+        for extract in chosen:
+            unit = index.unit(extract, matches_country=extract in matching)
+            date = self.choose_date(unit, options)
+            units.append({**unit, "date": date, "url": _dated_url(unit["url"], date)})
+        self.logger.info("Geofabrik extracts: " + ", ".join(f"{u['id']} ({u['date']})" for u in units))
+        return units
+
+    def get_data_unit_path(self, unit: dict, options: Optional[OSMRoadsResolveOptions] = None) -> Path:
+        """An extract's stored file: ``base_path / date / path.osm.pbf``, as in ``2026-10-27/africa/rwanda.osm.pbf``."""
+        return self.base_path / unit["date"] / f"{unit['path']}.osm.pbf"
+
+    def choose_date(self, unit: dict, options: OSMRoadsResolveOptions) -> str:
+        """
+        The date of the extract to use, as ``YYYY-MM-DD``.
+
+        ``date=`` when given; otherwise the newest stored date, unless
+        ``refresh`` is set or that date is more than ``max_age_days`` old, in
+        which case Geofabrik's latest. Geofabrik is asked only then; if it
+        cannot be reached when ``max_age_days`` asked, the stored extract is
+        used with a warning.
+        """
+        if options.date:
+            return options.date
+        stored = self.stored_dates(unit["path"])
+        newest = stored[-1] if stored else None
+        if newest is None or options.refresh:
+            return self.latest_date(unit["url"])
+        if options.max_age_days is None or _age_days(newest) <= options.max_age_days:
+            return newest
+        try:
+            return self.latest_date(unit["url"])
+        except requests.RequestException as error:
+            self.logger.warning(f"Cannot reach Geofabrik ({error}); using {unit['id']} of {newest}")
+            return newest
+
+    def stored_dates(self, path: str) -> List[str]:
+        """The dates an extract is stored for, oldest first; ``path`` is its Geofabrik path, such as ``africa/rwanda``."""
+        if not self.data_store.is_dir(str(self.base_path)):
+            return []
+        dates = [Path(name).name for name in self.data_store.list_directories(str(self.base_path))]
+        return sorted(
+            date
+            for date in dates
+            if _ISO_DATE.fullmatch(date) and self.data_store.file_exists(str(self.base_path / date / f"{path}.osm.pbf"))
+        )
+
+    def latest_date(self, url: str) -> str:
+        """
+        The date of Geofabrik's latest file for an extract, from its ``-latest`` URL.
+
+        ``-latest`` redirects to the dated file, except for large extracts
+        that redirect to a mirror under the same name; their date is that of
+        the extract's replication state.
+        """
+        response = requests.head(url, allow_redirects=False, timeout=TIMEOUT)
+        response.raise_for_status()
+        match = _DATED_NAME.search(response.headers.get("location", ""))
+        if match:
+            return _iso_date(match.group(1))
+        state = requests.get(url[: -len(LATEST)] + "-updates/state.txt", timeout=TIMEOUT)
+        state.raise_for_status()
+        match = re.search(r"^timestamp=(\d{4}-\d{2}-\d{2})", state.text, re.MULTILINE)
+        if not match:
+            raise ValueError(f"Cannot tell the date of {url}: no dated redirect or replication timestamp")
+        return match.group(1)
 
     def geofabrik_index(self, options: Optional[OSMRoadsResolveOptions] = None) -> "GeofabrikIndex":
         """
@@ -329,12 +413,69 @@ class GeofabrikIndex:
         return {"id": extract, "url": url, "path": _extract_path(url), "matches_country": matches_country}
 
 
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_DATED_NAME = re.compile(r"-(\d{6})\.osm\.pbf$")
+
+
 def _extract_path(url: str) -> str:
     """An extract's path in Geofabrik's folders, such as ``africa/rwanda``."""
     from urllib.parse import urlparse
 
     path = urlparse(url).path.lstrip("/")
-    return path[: -len("-latest.osm.pbf")] if path.endswith("-latest.osm.pbf") else path
+    return path[: -len(LATEST)] if path.endswith(LATEST) else path
+
+
+def _dated_url(latest_url: str, date: str) -> str:
+    """The dated file for a ``-latest`` URL: ``rwanda-latest.osm.pbf`` of 2026-10-27 is ``rwanda-261027.osm.pbf``."""
+    stamp = datetime.date.fromisoformat(date).strftime("%y%m%d")
+    return f"{latest_url[: -len(LATEST)]}-{stamp}.osm.pbf"
+
+
+def _iso_date(yymmdd: str) -> str:
+    return datetime.datetime.strptime(yymmdd, "%y%m%d").date().isoformat()
+
+
+def _age_days(date: str) -> int:
+    return (datetime.datetime.now(datetime.timezone.utc).date() - datetime.date.fromisoformat(date)).days
+
+
+def replication_timestamp(path: Union[str, Path], data_store: Optional[DataStore] = None) -> Optional[datetime.datetime]:
+    """
+    The time an extract's data was taken from OpenStreetMap, from its header.
+
+    Reads only the file's first bytes, so it works offline and on remote data
+    stores. The UTC date of this timestamp is the extract's date.
+
+    Args:
+        path: A stored ``.osm.pbf`` file.
+        data_store: The store holding it; a local one by default.
+
+    Returns:
+        The timestamp, in UTC, or None if the header has none.
+    """
+    osmium = _import_osmium()
+    from gigaspatial.core.io.local_data_store import LocalDataStore
+
+    with (data_store or LocalDataStore()).open(str(path), "rb") as file:
+        head = file.read(HEADER_BYTES)
+    reader = osmium.io.Reader(osmium.io.FileBuffer(head, "pbf"), osmium.osm.osm_entity_bits.NOTHING)
+    try:
+        stamp = reader.header().get("osmosis_replication_timestamp")
+    finally:
+        reader.close()
+    if not stamp:
+        return None
+    return datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def _import_osmium():
+    try:
+        import osmium
+    except ImportError as error:
+        raise ImportError(
+            "OSMRoadsHandler requires 'osmium' (pyosmium). Install it with: pip install 'giga-spatial[roads]'"
+        ) from error
+    return osmium
 
 
 def _read_stamp(data_store: DataStore, path: Path) -> Optional[datetime.datetime]:
@@ -355,16 +496,42 @@ class OSMRoadsDownloader(BaseHandlerDownloader):
 
     def download_data_unit(self, unit: dict, options: DownloadOptions) -> Path:
         """
-        Download one extract.
+        Download one extract's dated file, checked against Geofabrik's ``.md5``.
 
         Args:
-            unit: ``{"id", "url", "date"}``.
+            unit: A unit from ``OSMRoadsConfig.get_relevant_data_units``.
             options: The download options.
 
         Returns:
             The stored ``.osm.pbf`` path.
+
+        Raises:
+            FileNotFoundError: If Geofabrik no longer keeps the extract of that date.
+            ValueError: If the download does not match its checksum; nothing is stored.
+            requests.RequestException: If the download fails; nothing is stored.
         """
-        raise NotImplementedError("OSMRoadsDownloader.download_data_unit is not implemented yet")
+        path = self.config.get_data_unit_path(unit)
+        url = unit["url"]
+        try:
+            checksum = requests.get(f"{url}.md5", timeout=TIMEOUT)
+            checksum.raise_for_status()
+            self.logger.info(f"Downloading {unit['id']} of {unit['date']} from {url}")
+            stream_to_store(
+                url,
+                path,
+                self.data_store,
+                show_progress=options.show_progress,
+                desc=f"{unit['id']} {unit['date']}",
+                md5=checksum.text.split()[0],
+            )
+        except requests.HTTPError as error:
+            if error.response is not None and error.response.status_code == 404:
+                raise FileNotFoundError(
+                    f"Geofabrik no longer keeps {unit['id']} of {unit['date']} ({url}). Daily files are "
+                    "kept for about a week, then those of the 1st of each month and of January 1st."
+                ) from error
+            raise
+        return path
 
 
 class OSMRoadsReader(BaseHandlerReader):

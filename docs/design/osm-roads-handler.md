@@ -62,16 +62,19 @@ osm/geofabrik/2026-10-27/south-america/brazil/nordeste.osm.pbf
 osm/geofabrik/2026-10-27/south-america/brazil/nordeste.networks/drive_service-simplified/
 ```
 
-- The date folder is the extract's own date as an ISO date; below it, the path mirrors Geofabrik's URL path.
-- The data unit is `{id, url, date}`; its stored path is the `.pbf`. The base's availability check covers the `.pbf` only.
+- The date folder is the extract's own date as an ISO date; below it, the path mirrors Geofabrik's URL path. The date is the one in Geofabrik's dated file name (`rwanda-261027.osm.pbf`), which is the UTC date of the replication timestamp in the file's header and in the extract's `-updates/state.txt`.
+- The data unit is `{id, date, url, path, matches_country}`, with `url` the dated file; its stored path is the `.pbf`. The base's availability check covers the `.pbf` only.
 - Network folders are a cache the reader derives from the `.pbf` path, one per variant: the network type or a short hash of the tag filter, and `simplified` or `raw`. A missing network is built from the extract and saved; it never triggers a download.
 - A stored network always covers its whole extract, with every connected part. It is never cropped.
 - Loading uses the newest stored date holding the extract, unless `date=` pins one. Old dates are never deleted automatically.
 
 ## 6. Downloads
 
-- Resolve `-latest` to the dated file name, stream it into the data store with `fetch.stream_to_store`, and verify it against Geofabrik's `.md5`.
-- `refresh=False` (default) reuses the stored extract; `refresh=True` downloads today's file; `max_age_days=None` (default) never refreshes automatically, and a number refreshes extracts older than that.
+- The unit's date is chosen at resolution, so the downloader and the availability check need no options: `date=` when given; otherwise the newest stored date, found offline by listing the date folders; otherwise, or with `refresh`, or when the newest is more than `max_age_days` old, Geofabrik's latest.
+- Geofabrik's latest date comes from a `HEAD` of `-latest` without following the redirect: the `Location` names the dated file. Large extracts (Germany) redirect to a mirror under the `-latest` name; their date is read from `-updates/state.txt`. When `max_age_days` asks and Geofabrik cannot be reached, the stored extract is used with a warning; `refresh` raises.
+- The download is always the dated file from Geofabrik, which also serves the files it mirrors. It is streamed into the data store with `fetch.stream_to_store`, which checks the dated file's `.md5` while streaming and removes the file on a mismatch, so a remote store is never read back. A dated file Geofabrik no longer keeps (404) raises `FileNotFoundError` saying how long files are kept.
+- `date=` takes `YYYY-MM-DD` or a `datetime.date`, and cannot be combined with `refresh` or `max_age_days`.
+- `replication_timestamp(path, data_store)` reads the header from the file's first 64 KiB through pyosmium's `FileBuffer`, so it works offline and on remote stores.
 - The network's metadata records the extract's ID, date, URL, and replication timestamp. Reproducing an old result needs the stored extract, since Geofabrik deletes daily files after about a week; the docs say so.
 
 ## 7. Building a network from an extract

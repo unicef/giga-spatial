@@ -4,10 +4,8 @@ import types
 from pathlib import Path
 
 import pytest
-import shapely
 from shapely.geometry import Point, box
 
-import gigaspatial.handlers.osm_roads as osm_roads
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.handlers.osm_roads import (
     CODE_FIXES,
@@ -20,23 +18,9 @@ from gigaspatial.handlers.osm_roads import (
 
 DATA = Path(__file__).resolve().parents[2] / "data" / "osm_roads"
 SUBSET = DATA / "geofabrik_index_subset.json"
+INDEX_URL = "https://download.geofabrik.de/index-v1.json"
 GAZA = box(34.3, 31.3, 34.5, 31.5)
 SINGAPORE = box(103.7, 1.25, 103.95, 1.45)
-
-
-@pytest.fixture
-def downloads(monkeypatch):
-    """Geofabrik downloads replaced by the index subset; returns the downloaded URLs."""
-    urls = []
-
-    def fake_stream(url, path, store, **kwargs):
-        urls.append(url)
-        with store.open(str(path), "wb") as f:
-            f.write(SUBSET.read_bytes())
-        return path
-
-    monkeypatch.setattr(osm_roads, "stream_to_store", fake_stream)
-    return urls
 
 
 @pytest.fixture
@@ -56,11 +40,6 @@ def boundaries(monkeypatch):
     return asked
 
 
-@pytest.fixture
-def config(tmp_path, downloads):
-    return OSMRoadsConfig(data_store=LocalDataStore(tmp_path), base_path=Path("osm/geofabrik"))
-
-
 @pytest.fixture(scope="module")
 def index():
     return GeofabrikIndex(json.loads(SUBSET.read_text()))
@@ -73,27 +52,30 @@ def ids(units):
 # ----- storing the index
 
 
-def test_index_is_downloaded_once_and_stored(config, downloads, tmp_path):
+def test_index_is_downloaded_once_and_stored(config, geofabrik, tmp_path):
     config.geofabrik_index()
     config.geofabrik_index()
-    assert downloads == ["https://download.geofabrik.de/index-v1.json"]
+    assert geofabrik.asked() == [INDEX_URL]
     assert (tmp_path / "osm/geofabrik/index-v1.json").is_file()
     stamp = (tmp_path / "osm/geofabrik/index-v1.json.downloaded").read_text()
     assert datetime.datetime.fromisoformat(stamp).tzinfo is not None
     again = OSMRoadsConfig(data_store=LocalDataStore(tmp_path), base_path=Path("osm/geofabrik"))
-    assert "rwanda" in again.geofabrik_index().ids and len(downloads) == 1
+    assert "rwanda" in again.geofabrik_index().ids and geofabrik.asked() == [INDEX_URL]
 
 
-def test_refresh_and_max_age(config, downloads, tmp_path):
+def test_refresh_and_max_age(config, geofabrik, tmp_path):
+    def downloads():
+        return geofabrik.asked().count(INDEX_URL)
+
     config.geofabrik_index()
     config.geofabrik_index(OSMRoadsResolveOptions(refresh=True))
-    assert len(downloads) == 2
+    assert downloads() == 2
     config.geofabrik_index(OSMRoadsResolveOptions(max_age_days=30))
-    assert len(downloads) == 2
+    assert downloads() == 2
     old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=40)
     (tmp_path / "osm/geofabrik/index-v1.json.downloaded").write_text(old.isoformat())
     config.geofabrik_index(OSMRoadsResolveOptions(max_age_days=30))
-    assert len(downloads) == 3
+    assert downloads() == 3
 
 
 # ----- the index
@@ -212,7 +194,7 @@ def test_extracts_option_is_hashable():
     assert options.extracts == ("rwanda", "uganda") and hash(options)
 
 
-def test_unknown_country_and_handler_entry(tmp_path, downloads):
+def test_unknown_country_and_handler_entry(tmp_path, geofabrik):
     handler = OSMRoadsHandler(data_store=LocalDataStore(tmp_path), base_path=Path("osm/geofabrik"))
     assert ids(handler.config.get_relevant_data_units("Rwanda")) == ["rwanda"]
     with pytest.raises(ValueError, match="Unknown country"):
