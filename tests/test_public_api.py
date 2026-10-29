@@ -24,6 +24,7 @@ LAZY_PACKAGES = [
     "gigaspatial",
     "gigaspatial.handlers",
     "gigaspatial.fetchers",
+    "gigaspatial.fetchers.osm",
     "gigaspatial.processing.elevation",
 ]
 
@@ -58,6 +59,17 @@ def test_unknown_attribute_raises_attribute_error():
 def test_removed_aliases_are_gone(alias):
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(alias)
+
+
+def test_the_old_osm_fetcher_path_still_works_without_loading_roads():
+    code = (
+        "import sys; from gigaspatial.fetchers.osm import OSMLocationFetcher; "
+        "import gigaspatial.fetchers.osm.pois as pois; "
+        "assert OSMLocationFetcher is pois.OSMLocationFetcher; "
+        "print('gigaspatial.fetchers.osm.roads' in sys.modules)"
+    )
+    result = subprocess.run([sys.executable, "-W", "ignore", "-c", code], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "False"
 
 
 def test_bare_import_does_not_load_optional_or_heavy_dependencies():

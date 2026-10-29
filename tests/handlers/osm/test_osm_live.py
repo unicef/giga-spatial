@@ -30,7 +30,7 @@ def test_live_handler_matches_the_fetcher(tmp_path):
     pytest.importorskip("osmnx")
     from shapely.geometry import box
 
-    from gigaspatial.fetchers.osm_roads import OSMRoadsFetcher
+    from gigaspatial.fetchers.osm.roads import OSMRoadsFetcher
 
     area = box(30.055, -1.960, 30.075, -1.940)
     handler = OSMRoadsHandler(data_store=LocalDataStore(tmp_path), base_path=Path("osm/geofabrik"))

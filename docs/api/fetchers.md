@@ -11,7 +11,7 @@ from gigaspatial.fetchers import MLabConfig, GEEConfig
 
 ## OpenStreetMap
 
-::: gigaspatial.fetchers.osm.OSMLocationFetcher
+::: gigaspatial.fetchers.osm.pois.OSMLocationFetcher
     options:
       show_source: false
       members:
@@ -21,7 +21,7 @@ from gigaspatial.fetchers import MLabConfig, GEEConfig
 
 `OSMRoadsFetcher` returns a road network rather than records: a [`SpatialNetwork`](network.md). It needs `pip install "giga-spatial[roads]"`, and the [road networks guide](../user-guide/road-networks.md) says which area sizes suit Overpass.
 
-::: gigaspatial.fetchers.osm_roads.OSMRoadsFetcher
+::: gigaspatial.fetchers.osm.roads.OSMRoadsFetcher
     options:
       show_source: false
       members:
