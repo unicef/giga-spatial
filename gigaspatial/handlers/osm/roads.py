@@ -15,6 +15,7 @@ Choosing extracts is in ``geofabrik``, and building a network from one in
 import contextlib
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import shutil
@@ -22,8 +23,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
+import numpy as np
+import pandas as pd
 import pycountry
 import requests
+import shapely
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
@@ -39,9 +43,9 @@ from gigaspatial.handlers.base import (
     ReadOptions,
     ResolveOptions,
 )
-from gigaspatial.handlers.base.config import source_geometry
 from gigaspatial.handlers.base.fetch import TIMEOUT, stream_to_store
-from gigaspatial.handlers.base.source import SourceKind, classify_source
+from gigaspatial.handlers.base.options import sort_options
+from gigaspatial.handlers.base.source import SourceKind, classify_source, is_path_source
 from gigaspatial.handlers.osm.geofabrik import (
     EXTRACT_SUFFIX,
     GEOFABRIK_URL,
@@ -51,7 +55,13 @@ from gigaspatial.handlers.osm.geofabrik import (
     dated_url,
     latest_date,
 )
-from gigaspatial.handlers.osm.pbf import build_road_network
+from gigaspatial.handlers.osm.pbf import (
+    BUILD_VERSION,
+    build_road_network,
+    combine_road_networks,
+    simplify_road_network,
+    with_metadata,
+)
 from gigaspatial.processing.network import SpatialNetwork
 
 
@@ -160,9 +170,23 @@ class OSMRoadsConfig(BaseHandlerConfig):
                 return {"country": pycountry.countries.lookup(source).alpha_2}
             except LookupError as error:
                 raise ValueError(f"Unknown country: {source}") from error
+        return {"area": self.source_area(source, options)}
+
+    def source_area(self, source, options: Optional[OSMRoadsResolveOptions] = None):
+        """
+        The area roads are wanted for, in EPSG:4326, built as ``OSMRoadsFetcher`` builds it.
+
+        A country is its boundary (the base's search geometry), a geometry is
+        used as given, a frame of polygons is their union, and points and
+        lines become their hull, bounding box, or buffers, widened by
+        ``buffer`` meters.
+        """
         from gigaspatial.fetchers.osm_roads import query_area
 
-        return {"area": query_area(source, buffer=options.buffer, area=options.area, logger=self.logger)}
+        options = options or OSMRoadsResolveOptions()
+        if classify_source(source) is SourceKind.COUNTRY:
+            return self._search_geometry(source, options)
+        return query_area(source, buffer=options.buffer, area=options.area, logger=self.logger)
 
     def get_relevant_data_units_by_key(self, search_key: Dict[str, Any], options: OSMRoadsResolveOptions) -> List[dict]:
         """
@@ -204,7 +228,7 @@ class OSMRoadsConfig(BaseHandlerConfig):
         else:
             area = search_key.get("area")
             if area is None:
-                area = source_geometry(country, "EPSG:4326")
+                area = self._search_geometry(country, options)
             chosen = index.cover(area)
         matching = set(regions) | ({own} if own else set())
         units = []
@@ -307,6 +331,14 @@ class OSMRoadsConfig(BaseHandlerConfig):
         return cached
 
 
+def _variant(options: "OSMRoadsReadOptions") -> str:
+    """A network variant's name: the network type, or ``tags-`` and a hash of the tags filter."""
+    if options.tags is None:
+        return options.network_type
+    canonical = json.dumps({k: None if v is None else sorted(v) for k, v in options.tags.items()}, sort_keys=True)
+    return "tags-" + hashlib.sha1(canonical.encode()).hexdigest()[:10]
+
+
 def _age_days(date: str) -> int:
     return (datetime.datetime.now(datetime.timezone.utc).date() - datetime.date.fromisoformat(date)).days
 
@@ -382,23 +414,161 @@ class OSMRoadsDownloader(BaseHandlerDownloader):
 
 
 class OSMRoadsReader(BaseHandlerReader):
-    """Builds or loads the road network of each stored extract and combines them for a source."""
+    """
+    Builds or loads the road network of each stored extract and combines them for a source.
+
+    Each extract's networks are saved beside it, one folder per variant, as
+    ``rwanda.networks/drive_service-simplified/``; a missing one is built from
+    the extract and saved, never downloaded. A stored network covers its whole
+    extract with every connected part (ADR 0006). Loading for a source then
+    follows ``osmnx.graph_from_polygon``: keep the raw network's nodes in the
+    source's area, simplify, and keep the largest connected part.
+    """
 
     options_type = OSMRoadsReadOptions
     config_type = OSMRoadsConfig
 
-    def load_from_paths(self, source_data_path: List[Union[str, Path]], options: OSMRoadsReadOptions):
+    def load(self, source, crop_to_source: bool = True, **kwargs) -> Optional[SpatialNetwork]:
         """
-        Load the road networks of stored extracts.
+        The road network of a source.
+
+        The network is cropped to the source's area, as ``OSMRoadsFetcher``
+        builds it, except for path sources, and for a country source whose
+        extracts are all its own file or its regions (ADR 0007), which are
+        used whole.
+
+        Args:
+            source: Country, geometry, frame, points, or paths of stored
+                ``.osm.pbf`` files or saved network folders.
+            crop_to_source: Crop to the source's area. True by default.
+            **kwargs: Resolve and read options.
+
+        Returns:
+            A directed ``SpatialNetwork``, or None when no extract is resolved.
+
+        Raises:
+            TypeError: If a keyword is neither a resolve nor a read option.
+            ValueError: If the area has no matching roads.
+        """
+        resolve, read = sort_options(kwargs, self.config, self, entry="load")
+        if is_path_source(source):
+            return self.load_from_paths([str(p) for p in self.resolve_by_paths(source)], read)
+        units = self.config._resolve_units(source, resolve)
+        if not units:
+            self.logger.warning("No extract matches the source")
+            return None
+        paths = [str(self.config.get_data_unit_path(unit, resolve)) for unit in units]
+        whole_country = classify_source(source) is SourceKind.COUNTRY and all(u["matches_country"] for u in units)
+        if not crop_to_source or whole_country:
+            if crop_to_source:
+                self.logger.info("The extracts are the country's own files: not cropped")
+            return self.load_from_paths(paths, read)
+        area = self.config.source_area(source, resolve)
+        parts, counted = [], []
+        for path in paths:
+            whole = self.stored_network(path, read, simplified=False)
+            part = self.crop_to_geometry(whole, area, truncate_by_edge=read.truncate_by_edge)
+            parts.append(part)
+            if len(paths) > 1:
+                edges = whole.edges
+                touching = edges["u"].isin(part.node_index) | edges["v"].isin(part.node_index)
+                counted.append(edges.loc[np.asarray(touching), ["u", "v", "osmid", "reversed"]])
+        network = self._finish(parts, read, combine_raw=True, counted_edges=pd.concat(counted) if counted else None)
+        return with_metadata(
+            network,
+            load={**network.metadata.get("load", {}), "cropped": True, "area_bounds": [float(v) for v in area.bounds]},
+        )
+
+    def load_from_paths(self, source_data_path: List[Union[str, Path]], options: OSMRoadsReadOptions) -> SpatialNetwork:
+        """
+        The road networks of stored extracts or saved network folders, combined.
+
+        A network folder is loaded as it is. An extract's network is its
+        stored variant, built when missing; several extracts' raw networks
+        are combined before simplifying, so roads crossing between them are
+        joined once. The largest connected part is kept unless ``retain_all``.
 
         Args:
             source_data_path: Stored ``.osm.pbf`` paths, or saved network folders.
             options: The network options.
 
         Returns:
-            A ``SpatialNetwork``.
+            A directed ``SpatialNetwork``.
         """
-        raise NotImplementedError("OSMRoadsReader.load_from_paths is not implemented yet")
+        extracts = [p for p in source_data_path if str(p).endswith(EXTRACT_SUFFIX)]
+        folders = [p for p in source_data_path if not str(p).endswith(EXTRACT_SUFFIX)]
+        networks = [SpatialNetwork.load(folder, data_store=self.data_store) for folder in folders]
+        if not extracts:
+            return networks[0] if len(networks) == 1 else SpatialNetwork.concat(networks)
+        if len(extracts) == 1:
+            parts = [self.stored_network(extracts[0], options, simplified=options.simplify)]
+            network = self._finish(parts, options, combine_raw=False)
+        else:
+            parts = [self.stored_network(path, options, simplified=False) for path in extracts]
+            network = self._finish(parts, options, combine_raw=True)
+        network = with_metadata(network, load={**network.metadata.get("load", {}), "cropped": False})
+        return SpatialNetwork.concat([network, *networks]) if networks else network
+
+    def crop_to_geometry(self, data, geometry, truncate_by_edge: bool = False, **kwargs):
+        """
+        Keep a network's nodes in an area and the edges between them, as osmnx's ``truncate_graph_polygon`` does.
+
+        Args:
+            data: A ``SpatialNetwork``; anything else is cropped as the base does.
+            geometry: The area.
+            truncate_by_edge: Also keep the nodes just outside that share an
+                edge with a node inside.
+            **kwargs: ``crs`` of the area, EPSG:4326 by default.
+        """
+        if not isinstance(data, SpatialNetwork):
+            return super().crop_to_geometry(data, geometry, **kwargs)
+        crs = kwargs.get("crs", "EPSG:4326")
+        if crs and str(crs).upper() != "EPSG:4326":
+            import geopandas as gpd
+
+            geometry = gpd.GeoSeries([geometry], crs=crs).to_crs("EPSG:4326").iloc[0]
+        shapely.prepare(geometry)
+        nodes = data.nodes
+        inside = shapely.intersects_xy(geometry, nodes["x"].to_numpy(), nodes["y"].to_numpy())
+        if truncate_by_edge:
+            pu, pv = data._edge_positions
+            touching = inside[pu] | inside[pv]
+            inside[pu[touching]] = True
+            inside[pv[touching]] = True
+        return data.filter_nodes(mask=inside)
+
+    def stored_network(self, path: Union[str, Path], options: OSMRoadsReadOptions, simplified: bool) -> SpatialNetwork:
+        """
+        The saved network of a stored extract for these options, built and saved first when missing.
+
+        Building reads the extract once for its raw network and simplifies
+        that, saving both. A network saved by an older build is built again.
+        """
+        folder = self.network_folder(path, options, simplified)
+        if self._is_current(folder):
+            return SpatialNetwork.load(folder, data_store=self.data_store)
+        raw_folder = self.network_folder(path, options, simplified=False)
+        if self._is_current(raw_folder):
+            raw = SpatialNetwork.load(raw_folder, data_store=self.data_store)
+        else:
+            raw = self.build_network(path, dataclasses.replace(options, simplify=False))
+            raw.save(raw_folder, data_store=self.data_store)
+        if not simplified:
+            return raw
+        network = simplify_road_network(raw)
+        network.save(folder, data_store=self.data_store)
+        return network
+
+    def network_folder(self, path: Union[str, Path], options: OSMRoadsReadOptions, simplified: bool) -> Path:
+        """
+        Where an extract's network variant is saved: ``rwanda.networks/drive_service-simplified`` beside ``rwanda.osm.pbf``.
+
+        The variant is the network type, or ``tags-`` and a hash of a
+        ``tags`` filter, then ``simplified`` or ``raw``.
+        """
+        path = Path(path)
+        name = path.name[: -len(EXTRACT_SUFFIX)] if path.name.endswith(EXTRACT_SUFFIX) else path.stem
+        return path.parent / f"{name}.networks" / f"{_variant(options)}-{'simplified' if simplified else 'raw'}"
 
     def build_network(
         self, path: Union[str, Path], options: Optional[OSMRoadsReadOptions] = None
@@ -408,6 +578,7 @@ class OSMRoadsReader(BaseHandlerReader):
 
         The network covers the whole extract, with every connected part
         (ADR 0006); cropping and keeping the largest part happen at load.
+        A remote data store's extract is read from a local copy.
 
         Args:
             path: A stored ``.osm.pbf`` file.
@@ -428,6 +599,34 @@ class OSMRoadsReader(BaseHandlerReader):
                 extract=self.config.extract_of_path(path),
                 logger=self.logger,
             )
+
+    def _is_current(self, folder: Path) -> bool:
+        manifest = folder / "network.json"
+        if not self.data_store.file_exists(str(manifest)):
+            return False
+        saved = json.loads(self.data_store.read_file(str(manifest), encoding="utf-8"))
+        version = saved.get("metadata", {}).get("build", {}).get("version")
+        if version != BUILD_VERSION:
+            self.logger.info(f"Rebuilding {folder}: saved by build {version}, now {BUILD_VERSION}")
+            return False
+        return True
+
+    def _finish(
+        self,
+        parts: List[SpatialNetwork],
+        options: OSMRoadsReadOptions,
+        combine_raw: bool,
+        counted_edges: Optional[pd.DataFrame] = None,
+    ) -> SpatialNetwork:
+        """Combine raw networks and simplify them, then keep the largest connected part unless ``retain_all``."""
+        network = parts[0] if len(parts) == 1 else combine_road_networks(parts, counted_edges)
+        if len(network.nodes) == 0:
+            raise ValueError(f"No {options.tags or options.network_type} roads in the area")
+        if combine_raw and options.simplify:
+            network = simplify_road_network(network)
+        if not options.retain_all:
+            network = network.largest_component()
+        return with_metadata(network, load={"retain_all": options.retain_all, "truncate_by_edge": options.truncate_by_edge})
 
 
 class OSMRoadsHandler(BaseHandler):

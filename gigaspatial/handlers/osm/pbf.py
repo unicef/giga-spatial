@@ -29,6 +29,7 @@ from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.processing.network import SpatialNetwork
+from gigaspatial.processing.network.attributes import normalize_attributes
 from gigaspatial.processing.network.geodesy import haversine
 
 # osmnx 2.0.2 settings.useful_tags_way and useful_tags_node.
@@ -121,6 +122,10 @@ NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
 
 # A file's header block sits in its first bytes, so its timestamp is read without the rest.
 HEADER_BYTES = 64 * 1024
+# Raised when the builder's output changes, so networks stored by an older build are built again.
+BUILD_VERSION = 1
+# A way crossing between extracts is in each of them; these columns tell that its edges are the same.
+_SAME_EDGE = ["u", "v", "osmid", "reversed"]
 # The in-memory index takes about 16 bytes per node in the file; above this
 # extract size (Nigeria is 680 MiB, about 2 GB of index) it moves to disk.
 IN_MEMORY_INDEX_MAX_BYTES = 1 << 30
@@ -244,9 +249,10 @@ def build_road_network(
         "extract": {**described, **(extract or {}), "replication_timestamp": stamp},
         "build": {
             "builder": "OSMRoadsHandler",
+            "version": BUILD_VERSION,
             "network_type": None if tags is not None else network_type,
             "tags": None if tags is None else {k: None if v is None else list(v) for k, v in tags.items()},
-            "simplified": bool(simplify),
+            "simplified": False,
             "retain_all": True,
             "node_index": index.split(",", 1)[0],
             "pyosmium": _osmium_version(),
@@ -256,7 +262,7 @@ def build_road_network(
     network = _assemble(ways, bidirectional, built)
     raw_size = (len(network.nodes), len(network.edges))
     if simplify:
-        network = network.simplify()
+        network = simplify_road_network(network)
     logger.info(
         f"Built {network_type if tags is None else 'tagged'} roads of {path.name}: {raw_size[0]:,} nodes and "
         f"{raw_size[1]:,} edges"
@@ -264,6 +270,62 @@ def build_road_network(
         + f", in {time.perf_counter() - started:.1f} s"
     )
     return network
+
+
+def combine_road_networks(
+    networks: Sequence[SpatialNetwork], counted_edges: Optional[pd.DataFrame] = None
+) -> SpatialNetwork:
+    """
+    Raw road networks of overlapping extracts as one, as if built from one file.
+
+    Extracts share the ways that cross between them, with the same node and
+    way IDs. A node is kept once, and an edge once per ``(u, v)``, way, and
+    direction; parallel edges are keyed again in way order, and
+    ``street_count`` is counted again, as osmnx would for the combined ways.
+
+    Args:
+        networks: Unsimplified networks from ``build_road_network``.
+        counted_edges: The edges to count streets from (``u``, ``v``,
+            ``osmid``, ``reversed``), for networks already cropped: osmnx
+            counts streets before cropping. The combined edges otherwise.
+
+    Returns:
+        The combined network; its metadata lists each part's ``extract``.
+    """
+    nodes = pd.concat([n.nodes for n in networks])
+    nodes = normalize_attributes(nodes[~nodes.index.duplicated(keep="first")], skip=("x", "y", "kind"))
+    edges = pd.concat([n.edges for n in networks], ignore_index=True)
+    edges = edges[~edges.duplicated(subset=_SAME_EDGE, keep="first")]
+    edges = normalize_attributes(edges, skip=("u", "v", "key", "length", "kind", "osmid", "geometry"))
+    edges = edges.iloc[np.argsort(edges["osmid"].to_numpy(), kind="stable")].reset_index(drop=True)
+    pu = nodes.index.get_indexer(edges["u"])
+    pv = nodes.index.get_indexer(edges["v"])
+    edges["key"] = _insertion_keys(pu, pv, len(nodes))
+    nodes = nodes.copy()
+    nodes["street_count"] = _street_counts_of(nodes.index, edges if counted_edges is None else counted_edges)
+    first = networks[0].metadata
+    metadata = {
+        "extracts": [n.metadata.get("extract") for n in networks],
+        "build": {**first.get("build", {}), "simplified": False},
+    }
+    return SpatialNetwork(nodes, edges, directed=True, metadata=metadata)
+
+
+def simplify_road_network(network: SpatialNetwork) -> SpatialNetwork:
+    """``network.simplify()``, with ``metadata["build"]["simplified"]`` set."""
+    return with_metadata(network.simplify(), build={**network.metadata.get("build", {}), "simplified": True})
+
+
+def with_metadata(network: SpatialNetwork, **changes: Any) -> SpatialNetwork:
+    """The same network with some metadata entries replaced."""
+    return SpatialNetwork._from_tables(
+        network._nodes,
+        network._edges,
+        directed=network.directed,
+        weight=network.weight,
+        metadata={**network.metadata, **changes},
+        positions=network._edge_positions,
+    )
 
 
 class _Ways:
@@ -403,6 +465,16 @@ def _insertion_keys(pu: np.ndarray, pv: np.ndarray, n_nodes: int) -> np.ndarray:
     key = np.empty(len(pair), dtype=np.int16)
     key[order] = np.arange(len(pair)) - first
     return key
+
+
+def _street_counts_of(node_ids: pd.Index, edges: pd.DataFrame) -> np.ndarray:
+    """``street_count`` of ``node_ids`` from edges of one or more extracts, a way counted once."""
+    edges = edges[~edges.duplicated(subset=_SAME_EDGE, keep="first")]
+    edges = edges.iloc[np.argsort(edges["osmid"].to_numpy(), kind="stable")]
+    ends = pd.Index(np.unique(np.concatenate([edges["u"].to_numpy(), edges["v"].to_numpy(), node_ids.to_numpy()])))
+    pu, pv = ends.get_indexer(edges["u"]), ends.get_indexer(edges["v"])
+    counts = _street_counts(pu, pv, _insertion_keys(pu, pv, len(ends)), len(ends))
+    return counts[ends.get_indexer(node_ids)]
 
 
 def _street_counts(pu: np.ndarray, pv: np.ndarray, key: np.ndarray, n_nodes: int) -> np.ndarray:

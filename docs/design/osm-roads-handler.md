@@ -107,15 +107,28 @@ osmnx rules to reproduce exactly (osmnx 2.0.2):
 
 ## 8. Loading for a source
 
-`OSMRoadsHandler.load_data(source)` returns a `SpatialNetwork`; `crop_to_source` defaults to `True`. For each chosen extract, load or build its network, then:
+`OSMRoadsHandler.load_data(source)` returns a `SpatialNetwork`; `crop_to_source` defaults to `True`. A cropped load gives what `osmnx.graph_from_polygon` gives for the same area, in its order (tested against osmnx on the Kigali extract, with and without `truncate_by_edge`, `simplify`, and `retain_all`):
 
-1. Clip to the source's area, with the fetcher's rules: a country's boundary, a geometry as given, a frame's union, or points as hull, bounding box, or buffers widened by `buffer` meters; nodes inside the area are kept, and with `truncate_by_edge`, edges with one end inside. **No crop** when the source is a country and the extract is its own file or one of its sub-region files (ADR 0007), accepting small leftovers across borders as ADR 0001 does. A country's boundary geometry as the source gives an exact crop.
-2. Keep the largest connected part, unless `retain_all=True`.
-3. Combine several extracts with `concat`.
+1. Clip each extract's **raw** network to the source's area, with the fetcher's rules (`OSMRoadsConfig.source_area`, sharing the fetcher's `query_area`): a country's boundary, a geometry as given, a frame's union, or points as hull, bounding box, or buffers widened by `buffer` meters. Nodes in the area are kept, and with `truncate_by_edge`, nodes outside with a neighbour inside, as osmnx's `truncate_graph_polygon` does.
+2. Combine several extracts as if they were one file (`pbf.combine_road_networks`): a way in several extracts is kept once, parallel edges are keyed again in way order, and `street_count` is counted again from every edge touching a kept node in the whole extracts, since osmnx counts streets before cropping. `SpatialNetwork.concat` would key parallel edges by whichever extract came first.
+3. Simplify, then keep the largest connected part unless `retain_all=True`.
 
-- The reader overrides `crop_to_geometry` to clip the network; the base's version returns unknown types uncropped without a warning. `units_match_country` stays `False`, because the no-crop decision depends on the extract.
+Simplifying before clipping would lose the stub of a simplified edge whose ends lie outside the area; clipping the raw network costs about 1 s for Rwanda's 4.6 million edges.
+
+**No crop** when the source is a country and every extract is its own file or one of its sub-region files (ADR 0007), accepting small leftovers across borders as ADR 0001 does. A single extract then uses its stored simplified network; several are combined raw and simplified. A country's boundary geometry as the source gives an exact crop. `crop_to_source=False` uses whole extracts for any source.
+
+- The decision needs the source and its units together, which the base's crop does not get, so `OSMRoadsReader.load` overrides the public entry (changing `crop_to_source`'s default to `True`, as the contract allows) and `units_match_country` stays `False`. `crop_to_geometry` clips a network; anything else goes to the base's version.
+- Network folders are named by variant: the network type, or `tags-` and a hash of the `tags` filter, then `-simplified` or `-raw`. Building reads the extract once for its raw network and simplifies that, saving both; a stored raw network is simplified without reading the extract again. A network saved by an older `BUILD_VERSION` of the builder is built again.
 - pyosmium cannot read Python file objects. With a remote data store, the reader copies the extract to a local temporary file, reads it, and deletes it; a `LocalDataStore` path is read in place. Built networks are saved back to the data store.
-- Path sources: a `.pbf` path loads that extract through the network cache; a network folder path loads that network as it is.
+- Path sources: a `.pbf` path loads that extract through its network folders, with the largest part unless `retain_all`; a network folder path loads that network as it is. The handler's availability check treats every path as a file, so a folder path source needs sub-task 6 (or `ensure_available=False`).
+- Metadata records the extract (or `extracts`, for several), the build, and the load: `cropped`, `area_bounds`, `retain_all`, `truncate_by_edge`.
+
+| Rwanda (`benchmarks/osm_roads/load_rwanda.py`) | Time |
+|---|---|
+| Four school points, first load (builds the raw network) | 10.7 s |
+| Four school points; a 30 × 22 km box around Kigali | 1.1 s; 1.5 s |
+| The country, first load (simplifies the stored raw network) | 8.3 s |
+| The country | 0.44 s |
 
 Parameters, matching the fetcher where they overlap: `network_type="drive_service"`, `tags=None`, `simplify=True`, `retain_all=False`, `truncate_by_edge=False`, `buffer=2000`, `area="hull"`, `regions=False`, `extracts=None`, `date=None`, `refresh=False`, `max_age_days=None`, `node_index=None`.
 
@@ -125,7 +138,7 @@ Parameters, matching the fetcher where they overlap: `network_type="drive_servic
 |---|---|
 | Build Rwanda's network from its extract | under 30 s (osmnx route: 300 s); `drive_service` 15.4 s |
 | Nigeria (680 MiB) on a 16 GB machine | fits in memory with the default index |
-| Load a stored network | under 1 s for Rwanda (ADR 0005 load: 0.48 s) |
+| Load a stored network | under 1 s for Rwanda (ADR 0005 load: 0.48 s); the country 0.44 s, a cropped area about 1 s |
 | Extracts over 1 GiB | use the disk-backed index automatically |
 
 ## 10. Tests and fixtures

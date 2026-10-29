@@ -2,10 +2,7 @@ import re
 import shutil
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import pytest
-import shapely
 
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.handlers.osm.pbf import (
@@ -28,48 +25,12 @@ RECORDED = ["drive_service-raw", "drive_service-simplified", "drive-simplified",
 # ----- the same network as osmnx
 
 
-def _parts(value):
-    return None if pd.isna(value) else frozenset(str(value).split(";"))
-
-
-def assert_same_network(ours: SpatialNetwork, theirs: SpatialNetwork, exact_lengths: bool):
-    """Same nodes and attributes, same (u, v, key) edges and attributes; text compared as sets of ';' parts."""
-    on, tn = ours.nodes, theirs.nodes.loc[ours.nodes.index]
-    assert set(on.index) == set(theirs.nodes.index)
-    assert set(on.columns) == set(tn.columns)
-    assert np.array_equal(on["x"], tn["x"]) and np.array_equal(on["y"], tn["y"])
-    assert np.array_equal(on["street_count"], tn["street_count"])
-    for name in set(on.columns) - {"x", "y", "kind", "street_count"}:
-        assert on[name].astype(object).fillna("-").tolist() == tn[name].astype(object).fillna("-").tolist(), name
-
-    oe = ours.edges.set_index(["u", "v", "key"])
-    te = theirs.edges.set_index(["u", "v", "key"])
-    assert oe.index.is_unique and set(oe.index) == set(te.index)
-    te = te.loc[oe.index]
-    assert set(oe.columns) == set(te.columns)
-    if exact_lengths:
-        assert np.array_equal(oe["length"], te["length"])
-    else:
-        assert oe["length"].to_numpy() == pytest.approx(te["length"].to_numpy(), abs=1e-9)
-    for name in ("oneway", "reversed"):
-        assert np.array_equal(oe[name], te[name]), name
-    osmids = [frozenset(np.atleast_1d(v).tolist()) for v in oe["osmid"]]
-    assert osmids == [frozenset(np.atleast_1d(v).tolist()) for v in te["osmid"]]
-    if "geometry" in te.columns:
-        ours_geometry, their_geometry = oe["geometry"].to_numpy(), te["geometry"].to_numpy()
-        assert np.array_equal(pd.isna(ours_geometry), pd.isna(their_geometry))
-        present = ~pd.isna(their_geometry)
-        assert shapely.equals_exact(ours_geometry[present], their_geometry[present], 0).all()
-    for name in set(oe.columns) - {"length", "kind", "oneway", "reversed", "osmid", "geometry"}:
-        assert [_parts(v) for v in oe[name]] == [_parts(v) for v in te[name]], name
-
-
 @pytest.mark.parametrize("name", RECORDED)
-def test_kigali_matches_osmnx(name):
+def test_kigali_matches_osmnx(name, same_network):
     network_type, variant = name.rsplit("-", 1)
     ours = build_road_network(KIGALI, network_type=network_type, simplify=variant == "simplified")
     theirs = SpatialNetwork.load(DATA / "kigali_osmnx" / name)
-    assert_same_network(ours, theirs, exact_lengths=variant == "raw")
+    same_network(ours, theirs, exact_lengths=variant == "raw")
 
 
 def test_filters_are_osmnx_filters():
@@ -164,7 +125,7 @@ def test_one_way_rules(tmp_path):
 
 
 @pytest.mark.parametrize("network_type, bidirectional", [("all", False), ("walk", True)])
-def test_made_up_extract_matches_osmnx(tmp_path, network_type, bidirectional):
+def test_made_up_extract_matches_osmnx(tmp_path, network_type, bidirectional, same_network):
     ox = pytest.importorskip("osmnx")
     path = write_extract(tmp_path / "x.osm.pbf")
     xml = tmp_path / "x.osm"
@@ -177,7 +138,7 @@ def test_made_up_extract_matches_osmnx(tmp_path, network_type, bidirectional):
     theirs = SpatialNetwork.from_networkx(graph)
     theirs = SpatialNetwork(theirs.nodes, theirs.edges.drop(columns=["surface"], errors="ignore"))
     ours = build_road_network(path, network_type=network_type, simplify=False)
-    assert_same_network(ours, theirs, exact_lengths=True)
+    same_network(ours, theirs, exact_lengths=True)
 
 
 def test_ways_with_missing_nodes_are_skipped(tmp_path):
@@ -204,11 +165,11 @@ def test_node_index_by_size():
         node_index_for(10, "fast")
 
 
-def test_disk_index_gives_the_same_network():
+def test_disk_index_gives_the_same_network(same_network):
     in_memory = build_road_network(KIGALI, simplify=False)
     on_disk = build_road_network(KIGALI, simplify=False, node_index="sparse_file_array")
     assert on_disk.metadata["build"]["node_index"] == "sparse_file_array"
-    assert_same_network(on_disk, in_memory, exact_lengths=True)
+    same_network(on_disk, in_memory, exact_lengths=True)
 
 
 # ----- metadata

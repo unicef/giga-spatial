@@ -22,3 +22,5 @@ PYTHONPATH=/tmp/gs_geofabrik/pylib:../.. python make_fixtures.py
 ```bash
 PYTHONPATH=/tmp/gs_geofabrik/pylib:../.. python build_rwanda.py drive_service walk
 ```
+
+`load_rwanda.py` times `OSMRoadsReader.load` on Rwanda's stored extract for school points, a box, and the country, first while the networks are built and saved, then from the saved networks. Results are in section 8 of the design.
