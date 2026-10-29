@@ -106,38 +106,43 @@ class AlgorithmsMixin:
     # ----- pandana
 
     def to_pandana(self, weight: Optional[str] = None):
-        """A pandana network with ``twoway`` set to whether the network is undirected.
+        """A pandana network indexed by node ID, with ``twoway`` set to whether the network is undirected.
 
         Built once per weight and cached. Needs ``pip install 'giga-spatial[pandana]'``.
+        ``backend="pandana"`` does not need it: it works on any network.
 
         Raises:
             ValueError: If node IDs mix integers and text, which pandana cannot index.
         """
-        return self._pandana(weight, twoway=not self._directed)
+        if pd.api.types.infer_dtype(self._nodes.index, skipna=False) not in ("integer", "string"):
+            raise ValueError(
+                "pandana needs node IDs that are all integers or all text. backend='pandana' works on any "
+                "network; for pandana's own functions, give inserted points integer IDs"
+            )
+        return self._pandana(weight, twoway=not self._directed, by_position=False)
 
-    def _pandana(self, weight: Optional[str], twoway: bool):
+    def _pandana(self, weight: Optional[str], twoway: bool, by_position: bool):
+        """pandana's network, indexed by node ID, or by position for the backend, which any node IDs allow."""
         weight = weight or self._weight
         cache = self.__dict__.setdefault("_pandana_cache", {})
-        if (weight, twoway) in cache:
-            return cache[(weight, twoway)]
+        if (weight, twoway, by_position) in cache:
+            return cache[(weight, twoway, by_position)]
         try:
             import pandana
         except ImportError as error:
             raise ImportError(
                 "The pandana backend requires 'pandana'. Install it with: pip install 'giga-spatial[pandana]'"
             ) from error
-        if pd.api.types.infer_dtype(self._nodes.index, skipna=False) not in ("integer", "string"):
-            raise ValueError("pandana needs node IDs that are all integers or all text")
         values = self._edge_weights(weight)
-        network = pandana.Network(
-            self._nodes["x"],
-            self._nodes["y"],
-            self._edges["u"],
-            self._edges["v"],
-            pd.DataFrame({weight: values}),
-            twoway=twoway,
-        )
-        cache[(weight, twoway)] = network
+        if by_position:
+            pu, pv = self._edge_positions
+            x = pd.Series(self._nodes["x"].to_numpy())
+            y = pd.Series(self._nodes["y"].to_numpy())
+            u, v = pd.Series(pu.astype(np.int64)), pd.Series(pv.astype(np.int64))
+        else:
+            x, y, u, v = self._nodes["x"], self._nodes["y"], self._edges["u"], self._edges["v"]
+        network = pandana.Network(x, y, u, v, pd.DataFrame({weight: values}), twoway=twoway)
+        cache[(weight, twoway, by_position)] = network
         return network
 
     # ----- shortest paths
@@ -212,13 +217,14 @@ class AlgorithmsMixin:
 
     def _pandana_lengths(self, origin, target, pairwise, weight, directed) -> np.ndarray:
         twoway = not (self._directed and (directed is None or directed))
-        network = self._pandana(weight, twoway)
-        ids = self._nodes.index
+        network = self._pandana(weight, twoway, by_position=True)
         if pairwise:
             a, b = origin, target
         else:
             a, b = np.repeat(origin, len(target)), np.tile(target, len(origin))
-        values = np.asarray(network.shortest_path_lengths(list(ids.take(a)), list(ids.take(b))), dtype=np.float64)
+        values = np.asarray(
+            network.shortest_path_lengths(a.astype(np.int64).tolist(), b.astype(np.int64).tolist()), dtype=np.float64
+        )
         values[values >= _PANDANA_UNREACHABLE] = np.inf
         return values if pairwise else values.reshape(len(origin), len(target))
 
