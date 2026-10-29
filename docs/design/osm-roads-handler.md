@@ -42,12 +42,14 @@ The handler follows the handler contract: the config's only required hook is `ge
 
 ## 4. Choosing extracts (ADR 0007)
 
-- The index is downloaded once and stored at `osm/geofabrik/index-v1.json`, refreshed with the same `refresh` and `max_age_days` options as extracts.
-- For a source's area, choose the smallest extract whose polygon covers it. A source that needs more than one extract, such as an area crossing a border, loads each and combines them with `concat`.
-- A country's ISO code is a fast path: when exactly one extract carries that one code and the extract is not on the multi-country list, it is the country's own file.
-- The curated list of multi-country extracts lives in the module and is tested against a stored copy of the index.
-- Continent extracts are used only when named with `extracts=`.
-- `regions=False` (default): a country source uses the country file. `regions=True`: it uses all of the country's sub-region files, each built and saved on its own and combined at load. `extracts=[...]` names Geofabrik extract IDs directly and overrides the choice.
+- The index is downloaded once and stored at `osm/geofabrik/index-v1.json`, with its download time in `index-v1.json.downloaded`, refreshed with the same `refresh` and `max_age_days` options as extracts.
+- The search key is `{"country": "RW"}` for a country source and `{"area": polygon}` otherwise; the area is built by the fetcher's `query_area`, so `buffer` and `area` mean the same in both.
+- For a source's area, choose the smallest extracts that together cover it: take touching extracts from the smallest up while part of the area is uncovered, then drop any extract the others cover. A source that needs more than one extract, such as an area crossing a border, loads each and combines them with `concat`.
+- A country's ISO code is a fast path: when exactly one extract carries that one code and the extract is not on the multi-country list, it is the country's own file. A country without one (Palestine, Singapore, Malaysia) is covered by its AdminBoundaries polygon, and its units are cropped.
+- The curated lists live in the module and are tested against a stored copy of the index: `MULTI_COUNTRY_EXTRACTS`, and `CODE_FIXES` for territories the index mis-codes (French Polynesia, Wallis and Futuna, Tokelau and Pitcairn carry Vanuatu's or the Marshall Islands' code).
+- Continent extracts, root extracts without an ISO code, are used only when named with `extracts=`; an area only a continent covers raises an error saying so.
+- `regions=False` (default): a country source uses the country file. `regions=True`: it uses all of the country's sub-region files, each built and saved on its own and combined at load; these are the children of its extract, or the extracts coded with its ISO 3166-2 subdivisions (the US states). A country without regions uses its own file. `extracts=[...]` names Geofabrik extract IDs directly and overrides the choice.
+- Units are `{"id", "url", "path", "matches_country"}`, where `path` is the extract's place in Geofabrik's folders (`africa/rwanda`) and `matches_country` marks a country source's own file or one of its regions, which needs no crop.
 
 ## 5. Storage (ADR 0006)
 
