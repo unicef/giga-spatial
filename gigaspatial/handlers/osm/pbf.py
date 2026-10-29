@@ -311,6 +311,14 @@ def combine_road_networks(
     return SpatialNetwork(nodes, edges, directed=True, metadata=metadata)
 
 
+def count_streets(network: SpatialNetwork) -> pd.Series:
+    """osmnx's ``count_streets_per_node`` for every node of a network, indexed by node ID."""
+    pu, pv = network._edge_positions
+    key = network.edges["key"].to_numpy()
+    counts = _street_counts(pu.astype(np.int64), pv.astype(np.int64), key, len(network.nodes))
+    return pd.Series(counts, index=network.node_index, name="street_count")
+
+
 def simplify_road_network(network: SpatialNetwork) -> SpatialNetwork:
     """``network.simplify()``, with ``metadata["build"]["simplified"]`` set."""
     return with_metadata(network.simplify(), build={**network.metadata.get("build", {}), "simplified": True})
