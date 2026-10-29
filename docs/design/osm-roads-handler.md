@@ -85,7 +85,7 @@ The same network as osmnx for every `network_type`, tested against osmnx on the 
 1. Read the file once, with pyosmium's node location index. pyosmium preselects ways by key in C++; Python applies the filter to each way, keeps its ID, node references, and kept tags, and has pyosmium write its line (every node, in order) as WKB. Nodes reach Python only when they carry a kept node tag.
 2. In numpy: drop consecutive repeated nodes, reverse ways that run against their node order, cut ways into edges, number parallel edges as networkx does, and compute lengths and `street_count`; build the `SpatialNetwork`; run `simplify` for the simplified variant.
 
-Two reads (ways, then only the referenced nodes) were measured first: reading Rwanda's 4.1 million node references took 4.2 s, and the referenced nodes' coordinates another 6.6 s through Python, or 3.7 s with the location index and WKB. One read with the index takes 6 s for all of it.
+Two reads (ways, then their nodes) were measured against one (`benchmarks/osm_roads/read_strategies.py`, results in `benchmarks/osm_roads/results.md`). Reading the referenced nodes through an ID filter in Python takes 12.2 s in all and 2.4 GB; reading the ways again with the location index takes 7.5 s and 1.0 GB; one read with the index takes 7.3 s and 1.0 GB. The location index is what saves the time. One read is kept because it is simpler (the filter, tags, and line come from the same way) and reads the file once, not because it is faster.
 
 | Rwanda (68 MB extract) | Raw | Simplified |
 |---|---|---|
