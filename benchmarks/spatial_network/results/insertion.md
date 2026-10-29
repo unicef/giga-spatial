@@ -6,6 +6,21 @@ Apple M1 Pro, 8 CPUs, 16 GiB, macOS 15.7; Python 3.10.11, numpy 2.2.6, pandas 2.
 
 | operation | s | target |
 |---|---|---|
+After the fix for points on one-way roads (which had been pooled onto the edge table's last row):
+
+| operation | s | target |
+|---|---|---|
+| road edges projected to UTM and indexed (first insertion only) | 1.36 |  |
+| 1,000 points, chain=False (3,564 split pieces, 0 point links) | 0.66 |  |
+| 1,000 points, chain=True (3,560 split pieces, 2 point links) | 0.64 |  |
+| 10,000 points, chain=False (34,558 split pieces, 0 point links) | 1.83 | under 10 s |
+| 10,000 points, chain=True (34,160 split pieces, 382 point links) | 1.77 |  |
+| 1,000 points, chain=True, snap_to_node=0: total connection length (m) | 68,187 |  |
+
+Before the fix, earlier the same day:
+
+| operation | s | target |
+|---|---|---|
 | road edges projected to UTM and indexed (first insertion only) | 1.30 |  |
 | 1,000 points, chain=False (3,561 split pieces, 0 point links) | 0.63 |  |
 | 1,000 points, chain=True (3,557 split pieces, 2 point links) | 0.61 |  |

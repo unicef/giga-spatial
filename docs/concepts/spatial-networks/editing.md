@@ -116,7 +116,7 @@ print(planned.edges[planned.edges["kind"] == "added"][["u", "v", "key", "length"
 61909  279244409  279244410    1  1200.0  added  planned road
 ```
 
-When the weight is not `length`, the edges' lengths are measured from their geometry or ends, so `length` always means metres.
+A road already joins those two nodes, so the new edge gets key 1. When the weight is not `length`, the edges' lengths are measured from their geometry or ends, so `length` always means metres.
 
 ## Directions
 
@@ -152,7 +152,7 @@ SpatialNetwork(nodes=13,626, edges=35,616, directed=True, weight='length')
 SpatialNetwork(nodes=23,833, edges=61,909, directed=True, weight='length')
 ```
 
-`concat` suits networks that share nodes but not roads, such as neighbouring areas fetched from Overpass. Networks loaded from overlapping Geofabrik extracts are combined by `OSMRoadsHandler` itself, which matches roads by their OpenStreetMap way rather than by key (see [Reduction](reduction.md#how-a-source-is-cut-from-an-extract)).
+The two halves overlap, and together they are exactly the Kigali box clipped earlier. `concat` suits networks that share nodes but not roads, such as neighbouring areas fetched from Overpass. Networks loaded from overlapping Geofabrik extracts are combined by `OSMRoadsHandler` itself, which matches roads by their OpenStreetMap way rather than by key (see [Reduction](reduction.md#how-a-source-is-cut-from-an-extract)).
 
 ## Other edits
 

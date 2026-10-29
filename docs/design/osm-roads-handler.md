@@ -126,9 +126,9 @@ These are the steps of osmnx's `graph_from_polygon` after its download (osmnx 2.
 
 | Rwanda (`benchmarks/osm_roads/load_rwanda.py`) | Time |
 |---|---|
-| Four school points, first load (builds the raw network) | 10.7 s |
-| Four school points; a 30 × 22 km box around Kigali | 1.1 s; 1.5 s |
-| The country, first load (simplifies the stored raw network) | 8.3 s |
+| Four school points, first load (builds the raw network) | 11.1 s |
+| Four school points; a 30 × 22 km box around Kigali | 1.4 s; 1.9 s |
+| The country, first load (simplifies the stored raw network) | 9.8 s |
 | The country | 0.44 s |
 
 Parameters, matching the fetcher where they overlap: `network_type="drive_service"`, `tags=None`, `simplify=True`, `retain_all=False`, `truncate_by_edge=False`, `buffer=2000`, `area="hull"`, `regions=False`, `extracts=None`, `date=None`, `refresh=False`, `max_age_days=None`, `node_index=None`.
@@ -139,7 +139,7 @@ Parameters, matching the fetcher where they overlap: `network_type="drive_servic
 |---|---|
 | Build Rwanda's network from its extract | under 30 s (osmnx route: 300 s); `drive_service` 15.4 s |
 | Nigeria (680 MiB) on a 16 GB machine | fits in memory with the default index |
-| Load a stored network | under 1 s for Rwanda (ADR 0005 load: 0.48 s); the country 0.44 s, a cropped area about 1 s |
+| Load a stored network | under 1 s for Rwanda (ADR 0005 load: 0.48 s); the country 0.44 s, a cropped area 1.4 to 1.9 s |
 | Extracts over 1 GiB | use the disk-backed index automatically |
 
 ## 10. Tests and fixtures

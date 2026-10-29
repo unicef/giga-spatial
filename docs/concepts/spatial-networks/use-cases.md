@@ -16,8 +16,8 @@ print(planned.edges.groupby("kind", observed=True)[["length", "cost"]].sum().rou
 ```text
                  length          cost
 kind                                 
-road        106045370.0  1.293481e+09
-split          182330.0  2.319627e+06
+road        106043551.0  1.293426e+09
+split          184149.0  2.374447e+06
 connection      29550.0  7.387490e+05
 ```
 
@@ -35,9 +35,9 @@ for label, plan in plans.items():
 ```
 
 ```text
-shortest routes to the nearest fibre node: 381.5 km, cost 6.09 million
-cheapest routes to a fibre node: 395.6 km, cost 4.80 million
-one tree joining schools and fibre nodes: 289.2 km, cost 4.67 million
+shortest routes to the nearest fibre node: 355.2 km, cost 5.52 million
+cheapest routes to a fibre node: 365.3 km, cost 4.46 million
+one tree joining schools and fibre nodes: 264.6 km, cost 3.92 million
 ```
 
 The plan's cost is the rate times the length of each of its edges. The plans are contracted networks, whose edges join many road segments, and a joined edge's rate is the length-weighted mean of its parts, so this total is exact (see [Editing](editing.md#attributes-and-weights)).
@@ -60,10 +60,10 @@ print(last_mile.groupby(bands, observed=False).agg(schools=("origin", "size"), s
 ```text
             schools  students
 distance                     
-under 2 km        8    5309.0
-2-5 km           62   38566.0
+under 2 km       10    7001.0
+2-5 km           65   40515.0
 5-10 km          92   62469.0
-over 10 km       35   21579.0
+over 10 km       30   17938.0
 ```
 
 **What to check before trusting a plan.** Schools that were skipped because they lie far from any road (see [Inserting points](inserting-points.md#the-options)) are missing from every plan. Roads missing from OpenStreetMap make routes longer than they are; `connect_components` and a look at the schools with the longest detours find most of them. And a plan along roads assumes the cable follows roads, which is the usual case but not the only one.
@@ -84,21 +84,21 @@ access = pd.DataFrame(
 )
 print(access.describe().round(0))
 share = (access["clinics_within_5km"] > 0).mean()
-pupils = access.loc[access["clinics_within_5km"] == 0, "students"].sum()
+pupils = int(access.loc[access["clinics_within_5km"] == 0, "students"].sum())
 print(f"Schools with a clinic within 5 km by road: {share:.0%}; pupils without one: {pupils:,}")
 ```
 
 ```text
        nearest_clinic_m  clinics_within_5km  students
 count             197.0               197.0     197.0
-mean             5313.0                 1.0     649.0
-std              5343.0                 1.0     311.0
+mean             4491.0                 1.0     649.0
+std              2288.0                 1.0     311.0
 min               208.0                 0.0      82.0
-25%              3073.0                 0.0     405.0
-50%              4330.0                 1.0     644.0
-75%              6233.0                 2.0     924.0
-max             35251.0                 4.0    1198.0
-Schools with a clinic within 5 km by road: 60%; pupils without one: 49,299.0
+25%              2967.0                 0.0     405.0
+50%              4190.0                 1.0     644.0
+75%              5936.0                 2.0     924.0
+max             11627.0                 4.0    1198.0
+Schools with a clinic within 5 km by road: 63%; pupils without one: 45,658
 ```
 
 **Road distance against straight-line distance.** The same question asked with straight lines gives a rosier answer, because no road is shorter than the straight line:
@@ -112,8 +112,8 @@ print(pd.crosstab(straight_5km.rename("within 5 km straight"), road_5km.rename("
 ```text
 within 5 km by road   False  True 
 within 5 km straight              
-False                    39      0
-True                     39    119
+False                    34      0
+True                     39    124
 ```
 
 The schools that are within 5 km in a straight line but not by road are the ones a straight-line indicator would misclassify. They are worth listing by name in any report on access.
@@ -145,10 +145,10 @@ school-002 -1.93  30.11      1025  ...                 3.0    1.18  2293.00
 
 [3 rows x 7 columns]
                   nearest_clinic_m  detour  fibre_m  students
-nearest_clinic_m              1.00    0.70     0.89      0.01
-detour                        0.70    1.00     0.64     -0.04
-fibre_m                       0.89    0.64     1.00      0.02
-students                      0.01   -0.04     0.02      1.00
+nearest_clinic_m              1.00   -0.09     0.57     -0.08
+detour                       -0.09    1.00    -0.09     -0.04
+fibre_m                       0.57   -0.09     1.00     -0.03
+students                     -0.08   -0.04    -0.03      1.00
 ```
 
 A few things are worth knowing when you use them:

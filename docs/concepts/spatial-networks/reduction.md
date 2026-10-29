@@ -16,7 +16,7 @@ print(simple_kigali, f"{time.perf_counter() - started:.2f} s")
 
 ```text
 SpatialNetwork(nodes=166,206, edges=342,706, directed=True, weight='length')
-SpatialNetwork(nodes=23,722, edges=61,611, directed=True, weight='length') 0.39 s
+SpatialNetwork(nodes=23,722, edges=61,611, directed=True, weight='length') 0.65 s
 ```
 
 ![Kigali's raw road network, with a node at every bend, and the same roads simplified](../../assets/spatial-network/simplify.png)
@@ -37,18 +37,18 @@ SpatialNetwork(nodes=23,722, edges=61,611, directed=True, weight='length') 0.39 
 | `kind` | the kind of the longest part |
 
 ```python
-joined = simple_kigali.edges[simple_kigali.edges["osmid"].map(len) > 1].iloc[0]
+joined = simple_kigali.edges[simple_kigali.edges["highway"].astype(str).str.contains(";")].iloc[0]
 print(joined[["u", "v", "length", "osmid", "highway", "oneway"]])
 ```
 
 ```text
-u                     6243465307
-v                     3586160501
-length                403.245915
-osmid      [25796126, 352844178]
-highway              residential
-oneway                     False
-Name: 15564, dtype: object
+u                        1224173076
+v                        6370565775
+length                   384.393696
+osmid        [106060663, 680376414]
+highway    unclassified;residential
+oneway                        False
+Name: 17137, dtype: object
 ```
 
 Each direction of a two-way road is joined separately, so it stays two-way when both directions can be joined.
@@ -78,9 +78,9 @@ for label, call in [
 ```
 
 ```text
-Steiner tree joining the schools: 287.5 km, 471 edges, 0.19 s
-each school to its nearest fibre node: 381.5 km, 519 edges, 0.06 s
-all pairs, 30 schools and the fibre nodes: 480.5 km, 756 edges, 0.84 s
+Steiner tree joining the schools: 261.6 km, 476 edges, 0.39 s
+each school to its nearest fibre node: 355.2 km, 526 edges, 0.07 s
+all pairs, 30 schools and the fibre nodes: 424.7 km, 748 edges, 0.92 s
 ```
 
 ![The three methods on the example: a Steiner tree, each school's path to its nearest fibre node, and all pairs](../../assets/spatial-network/connecting-subnetworks.png)
@@ -108,10 +108,11 @@ In every case, the paths are collected from Dijkstra's predecessor arrays all at
 
 ## How a source is cut from an extract
 
-`OSMRoadsHandler` stores each extract's whole network, uncropped, and cuts it to a source when it loads. To give the same network `OSMRoadsFetcher` would, it follows osmnx's own order:
+`OSMRoadsHandler` stores each extract's whole network, uncropped, and cuts it to a source when it loads. To give the same network `OSMRoadsFetcher` would, it replays the steps of osmnx's `graph_from_polygon`:
 
-1. **Clip the raw network.** The source becomes an area by the fetcher's rules (a country's boundary, a geometry as given, a frame's union, or points' hull, bounding box, or buffers), and the raw network's nodes in that area are kept. With `truncate_by_edge=True`, nodes just outside that share an edge with a node inside are kept too.
+1. **Widen the area.** The source becomes an area by the fetcher's rules (a country's boundary, a geometry as given, a frame's union, or points' hull, bounding box, or buffers), and the area is widened by 500 m, as osmnx widens what it downloads. The raw network's nodes in the widened area are kept; with `truncate_by_edge=True`, so are the nodes just outside that share an edge with one inside.
 2. **Combine extracts.** When a source needs several extracts, such as schools along a border, their raw networks are combined as if they were one file: a road that crosses between extracts is in both, and is kept once.
-3. **Simplify, then keep the largest connected part,** unless `retain_all=True`.
+3. **Keep the largest connected part, and simplify,** unless `retain_all=True` keeps every part.
+4. **Cut to the area.** The nodes in the area itself are kept, and the largest connected part again. `street_count` is the count on the simplified widened network, as osmnx sets it.
 
-Clipping the raw network before simplifying matters. A simplified road whose two ends lie outside the area would be dropped entirely, although part of it runs inside; clipping first keeps that part. A country whose extracts are its own file, or its regional files, is not clipped at all.
+Simplifying the widened network before cutting it decides what happens to a road that leaves the area: its simplified edge runs to the next real junction outside, so the edge's far end is outside the area and the edge is dropped. That is what osmnx does, and the handler does the same, so a cropped load equals the fetcher's network for the same area. A country whose extracts are its own file, or its regional files, is not cropped at all.

@@ -19,11 +19,11 @@ print(loaded, f"{time.perf_counter() - started:.2f} s")
 ```
 
 ```text
-Saved in 0.88 s
+Saved in 0.94 s
   edges.parquet: 48.3 MB
   network.json: 0.0 MB
   nodes.parquet: 2.9 MB
-SpatialNetwork(nodes=125,490, edges=333,422, directed=True, weight='length') 0.65 s
+SpatialNetwork(nodes=125,494, edges=333,426, directed=True, weight='length') 0.71 s
 ```
 
 The files are plain Parquet, compressed with zstd, so other tools read them directly: geopandas reads `edges.parquet` as a GeoDataFrame, and DuckDB, QGIS, and pandas read both tables without the library.
@@ -32,11 +32,11 @@ The files are plain Parquet, compressed with zstd, so other tools read them dire
 import geopandas as gpd
 
 edges_on_their_own = gpd.read_parquet("rwanda-with-schools/edges.parquet")
-print(edges_on_their_own.shape, edges_on_their_own.crs)
+print(edges_on_their_own.shape, edges_on_their_own.crs.to_string())
 ```
 
 ```text
-(333422, 21) {"$schema": "https://proj.org/schemas/v0.7/projjson.schema.json", "type": "GeographicCRS", "name": "WGS 84", "datum_ensemble": {"name": "World Geodetic System 1984 ensemble", "members": [{"name": "World Geodetic System 1984 (Transit)"}, {"name": "World Geodetic System 1984 (G730)"}, {"name": "World Geodetic System 1984 (G873)"}, {"name": "World Geodetic System 1984 (G1150)"}, {"name": "World Geodetic System 1984 (G1674)"}, {"name": "World Geodetic System 1984 (G1762)"}, {"name": "World Geodetic System 1984 (G2139)"}, {"name": "World Geodetic System 1984 (G2296)"}], "ellipsoid": {"name": "WGS 84", "semi_major_axis": 6378137, "inverse_flattening": 298.257223563}, "accuracy": "2.0", "id": {"authority": "EPSG", "code": 6326}}, "coordinate_system": {"subtype": "ellipsoidal", "axis": [{"name": "Geodetic latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree"}, {"name": "Geodetic longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree"}]}, "scope": "Horizontal component of 3D system.", "area": "World.", "bbox": {"south_latitude": -90, "west_longitude": -180, "north_latitude": 90, "east_longitude": 180}, "id": {"authority": "EPSG", "code": 4326}}
+(333426, 21) EPSG:4326
 ```
 
 **Loading less.** `columns=` names the edge columns to load, on top of the ones every network needs (`u`, `v`, `key`, `length`, `kind`, and the weight). With an empty list, only the topology and lengths load, which is the fastest way to get a network for routing:
@@ -48,7 +48,7 @@ print(list(topology.edges.columns), f"{time.perf_counter() - started:.3f} s")
 ```
 
 ```text
-['u', 'v', 'key', 'length', 'kind'] 0.233 s
+['u', 'v', 'key', 'length', 'kind'] 0.230 s
 ```
 
 **Remote data stores.** `save(path, data_store=...)` and `load(path, data_store=...)` work with any of the library's data stores, such as Azure Blob Storage, through the same calls.
@@ -69,7 +69,7 @@ print(edges_utm.geometry.length.sum() / network.total_length())
 
 ```text
 WGS 84 / UTM zone 35S WGS 84 / UTM zone 35S
-0.9994358486727203
+0.9985940358403483
 ```
 
 The projected lengths differ from the network's great-circle lengths by a fraction of a percent near the projection's centre. The network's `length` is what every algorithm uses.
@@ -85,11 +85,11 @@ print(type(graph).__name__, f"{graph.number_of_edges():,} edges", f"{time.perf_c
 ```
 
 ```text
-MultiDiGraph 333,422 edges 1.71 s
+MultiDiGraph 333,426 edges 1.83 s
 ```
 
 **When to use it.** For algorithms scipy does not have, such as betweenness centrality or community detection, and for libraries built on networkx, including osmnx's own functions. On a large network, centrality in networkx can take hours; run it on a clipped or reduced network.
 
 ## pandana
 
-`to_pandana()` returns a pandana network, built once per weight and cached, and `backend="pandana"` uses it for shortest path lengths (see [Algorithms](algorithms.md#very-many-pairs-the-pandana-backend)). pandana's own functions, such as aggregations of points within a distance of every node, become available on it. It needs the `pandana` extra, and node IDs that are all integers or all text.
+`to_pandana()` returns a pandana network indexed by node ID, built once per weight and cached, on which pandana's own functions, such as aggregations of points within a distance of every node, become available. It needs the `pandana` extra, and node IDs that are all integers or all text. `backend="pandana"` (see [Algorithms](algorithms.md#very-many-pairs-the-pandana-backend)) does not need either restriction on IDs: it gives pandana node positions instead.

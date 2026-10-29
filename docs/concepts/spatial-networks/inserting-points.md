@@ -18,9 +18,9 @@ print(summary["edge_kinds"])
 ```
 
 ```text
-Schools: 1.52 s, 3 skipped
-{'road': 125095, 'point': 212, 'split': 183}
-{'road': 332284, 'split': 714, 'connection': 424}
+Schools: 1.57 s, 3 skipped
+{'road': 125095, 'point': 212, 'split': 187}
+{'road': 332280, 'split': 722, 'connection': 424}
 ```
 
 For each point, the method finds the nearest road edge and the foot of the perpendicular on it: the point on the road closest to the school. It splits the road there, at a new node of kind `split`, and adds a `connection` edge from the school (kind `point`) to that node. The school's columns, such as `students`, become node attributes.
@@ -40,10 +40,10 @@ print(pieces[["u", "v", "length", "kind"]])
 node_id                                         
 school-000  30.146086 -1.944989  point    1167.0
                  u     v     length        kind
-332938  school-000  -102  26.341664  connection
+332942  school-000  -103  26.341664  connection
            u           v      length   kind
-332677  -102  6294807498  159.216257  split
-332679  -102  1612911824  177.157333  split
+332675  -103  6294807498  159.216257  split
+332677  -103  1612911824  177.157333  split
 ```
 
 ![A road split at the feet of three schools, with each school's connection edge](../../assets/spatial-network/insertion.png)
@@ -63,8 +63,8 @@ print(f"Roads and split pieces after: {by_kind['road'] + by_kind['split']:,.0f} 
 
 ```text
 kind
-road          106045370.0
-split            182330.0
+road          106043551.0
+split            184149.0
 connection        29550.0
 Name: length, dtype: float64
 Roads before: 106,227,700 m
@@ -99,7 +99,7 @@ print(chained.info()["edge_kinds"])
 ```
 
 ```text
-{'road': 332316, 'split': 644, 'connection': 380, 'point_link': 14}
+{'road': 332312, 'split': 652, 'connection': 380, 'point_link': 14}
 ```
 
 - **`id_column`.** The column with the point IDs; the frame's index otherwise. IDs must not repeat, and must not already be node IDs: inserting the same schools twice raises.

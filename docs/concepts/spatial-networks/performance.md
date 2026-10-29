@@ -43,7 +43,7 @@ So insert all your points in one call where you can, rather than in many calls o
 
 **Unreachable pairs are `inf`.** They are not errors and not missing values. Count them before you average distances, and decide whether they mean "too far" or "missing road".
 
-**Mixed node IDs.** Inserting points with text IDs into a road network with integer IDs gives a network with both. Everything works with that, including saving, except pandana, which needs one kind. Give your points integer IDs (negative ones are taken by split nodes; use large positive numbers), or route with scipy.
+**Mixed node IDs.** Inserting points with text IDs into a road network with integer IDs gives a network with both. Everything works with that, including saving and `backend="pandana"`, except `to_pandana()`, which hands you pandana's network indexed by node ID and needs one kind. If you need pandana's own functions, give your points integer IDs (negative ones are taken by split nodes; use large positive numbers).
 
 **Totals on split and joined edges.** Only the weight column is shared between the pieces of a split road and added up when edges are joined. A total such as a cost per edge is copied to both pieces when a road is split. Keep a rate per metre beside it and compute totals after inserting points (see [Editing](editing.md#attributes-and-weights)).
 

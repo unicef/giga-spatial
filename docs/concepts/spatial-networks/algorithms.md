@@ -14,7 +14,7 @@ print(list(network.node_index[:3]))
 ```
 
 ```text
-(125490, 125490) 330,645 entries 0.06 s
+(125494, 125494) 330,649 entries 0.06 s
 [271317577, 279244409, 279244410]
 ```
 
@@ -37,7 +37,7 @@ node_id
 school-000     8937.0    12241.0     8273.0    17462.0    13567.0
 school-001    10612.0     8455.0     4158.0    14607.0     9822.0
 school-002     7944.0     6591.0     2293.0    12742.0     7957.0
-197 by 5: 5.09 s
+197 by 5: 5.62 s
 ```
 
 **How it works.** Dijkstra's algorithm, from each origin, on the cached matrix. One search costs \(O((V + E)\log V)\) and finds the distance to every node, so the cost grows with the number of origins, not with the number of destinations: about 25 ms per origin on Rwanda's roads. The library runs origins in blocks that keep the working matrix under 256 MiB, and refuses a result matrix over 1 GiB, with advice to batch, rather than run out of memory.
@@ -52,7 +52,7 @@ print(f"One-way streets add {gap.mean():.0f} m on average, {gap.max():.0f} m at 
 ```
 
 ```text
-One-way streets add 66 m on average, 563 m at most
+One-way streets add 66 m on average, 1302 m at most
 ```
 
 **Use cases.** Road distance as a model feature, travel distances for cost estimates, and origin-destination matrices for planning.
@@ -87,13 +87,13 @@ print(features[["distance", "straight", "detour"]].describe().round(2))
 3  school-003  clinic-008   2857.87   1977.87    1.44
        distance  straight  detour
 count    197.00    197.00  197.00
-mean    5313.09   3299.46    1.56
-std     5342.56   1924.76    0.55
+mean    4490.59   3127.79    1.50
+std     2287.94   1723.44    0.34
 min      207.82     88.06    1.05
-25%     3072.66   1950.03    1.28
-50%     4329.95   3004.41    1.41
-75%     6232.69   4298.19    1.63
-max    35251.48  11734.66    4.90
+25%     2967.47   1904.02    1.28
+50%     4190.20   2852.59    1.41
+75%     5935.87   4099.45    1.62
+max    11626.62   8943.35    2.94
 ```
 
 The straight line here is to the same clinic. The nearest clinic by road need not be the nearest in a straight line, which is one more reason to measure along the network.
@@ -135,10 +135,10 @@ print(f"Schools within 5 km of a clinic: {served['node_id'].nunique()} of {len(s
 ```text
        origin     node_id  distance
 0  clinic-000  clinic-000       0.0
-1  clinic-000        -180      14.0
+1  clinic-000        -184      14.0
 2  clinic-000  1223026109      60.0
-25,098 rows, 0.02 s
-Schools within 5 km of a clinic: 120 of 197
+25,120 rows, 0.02 s
+Schools within 5 km of a clinic: 125 of 197
 ```
 
 ![The roads within 5 km of one clinic, coloured by distance](../../assets/spatial-network/service-area.png)
@@ -181,11 +181,11 @@ print(clinics_near.value_counts().sort_index())
 
 ```text
 count
-0    78
-1    64
+0    73
+1    66
 2    19
-3    22
-4    14
+3    24
+4    15
 Name: count, dtype: int64
 ```
 
@@ -216,19 +216,28 @@ A network loaded through `OSMRoadsHandler` keeps only its largest weakly connect
 
 **`largest_component()`** keeps the largest component as a network.
 
-**`connect_components(max_distance=None)`** joins disconnected parts with `component_link` edges between their nearest nodes. The links form a minimum spanning tree over the components, by great-circle distance, found with Borůvka's method: each round, every component finds its nearest node outside itself, and the shortest of those links join components, until one is left or the remaining gaps exceed `max_distance`. The main roads alone, from [Editing](editing.md#selecting-part-of-a-network), fall apart into many pieces:
+**`connect_components(max_distance=None)`** joins disconnected parts with `component_link` edges between their nearest nodes. The links form a minimum spanning tree over the components, by great-circle distance, found with Borůvka's method: each round, every component finds its nearest node outside itself, and the shortest of those links join components, until one is left or the remaining gaps exceed `max_distance`. In a directed network each link is added in both directions.
+
+Clipping Kigali out of Rwanda's network with `clip`, in [Editing](editing.md#selecting-part-of-a-network), left a few pieces cut off: roads that leave the box and come back into it lost the part outside.
 
 ```python
-pieces = connected.connected_components()
-joined = connected.connect_components(max_distance=1000)
+pieces = kigali_roads.connected_components()
+print(pieces.value_counts().head(4))
+joined = kigali_roads.connect_components(max_distance=1000)
 links = joined.edges[joined.edges["kind"] == "component_link"]
 print(f"Components before: {pieces.nunique()}, after: {joined.connected_components().nunique()}")
-print(f"Links added: {len(links)}, the longest {links['length'].max():.0f} m")
+print(f"Link edges added: {len(links)}, the longest {links['length'].max():.0f} m")
 ```
 
 ```text
-Components before: 1, after: 1
-Links added: 0, the longest nan m
+component
+0    23744
+1       36
+2       32
+3        3
+Name: count, dtype: int64
+Components before: 13, after: 2
+Link edges added: 22, the longest 917 m
 ```
 
 **Use cases.** Network diagnostics: finding where OpenStreetMap is missing a road, and bridging small gaps so that routing does not fail on data errors. The links are straight lines, not roads, and are marked as such, so they can be reported or priced differently.
@@ -258,16 +267,14 @@ A tree over a disconnected network is a forest, one tree per component. scipy ig
 
 pandana answers shortest path queries with contraction hierarchies: it preprocesses the network once (about 1.4 s for Rwanda), then answers each pair in microseconds. `backend="pandana"` uses it for `shortest_path_lengths`; it needs the `pandana` extra.
 
-pandana indexes nodes by ID and needs them all integers or all text, so it cannot take a network with inserted schools, whose IDs mix OpenStreetMap's integers with text. Here it runs on the road network, between the road nodes nearest to each school and each clinic:
+Here it computes the road distance from every school to every clinic, as pairs:
 
 ```python
-school_nodes = roads.nearest_nodes(schools).to_numpy()
-clinic_nodes = roads.nearest_nodes(clinics).to_numpy()
-origins = np.repeat(school_nodes, len(clinic_nodes))
-destinations = np.tile(clinic_nodes, len(school_nodes))
+origins = np.repeat(school_ids, len(clinic_ids))
+destinations = np.tile(clinic_ids, len(school_ids))
 for backend in ("scipy", "pandana"):
     started = time.perf_counter()
-    lengths = roads.shortest_path_lengths(origins, destinations, pairwise=True, backend=backend)
+    lengths = network.shortest_path_lengths(origins, destinations, pairwise=True, backend=backend)
     print(f"{backend}: {len(lengths):,} pairs in {time.perf_counter() - started:.2f} s (pandana's includes its build)")
     if backend == "scipy":
         reference = lengths
@@ -275,9 +282,9 @@ print(f"Largest difference: {np.abs(lengths - reference).max():.2f} m")
 ```
 
 ```text
-scipy: 2,000 pairs in 5.01 s (pandana's includes its build)
-pandana: 2,000 pairs in 1.47 s (pandana's includes its build)
+scipy: 1,970 pairs in 5.09 s (pandana's includes its build)
+pandana: 1,970 pairs in 1.81 s (pandana's includes its build)
 Largest difference: 0.11 m
 ```
 
-scipy's cost grows with the number of origins (about 25 ms each on Rwanda), and pandana's with the number of pairs once it is built. pandana's preprocessing costs as much as about 55 origins of scipy work, so it pays off for large origin-destination matrices, and not for a few hundred origins. It stores weights with limited precision, so its lengths differ from scipy's by a fraction of a metre.
+scipy's cost grows with the number of origins (about 25 ms each on Rwanda), and pandana's with the number of pairs once it is built. pandana's preprocessing costs as much as about 55 origins of scipy work, so it pays off for large origin-destination matrices, and not for a few hundred origins. It stores weights with limited precision, so its lengths differ from scipy's by a fraction of a metre. The backend works on any network; `to_pandana()`, which gives you pandana's network itself, indexed by node ID, needs node IDs that are all integers or all text (see [Storage and interoperability](storage.md#pandana)).

@@ -25,13 +25,17 @@ Peak memory accumulates across the four builds; a simplified `drive_service` bui
 
 ### Loading for a source (`load_rwanda.py`)
 
+After cropped loads were changed to follow osmnx's `graph_from_polygon` exactly (they now simplify the area widened by 500 m before cutting it to the area):
+
 | load | nodes | edges | s |
 |---|---|---|---|
-| four school points, first load (builds and saves the raw network) | 6,076 | 15,044 | 9.95 |
-| four school points | 6,076 | 15,044 | 1.06 |
-| a 30 by 22 km box around Kigali | 23,724 | 61,615 | 1.31 |
-| the country, first load (simplifies the stored raw network) | 125,058 | 332,535 | 7.16 |
-| the country | 125,058 | 332,535 | 0.43 |
+| four school points, first load (builds and saves the raw network) | 5,996 | 14,893 | 11.08 |
+| four school points | 5,996 | 14,893 | 1.43 |
+| a 30 by 22 km box around Kigali | 23,571 | 61,311 | 1.85 |
+| the country, first load (simplifies the stored raw network) | 125,058 | 332,535 | 9.78 |
+| the country | 125,058 | 332,535 | 0.44 |
+
+Before that change, earlier on 29 October, the cropped loads were 6,076 nodes in 1.06 s and 23,724 nodes in 1.31 s; they kept stubs of roads leaving the area that osmnx drops.
 
 ### The route through osmnx (`../spatial_network/step0.py`, 27 October 2026, Python 3.10.11, osmnx 2.0.2)
 

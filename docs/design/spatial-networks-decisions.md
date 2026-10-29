@@ -126,7 +126,7 @@ GeoParquet written straight from osmnx's GeoDataFrames failed: simplified osmnx 
 
 scipy is already a dependency of the library. pandana is the fastest once built, but it pulls in scikit-learn and PyTables, stores weights with limited precision, reports unreachable pairs as 4294967.295, and fails with a cryptic dtype error on an unknown node ID. It is maintained: version 0.8 came out in August 2026. igraph would have been one more compiled dependency for a middle speed.
 
-**Decision.** Every algorithm uses scipy by default. `backend="pandana"` is available where it helps, through the `giga-spatial[pandana]` extra. The library checks node IDs before calling pandana and returns `inf` for unreachable pairs. networkx is only an export. I did not add igraph.
+**Decision.** Every algorithm uses scipy by default. `backend="pandana"` is available where it helps, through the `giga-spatial[pandana]` extra. The backend gives pandana node positions rather than IDs, so it works on any network, including one whose IDs mix OpenStreetMap's integers with the text IDs of inserted schools, and it returns `inf` for unreachable pairs. `to_pandana()`, for pandana's own functions, keeps node IDs and so still needs them all integers or all text. My first version passed IDs to pandana in both cases, which ruled out the backend on exactly the networks people build; writing the concept note's examples showed it. networkx is only an export. I did not add igraph.
 
 How the algorithms use scipy, on the current code:
 
@@ -164,7 +164,7 @@ The two give the same nodes and the same edge lengths, 21 times faster. The firs
 
 ### Decision 7: connecting subnetworks with Mehlhorn's Steiner approximation
 
-**Question.** Fiber planning needs the roads that connect a set of points, such as schools, at the smallest total length. That is the Steiner tree problem, which is NP-hard. How should the library approximate it, and what else should it offer?
+**Question.** Fibre planning needs the roads that connect a set of points, such as schools, at the smallest total length. That is the Steiner tree problem, which is NP-hard. How should the library approximate it, and what else should it offer?
 
 **Options.** networkx's `steiner_tree`, after a conversion to networkx; Kou's algorithm, which needs the shortest-path distance between every pair of terminals; Mehlhorn's algorithm, which needs one multi-source Dijkstra; and the old Giga approach, which kept the shortest path between every pair of points (`create_cleaned_graph`).
 
@@ -182,7 +182,7 @@ The test suite checks that our tree on the Kigali fixture is no longer than the 
 **Decision.** `connecting_subnetwork` works on the undirected network and offers three methods:
 
 - `method="steiner"` (the default) is Mehlhorn's 2-approximation. One multi-source Dijkstra from the terminals gives each node its nearest terminal. Every edge between two terminals' regions is a candidate link between those terminals, and an MST over the cheapest links, expanded back into road paths, gives a tree. A second MST and pruning of leaves that are not terminals finish it. Its length is at most twice the optimum, and in practice close to it.
-- With `sources=`, each terminal takes its shortest path to its nearest source. This is the right model when every school must reach some fiber node, and the cost is one multi-source Dijkstra.
+- With `sources=`, each terminal takes its shortest path to its nearest source. This is the right model when every school must reach some fibre node, and the cost is one multi-source Dijkstra.
 - `method="all_pairs"` keeps the shortest path between every terminal and every terminal or source, as the old code did. Its cost grows with the square of the number of terminals, which is why it is not the default.
 
 The result is contracted to the terminals, the sources, and the branching nodes, with lengths added and geometries joined, using `simplify(keep=...)`.
@@ -200,13 +200,15 @@ The result is contracted to the terminals, the sources, and the branching nodes,
 | | 1,000 points | 2,000 points | 10,000 points |
 |---|---|---|---|
 | Old `merge_points_to_graph` | 291.7 s | 542.8 s | not run |
-| `insert_points`, current code | 0.63 s | | 1.70 s |
+| `insert_points`, current code | 0.66 s | | 1.83 s |
 
-`insert_points` also builds a projected index of the road edges once per network, in 1.30 s. The old function compared each point with every earlier point and concatenated a table per point, so its cost grew with the square of the number of points. It fell back to scanning every edge when two points shared an edge, and projected and copied the whole graph twice.
+`insert_points` also builds a projected index of the road edges once per network, in 1.36 s. The old function compared each point with every earlier point and concatenated a table per point, so its cost grew with the square of the number of points. It fell back to scanning every edge when two points shared an edge, and projected and copied the whole graph twice.
 
 **Decision.** `insert_points` does all points at once. One nearest-edge query in UTM finds each point's road; vectorised `line_locate_point` finds where along the road each point falls; points are grouped by edge and sorted by position; each affected road is split once, at all of its points; and the new nodes and edges are appended in one step. Python loops run only over affected edges. A point within `snap_to_node` metres (5 by default) of a road's end connects to that node instead of splitting the road. In a directed network, both directions of a two-way road are split at the same new nodes. `chain=True` reproduces the old rule that a point may connect to an already inserted point when that point is closer than any road; candidates come from a KD-tree on the points, querying more neighbours only for points that need them.
 
 **Consequences and limits.** Points join roads only, never earlier connections. The 10,000-point time stays far below my 10 s target, so I did not optimise the per-edge loop further.
+
+Writing the concept note's figures showed a bug in the first version. The two directions of a two-way road are split together, so each road row is mapped to its reverse twin, and a one-way road, which has none, was recorded with the twin `-1`. The remapping took `-1` for a lower row and moved every point on a one-way road onto the edge table's last row: in the example, five schools across Kigali shared one split node, and the pieces took the geometry of a road 25 km away. Connection lengths were right, which is what the tests checked; the split nodes' positions and the pieces' geometries were not. The tests now check both, and the fix changed the timings above by less than their noise.
 
 ### Decision 9: normalising attributes
 
@@ -348,22 +350,26 @@ That is 22 times faster than the osmnx route, and both network types are under m
 
 **Question.** A stored network covers a whole extract. How should it be cut to a source, so that the result equals what the fetcher would return for the same area?
 
-**Options.** Clip the stored simplified network, which is small and fast; or clip the raw network and simplify afterwards, as osmnx's `graph_from_polygon` does. For several extracts: `SpatialNetwork.concat`, or a combination that treats them as one file.
+**Options.** Clip the stored simplified network, which is small and fast; clip the raw network to the area and simplify afterwards; or replay osmnx's `graph_from_polygon` step by step. For several extracts: `SpatialNetwork.concat`, or a combination that treats them as one file.
 
-**Evidence.** Clipping a simplified network loses roads at the edge of the area: a simplified edge whose two ends lie outside the area is dropped, although part of it runs inside. osmnx clips the raw network, keeps the part inside, and simplifies after. For extracts, neighbouring files share the ways that cross between them, with the same IDs, but each numbers parallel edges in its own way order. `concat` keeps one edge per `(u, v, key)`, so depending on which extract came first it can keep a duplicate and drop a different way. Border nodes would also get too low a `street_count`.
+**Evidence.** osmnx 2.0.2's `graph_from_polygon` downloads the area widened by 500 m, keeps the largest connected part of that, simplifies it, and only then keeps the nodes inside the area itself and the largest part again. It counts streets on the simplified widened network. Simplifying the widened area first means a road that leaves the area ends where its simplified edge ends, at a real junction outside, and is dropped with that edge.
+
+I first implemented the second option, believing it was osmnx's order, and tested it against my own replay of that order. Writing the concept note's examples showed the mistake: for central Kigali (a 2 by 2 km box), the handler returned 513 nodes and the fetcher 478, from identical raw data (2,824 nodes and 5,117 edges in both). Clipping the raw network first kept the stubs of roads that leave the area. Replaying osmnx's steps on the stored extract gives the fetcher's network exactly: the same 478 nodes and 1,074 edges. The handler now does that, and the tests replay osmnx's steps (decision 18).
+
+For extracts, neighbouring files share the ways that cross between them, with the same IDs, but each numbers parallel edges in its own way order. `concat` keeps one edge per `(u, v, key)`, so depending on which extract came first it can keep a duplicate and drop a different way.
 
 Loading times on Rwanda, from stored networks (`load_rwanda.py`, current code):
 
 | Load | Time |
 |---|---|
-| Four school points with a 2 km buffer | 1.06 s |
-| A 30 by 22 km box around Kigali | 1.31 s |
-| The whole country | 0.43 s |
-| The first load of a source, which builds and saves the raw network | 9.95 s |
+| Four school points with a 2 km buffer | 1.43 s |
+| A 30 by 22 km box around Kigali | 1.85 s |
+| The whole country | 0.44 s |
+| The first load of a source, which builds and saves the raw network | 11.1 s |
 
-**Decision.** A cropped load clips each extract's raw network to the source's area, combines several extracts with `combine_road_networks`, simplifies, and keeps the largest connected part unless `retain_all=True`. The combination keeps a way's edges once, numbers parallel edges again in way order, and counts streets again from every edge touching a kept node in the whole extracts, because osmnx counts streets before cropping. A country whose extracts are its own file or its regions is not cropped at all.
+**Decision.** A cropped load replays `graph_from_polygon`: it clips each extract's raw network to the source's area widened by 500 m, combines several extracts with `combine_road_networks`, keeps the largest connected part, simplifies, clips to the area itself, keeps the largest part again, and sets `street_count` as counted on the simplified widened network. `retain_all` and `truncate_by_edge` apply at the same steps as in osmnx. The combination keeps a way's edges once and numbers parallel edges again in way order. A country whose extracts are its own file or its regions is not cropped at all.
 
-**Consequences and limits.** A cropped load reads the raw network, 4.6 million edges for Rwanda, which costs about a second. osmnx works on the area buffered by 500 m before it crops: it counts streets there, and without `retain_all` keeps only the largest part of that buffered graph. The handler counts streets on the whole extract, so a node whose streets reach beyond the buffer can count more here, which is closer to the truth but a difference. The equivalence test compares against `truncate_graph_polygon` on the whole extract, so it does not cover the buffered step; a part of the road network that is disconnected within the buffer but connected through roads outside it could be kept here and dropped by osmnx.
+**Consequences and limits.** A cropped load reads the raw network, 4.6 million edges for Rwanda, and simplifies the widened area, which together cost 1.4 to 1.9 s for a city-sized area; the first version took about 1 s, for a wrong result. `street_count` near the edge of the widened area counts only the streets inside it, as osmnx's does.
 
 ### Decision 18: how equivalence with osmnx is tested
 
@@ -374,18 +380,21 @@ Loading times on Rwanda, from stored networks (`load_rwanda.py`, current code):
 - osmnx's networks for a small Kigali extract, built once through `graph_from_xml` and stored as fixtures, for `drive_service` raw and simplified, `drive`, `walk`, and `all`. Nodes, `street_count`, node tags, edges by `(u, v, key)`, way IDs, `oneway`, `reversed`, kept tags, and simplified geometries must all match. Raw lengths must be bit-identical.
 - The filter presets against osmnx's own filter strings.
 - A small made-up extract with every one-way case, repeated nodes, parallel ways, and node tags, against `graph_from_xml`, for a one-way and a two-way network type.
-- Cropped loads against `truncate_graph_polygon`, with and without `truncate_by_edge`, raw and simplified, and with `retain_all`.
+- Cropped loads against osmnx's `graph_from_polygon`, replayed with osmnx's own functions after the download (projection, 500 m buffer, `truncate_graph_polygon`, `largest_component`, `simplify_graph`, `count_streets_per_node`), with and without `truncate_by_edge`, raw and simplified, and with `retain_all`.
 - Kigali split in two at a meridian and stored as two extracts, combined in either order, against the whole.
+- A live test (`pytest -m live`) that loads central Kigali through the handler and through the fetcher, and requires them to share at least 98% of their nodes, allowing for edits made to OpenStreetMap since the extract's date.
 
 The tests that need osmnx run on Python 3.10, where it is installed, and are skipped elsewhere. One cross-check needs no test: the handler's whole-country load of Rwanda, which keeps the largest connected part, has 125,058 nodes and 332,535 edges, exactly the simplified network osmnx built from the same extract.
+
+The lesson of decision 17 is in the third point: a test that replays my understanding of osmnx can only confirm that understanding. Replaying osmnx's own code, and comparing with the fetcher live, is what catches a wrong understanding.
 
 ## Known limits and open questions
 
 Differences from osmnx:
 
 - `simplify` keeps the nodes between duplicated parallel ways and one node of a ring without junctions, where osmnx removes them (decision 6).
-- After a crop, `street_count` comes from the whole extract, where osmnx counts on an area buffered by 500 m (decision 17).
 - pandana's distances can differ from scipy's by up to about 0.5 m on Rwanda (decision 5).
+- An uncropped load counts streets on the whole extract, where `graph_from_xml` sets no `street_count` at all; this follows `graph_from_polygon`, which counts them.
 
 Untested or unmeasured:
 

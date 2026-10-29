@@ -67,6 +67,18 @@ def run_page(text: str, namespace: dict, page: str) -> str:
     return "".join(pieces)
 
 
+def example_namespace(workdir: str = "/tmp/gs_concepts") -> dict:
+    """Run every page's code without writing, and return the objects it made, for the figures."""
+    os.environ.setdefault("TQDM_DISABLE", "1")
+    sys.path.insert(0, str(ROOT))
+    Path(workdir).mkdir(parents=True, exist_ok=True)
+    os.chdir(workdir)
+    namespace: dict = {"__name__": "__concepts__"}
+    for page in PAGES:
+        run_page((PAGES_DIR / page).read_text(), namespace, page)
+    return namespace
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")

@@ -26,8 +26,8 @@ print(roads.metadata["extract"])
 
 ```text
 SpatialNetwork(nodes=125,095, edges=332,633, directed=True, weight='length')
-First load, with the download and the build: 80.7 s
-Later loads, from the saved network: 0.51 s
+First load, with the download and the build: 24.0 s
+Later loads, from the saved network: 0.62 s
 {'id': 'rwanda', 'date': '2026-10-28', 'url': 'https://download.geofabrik.de/africa/rwanda-261028.osm.pbf', 'path': 'africa/rwanda', 'replication_timestamp': '2026-10-28T21:21:02Z'}
 ```
 
@@ -63,7 +63,7 @@ print("Extract: ", from_extract)
 
 ```text
 Overpass: SpatialNetwork(nodes=478, edges=1,074, directed=True, weight='length')
-Extract:  SpatialNetwork(nodes=513, edges=1,128, directed=True, weight='length')
+Extract:  SpatialNetwork(nodes=478, edges=1,074, directed=True, weight='length')
 ```
 
 The two give the same network for the same area, built by the same rules, apart from edits made to OpenStreetMap between the extract's date and the moment of the query. Which to use depends on the area:
@@ -72,7 +72,7 @@ The two give the same network for the same area, built by the same rules, apart 
 |---|---|---|
 | Suits | a city, a district, the area around a set of schools | regions and whole countries |
 | Downloads | only the area, from Overpass | the whole country's extract, once |
-| Time for Rwanda | hours, if Overpass allows it | about 30 s the first time, then under a second |
+| Time for Rwanda | hours, if Overpass allows it | about 25 s the first time, then under a second |
 | Offline after the first run | no | yes |
 | Data date | the moment of the query | the extract's date, recorded in the metadata |
 

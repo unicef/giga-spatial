@@ -73,6 +73,17 @@ nav:
       - Processing: user-guide/processing.md
       - Settlement: user-guide/settlement-characterization.md
       - Infrastructure files: user-guide/infrastructure-normalization.md
+  - Concepts:
+      - "Spatial networks": concepts/spatial-networks/index.md
+      - Getting a network: concepts/spatial-networks/getting-a-network.md
+      - The data model: concepts/spatial-networks/data-model.md
+      - Editing: concepts/spatial-networks/editing.md
+      - Inserting points: concepts/spatial-networks/inserting-points.md
+      - Reduction: concepts/spatial-networks/reduction.md
+      - Algorithms: concepts/spatial-networks/algorithms.md
+      - Storage and interoperability: concepts/spatial-networks/storage.md
+      - Worked use cases: concepts/spatial-networks/use-cases.md
+      - Performance and pitfalls: concepts/spatial-networks/performance.md
   - API Reference:
       - api/index.md
       - Handlers: api/handlers.md
@@ -191,5 +202,9 @@ extra:
 
 extra_css:
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 copyright: '&copy; Copyright 2025 - , UNICEF Digital Inclusion and Giga, Applied Science Devs'
