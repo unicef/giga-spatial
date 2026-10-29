@@ -28,7 +28,7 @@ Some datasets and tools need packages that most users don't. Install them with a
 
 | Extra | Adds | Used by |
 | --- | --- | --- |
-| `roads` | osmnx | `OSMRoadsFetcher`, for OpenStreetMap road networks |
+| `roads` | osmnx, osmium (pyosmium) | `OSMRoadsFetcher` and `OSMRoadsHandler`, for OpenStreetMap road networks |
 | `pandana` | pandana | `SpatialNetwork.to_pandana` and `backend="pandana"` |
 | `gee` | earthengine-api, geemap | Google Earth Engine |
 | `bq` | google-cloud-bigquery and its auth packages | `BigQueryClient`, `MLabFetcher` |

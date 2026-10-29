@@ -331,6 +331,15 @@ class OSMRoadsConfig(BaseHandlerConfig):
         return cached
 
 
+NETWORK_MANIFEST = "network.json"
+
+
+def _network_folder_of(path: Union[str, Path]) -> Path:
+    """A saved network's folder, from the folder or its ``network.json``."""
+    path = Path(path)
+    return path.parent if path.name == NETWORK_MANIFEST else path
+
+
 def _variant(options: "OSMRoadsReadOptions") -> str:
     """A network variant's name: the network type, or ``tags-`` and a hash of the tags filter."""
     if options.tags is None:
@@ -428,7 +437,7 @@ class OSMRoadsReader(BaseHandlerReader):
     options_type = OSMRoadsReadOptions
     config_type = OSMRoadsConfig
 
-    def load(self, source, crop_to_source: bool = True, **kwargs) -> Optional[SpatialNetwork]:
+    def load(self, source: Any, crop_to_source: bool = True, **kwargs: Any) -> Optional[SpatialNetwork]:
         """
         The road network of a source.
 
@@ -496,7 +505,7 @@ class OSMRoadsReader(BaseHandlerReader):
             A directed ``SpatialNetwork``.
         """
         extracts = [p for p in source_data_path if str(p).endswith(EXTRACT_SUFFIX)]
-        folders = [p for p in source_data_path if not str(p).endswith(EXTRACT_SUFFIX)]
+        folders = [_network_folder_of(p) for p in source_data_path if not str(p).endswith(EXTRACT_SUFFIX)]
         networks = [SpatialNetwork.load(folder, data_store=self.data_store) for folder in folders]
         if not extracts:
             return networks[0] if len(networks) == 1 else SpatialNetwork.concat(networks)
@@ -508,6 +517,19 @@ class OSMRoadsReader(BaseHandlerReader):
             network = self._finish(parts, options, combine_raw=True)
         network = with_metadata(network, load={**network.metadata.get("load", {}), "cropped": False})
         return SpatialNetwork.concat([network, *networks]) if networks else network
+
+    def resolve_by_paths(self, paths: Union[Path, str, List[Union[str, Path]]]) -> List[Union[str, Path]]:
+        """
+        The stored files path sources name: ``.osm.pbf`` extracts as given,
+        and a saved network folder as its ``network.json``, so the handler's
+        availability check finds a file.
+        """
+        resolved = []
+        for path in super().resolve_by_paths(paths):
+            if not str(path).endswith(EXTRACT_SUFFIX) and Path(path).name != NETWORK_MANIFEST:
+                path = Path(path) / NETWORK_MANIFEST
+            resolved.append(path)
+        return resolved
 
     def crop_to_geometry(self, data, geometry, truncate_by_edge: bool = False, **kwargs):
         """
@@ -601,7 +623,7 @@ class OSMRoadsReader(BaseHandlerReader):
             )
 
     def _is_current(self, folder: Path) -> bool:
-        manifest = folder / "network.json"
+        manifest = folder / NETWORK_MANIFEST
         if not self.data_store.file_exists(str(manifest)):
             return False
         saved = json.loads(self.data_store.read_file(str(manifest), encoding="utf-8"))
@@ -634,8 +656,66 @@ class OSMRoadsHandler(BaseHandler):
     OpenStreetMap road networks from Geofabrik extracts.
 
     Stores each extract once and returns a ``SpatialNetwork`` for a country,
-    a geometry, a frame, or points.
+    a geometry, a frame, or points, the same network ``OSMRoadsFetcher``
+    returns for the same area. Suited to whole countries and regions; for a
+    city or the area around a few schools, the fetcher downloads less.
+
+    Options, passed as keywords to ``load_data`` and the other entries:
+
+    - choosing extracts: ``regions``, ``extracts``, ``date``, ``refresh``,
+      ``max_age_days``, ``buffer``, ``area`` (``OSMRoadsResolveOptions``);
+    - the network: ``network_type``, ``tags``, ``simplify``, ``retain_all``,
+      ``truncate_by_edge``, ``node_index`` (``OSMRoadsReadOptions``).
+
+    Example:
+        >>> from gigaspatial import OSMRoadsHandler
+        >>> handler = OSMRoadsHandler()
+        >>> rwanda = handler.load_data("RWA")
+        >>> around_schools = handler.load_data([(-1.9441, 30.0619), (-1.9536, 30.0588)], buffer=2000)
+
+    Needs ``pip install 'giga-spatial[roads]'``.
     """
+
+    def load_data(
+        self, source: Any, crop_to_source: bool = True, ensure_available: bool = True, **kwargs: Any
+    ) -> Optional[SpatialNetwork]:
+        """
+        The road network of a source, downloading its extracts first when they are not stored.
+
+        Args:
+            source: Country name or code, shapely geometry, GeoDataFrame,
+                DataFrame with latitude and longitude columns, list of
+                ``(lat, lon)`` tuples or Points, or paths of stored
+                ``.osm.pbf`` files or saved network folders.
+            crop_to_source: Crop to the source's area, as ``OSMRoadsFetcher``
+                does. True by default. A country whose extracts are its own
+                file or its regions is used whole.
+            ensure_available: Download missing extracts first.
+            **kwargs: Resolve, download, and read options.
+
+        Returns:
+            A directed ``SpatialNetwork`` in EPSG:4326 with lengths in meters.
+
+        Raises:
+            TypeError: If a keyword is not an option.
+            RuntimeError: If an extract could not be downloaded.
+            ValueError: If no extract covers the source, or the area has no matching roads.
+        """
+        return super().load_data(source, crop_to_source=crop_to_source, ensure_available=ensure_available, **kwargs)
+
+    def download_and_load(
+        self, source: Any, crop_to_source: bool = True, force_download: bool = False, **kwargs: Any
+    ) -> Optional[SpatialNetwork]:
+        """
+        Download the source's extracts when missing, or always with ``force_download``, then load its road network.
+
+        Args:
+            source: As for ``load_data``.
+            crop_to_source: Crop to the source's area. True by default.
+            force_download: Download the extracts again even when stored.
+            **kwargs: Resolve, download, and read options.
+        """
+        return super().download_and_load(source, crop_to_source=crop_to_source, force_download=force_download, **kwargs)
 
     def create_config(self, data_store: DataStore, logger: logging.Logger, **kwargs) -> OSMRoadsConfig:
         return OSMRoadsConfig(data_store=data_store, logger=logger, **kwargs)

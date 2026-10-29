@@ -149,7 +149,7 @@ Parameters, matching the fetcher where they overlap: `network_type="drive_servic
 
 ## 11. Sub-tasks
 
-Each sub-task is its own chat and pull request on `feat/osm-roads-handler`, stacked on `feat/spatial-network` until PR #18 merges.
+Each sub-task is its own chat and pull request on `feat/osm-roads-handler`, stacked on `feat/spatial-network` until PR #18 merges. All six are implemented; the modules are in `gigaspatial/handlers/osm/`, and `OSMRoadsHandler` is public from `gigaspatial`.
 
 | # | Sub-task | Delivers |
 |---|---|---|
