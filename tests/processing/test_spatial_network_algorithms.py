@@ -267,3 +267,22 @@ def test_pandana_unreachable_and_mixed_ids():
     mixed = SpatialNetwork(nodes, pd.DataFrame({"u": [1], "v": ["a"]}))
     with pytest.raises(ValueError, match="all integers or all text"):
         mixed.to_pandana()
+    assert mixed.shortest_path_lengths([1], ["a"], pairwise=True, backend="pandana")[0] == pytest.approx(
+        mixed.shortest_path_lengths([1], ["a"], pairwise=True)[0], abs=0.01
+    )
+
+
+def test_pandana_backend_with_inserted_points(kigali):
+    pytest.importorskip("pandana")
+    west, south, east, north = kigali.bounds
+    points = pd.DataFrame(
+        {"school_id": ["school-a", "school-b", "school-c"], "lon": [west + 0.01, (west + east) / 2, east - 0.01],
+         "lat": [south + 0.01, (south + north) / 2, north - 0.01]}
+    )
+    with_schools = kigali.insert_points(points, id_column="school_id")
+    origins = ["school-a", "school-b", "school-c"]
+    destinations = ["school-c", "school-a", "school-b"]
+    scipy_values = with_schools.shortest_path_lengths(origins, destinations, pairwise=True)
+    pandana_values = with_schools.shortest_path_lengths(origins, destinations, pairwise=True, backend="pandana")
+    assert np.isfinite(scipy_values).all()
+    assert pandana_values == pytest.approx(scipy_values, abs=1.0)
