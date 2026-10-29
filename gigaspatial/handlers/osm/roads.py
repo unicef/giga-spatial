@@ -59,6 +59,7 @@ from gigaspatial.handlers.osm.pbf import (
     BUILD_VERSION,
     build_road_network,
     combine_road_networks,
+    count_streets,
     simplify_road_network,
     with_metadata,
 )
@@ -332,6 +333,20 @@ class OSMRoadsConfig(BaseHandlerConfig):
 
 
 NETWORK_MANIFEST = "network.json"
+# osmnx's graph_from_polygon simplifies the area widened by this much, then cuts it to the area,
+# so roads that leave the area end at their true junctions.
+OSMNX_POLYGON_BUFFER_M = 500.0
+
+
+def _widened(area, meters: float, logger: Any):
+    """An area in EPSG:4326 widened by ``meters``, through its UTM zone as the fetcher buffers."""
+    import geopandas as gpd
+
+    from gigaspatial.processing.geo import estimate_utm_crs_with_fallback
+
+    series = gpd.GeoSeries([area], crs="EPSG:4326")
+    utm = estimate_utm_crs_with_fallback(gpd.GeoDataFrame(geometry=series), logger=logger)
+    return series.to_crs(utm).buffer(meters).to_crs("EPSG:4326").iloc[0]
 
 
 def _network_folder_of(path: Union[str, Path]) -> Path:
@@ -430,8 +445,10 @@ class OSMRoadsReader(BaseHandlerReader):
     ``rwanda.networks/drive_service-simplified/``; a missing one is built from
     the extract and saved, never downloaded. A stored network covers its whole
     extract with every connected part (ADR 0006). Loading for a source then
-    follows ``osmnx.graph_from_polygon``: keep the raw network's nodes in the
-    source's area, simplify, and keep the largest connected part.
+    follows ``osmnx.graph_from_polygon``, step by step: keep the raw
+    network's nodes in the source's area widened by 500 m, keep its largest
+    connected part, simplify, then keep the nodes in the area itself and the
+    largest connected part again.
     """
 
     options_type = OSMRoadsReadOptions
@@ -473,16 +490,25 @@ class OSMRoadsReader(BaseHandlerReader):
                 self.logger.info("The extracts are the country's own files: not cropped")
             return self.load_from_paths(paths, read)
         area = self.config.source_area(source, resolve)
+        widened = _widened(area, OSMNX_POLYGON_BUFFER_M, self.logger)
         parts, counted = [], []
         for path in paths:
             whole = self.stored_network(path, read, simplified=False)
-            part = self.crop_to_geometry(whole, area, truncate_by_edge=read.truncate_by_edge)
+            part = self.crop_to_geometry(whole, widened, truncate_by_edge=read.truncate_by_edge)
             parts.append(part)
             if len(paths) > 1:
                 edges = whole.edges
                 touching = edges["u"].isin(part.node_index) | edges["v"].isin(part.node_index)
                 counted.append(edges.loc[np.asarray(touching), ["u", "v", "osmid", "reversed"]])
-        network = self._finish(parts, read, combine_raw=True, counted_edges=pd.concat(counted) if counted else None)
+        network = parts[0] if len(parts) == 1 else combine_road_networks(parts, pd.concat(counted))
+        network = self._finish([network], read, combine_raw=True)
+        streets = count_streets(network)
+        network = self.crop_to_geometry(network, area, truncate_by_edge=read.truncate_by_edge)
+        if len(network.nodes) == 0:
+            raise ValueError(f"No {read.tags or read.network_type} roads in the area")
+        if not read.retain_all:
+            network = network.largest_component()
+        network = network.set_node_attribute("street_count", streets.reindex(network.node_index).to_numpy())
         return with_metadata(
             network,
             load={**network.metadata.get("load", {}), "cropped": True, "area_bounds": [float(v) for v in area.bounds]},

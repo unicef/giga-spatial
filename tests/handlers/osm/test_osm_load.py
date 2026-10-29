@@ -62,7 +62,7 @@ def no_boundaries(monkeypatch):
 
 
 def osmnx_reference(tmp_path, area, truncate_by_edge=False, simplify=True, retain_all=False):
-    """What osmnx's graph_from_polygon returns for the Kigali extract, built from the same ways."""
+    """What osmnx's graph_from_polygon returns for the Kigali extract: its steps after the download, replayed."""
     ox = pytest.importorskip("osmnx")
     passes, _ = way_filter("drive_service")
     kept = {w.id for w in osmium.FileProcessor(str(KIGALI), osmium.osm.WAY) if passes(w.tags.get)}
@@ -72,14 +72,20 @@ def osmnx_reference(tmp_path, area, truncate_by_edge=False, simplify=True, retai
         for entity in osmium.FileProcessor(str(KIGALI)):
             if (entity.is_node() and entity.id in refs) or (entity.is_way() and entity.id in kept):
                 writer.add(entity)
-    graph = ox.graph_from_xml(xml, simplify=False, retain_all=True)
-    for node, count in ox.stats.count_streets_per_node(graph).items():
-        graph.nodes[node]["street_count"] = count
-    graph = ox.truncate.truncate_graph_polygon(graph, area, truncate_by_edge=truncate_by_edge)
+    # osmnx 2.0.2's graph_from_polygon, after it has downloaded the ways in the widened area.
+    area_utm, utm = ox.projection.project_geometry(area)
+    widened, _ = ox.projection.project_geometry(area_utm.buffer(500), crs=utm, to_latlong=True)
+    widened_graph = ox.graph_from_xml(xml, simplify=False, retain_all=True)
+    widened_graph = ox.truncate.truncate_graph_polygon(widened_graph, widened, truncate_by_edge=truncate_by_edge)
+    if not retain_all:
+        widened_graph = ox.truncate.largest_component(widened_graph)
     if simplify:
-        graph = ox.simplify_graph(graph)
+        widened_graph = ox.simplify_graph(widened_graph)
+    graph = ox.truncate.truncate_graph_polygon(widened_graph, area, truncate_by_edge=truncate_by_edge)
     if not retain_all:
         graph = ox.truncate.largest_component(graph)
+    for node, count in ox.stats.count_streets_per_node(widened_graph, nodes=graph.nodes).items():
+        graph.nodes[node]["street_count"] = count
     SpatialNetwork.from_networkx(graph).save(tmp_path / "reference")
     return SpatialNetwork.load(tmp_path / "reference")
 
