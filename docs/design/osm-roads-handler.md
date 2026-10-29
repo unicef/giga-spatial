@@ -11,7 +11,7 @@ Read first:
 - [ADR 0006](../adr/0006-osm-extract-storage.md): extracts stored by date, uncropped networks beside them, cropping at load.
 - [ADR 0007](../adr/0007-osm-extract-choice.md): extracts chosen by polygon, with a curated list of multi-country extracts.
 
-This page is not in the docs site navigation.
+This page is not in the docs site navigation. Why each part was built the way it was, with the benchmarks behind it, is in [design and algorithm decisions](spatial-networks-decisions.md).
 
 ## 1. Why a handler
 
@@ -85,7 +85,7 @@ The same network as osmnx for every `network_type`, tested against osmnx on the 
 1. Read the file once, with pyosmium's node location index. pyosmium preselects ways by key in C++; Python applies the filter to each way, keeps its ID, node references, and kept tags, and has pyosmium write its line (every node, in order) as WKB. Nodes reach Python only when they carry a kept node tag.
 2. In numpy: drop consecutive repeated nodes, reverse ways that run against their node order, cut ways into edges, number parallel edges as networkx does, and compute lengths and `street_count`; build the `SpatialNetwork`; run `simplify` for the simplified variant.
 
-Two reads (ways, then only the referenced nodes) were measured first: reading Rwanda's 4.1 million node references took 4.2 s, and the referenced nodes' coordinates another 6.6 s through Python, or 3.7 s with the location index and WKB. One read with the index takes 6 s for all of it.
+Two reads (ways, then their nodes) were measured against one (`benchmarks/osm_roads/read_strategies.py`, results in `benchmarks/osm_roads/results.md`). Reading the referenced nodes through an ID filter in Python takes 12.2 s in all and 2.4 GB; reading the ways again with the location index takes 7.5 s and 1.0 GB; one read with the index takes 7.3 s and 1.0 GB. The location index is what saves the time. One read is kept because it is simpler (the filter, tags, and line come from the same way) and reads the file once, not because it is faster.
 
 | Rwanda (68 MB extract) | Raw | Simplified |
 |---|---|---|
@@ -126,9 +126,9 @@ These are the steps of osmnx's `graph_from_polygon` after its download (osmnx 2.
 
 | Rwanda (`benchmarks/osm_roads/load_rwanda.py`) | Time |
 |---|---|
-| Four school points, first load (builds the raw network) | 10.7 s |
-| Four school points; a 30 × 22 km box around Kigali | 1.1 s; 1.5 s |
-| The country, first load (simplifies the stored raw network) | 8.3 s |
+| Four school points, first load (builds the raw network) | 11.1 s |
+| Four school points; a 30 × 22 km box around Kigali | 1.4 s; 1.9 s |
+| The country, first load (simplifies the stored raw network) | 9.8 s |
 | The country | 0.44 s |
 
 Parameters, matching the fetcher where they overlap: `network_type="drive_service"`, `tags=None`, `simplify=True`, `retain_all=False`, `truncate_by_edge=False`, `buffer=2000`, `area="hull"`, `regions=False`, `extracts=None`, `date=None`, `refresh=False`, `max_age_days=None`, `node_index=None`.
@@ -139,7 +139,7 @@ Parameters, matching the fetcher where they overlap: `network_type="drive_servic
 |---|---|
 | Build Rwanda's network from its extract | under 30 s (osmnx route: 300 s); `drive_service` 15.4 s |
 | Nigeria (680 MiB) on a 16 GB machine | fits in memory with the default index |
-| Load a stored network | under 1 s for Rwanda (ADR 0005 load: 0.48 s); the country 0.44 s, a cropped area about 1 s |
+| Load a stored network | under 1 s for Rwanda (ADR 0005 load: 0.48 s); the country 0.44 s, a cropped area 1.4 to 1.9 s |
 | Extracts over 1 GiB | use the disk-backed index automatically |
 
 ## 10. Tests and fixtures
