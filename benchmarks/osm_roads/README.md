@@ -16,3 +16,9 @@ The script needs osmnx and pyosmium. When pyosmium is not installed, put a copy 
 pip install --target /tmp/gs_geofabrik/pylib osmium
 PYTHONPATH=/tmp/gs_geofabrik/pylib:../.. python make_fixtures.py
 ```
+
+`build_rwanda.py` times `build_road_network` on Rwanda's whole extract, raw and simplified, for the network types given (`drive_service` by default); the target is under 30 s. Results are in section 7 of the design.
+
+```bash
+PYTHONPATH=/tmp/gs_geofabrik/pylib:../.. python build_rwanda.py drive_service walk
+```

@@ -10,11 +10,14 @@ The design is in ``docs/design/osm-roads-handler.md``, with ADRs 0006 (storage)
 and 0007 (choosing extracts). Needs ``pip install 'giga-spatial[roads]'``.
 """
 
+import contextlib
 import dataclasses
 import datetime
 import json
 import logging
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, Union
 
@@ -27,6 +30,7 @@ from pydantic.dataclasses import dataclass
 
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.handlers.base import (
     BaseHandler,
     BaseHandlerConfig,
@@ -39,9 +43,12 @@ from gigaspatial.handlers.base import (
 from gigaspatial.handlers.base.config import source_geometry
 from gigaspatial.handlers.base.fetch import TIMEOUT, stream_to_store
 from gigaspatial.handlers.base.source import SourceKind, classify_source
+from gigaspatial.handlers.osm_pbf import build_road_network, import_osmium
+from gigaspatial.processing.network import SpatialNetwork
 
 GEOFABRIK_URL = "https://download.geofabrik.de"
 LATEST = "-latest.osm.pbf"
+EXTRACT_SUFFIX = ".osm.pbf"
 # An extract's header block sits in its first bytes, so its timestamp is read without the rest.
 HEADER_BYTES = 64 * 1024
 
@@ -126,6 +133,7 @@ class OSMRoadsReadOptions(ReadOptions):
             ``"drive"``, ``"walk"``, ``"bike"``, ``"all_public"``, or ``"all"``.
         tags: Allowed values per OSM key, such as
             ``{"highway": ["primary", "secondary"]}``, replacing ``network_type``.
+            A way must match every key; ``None`` allows any value of a key.
         simplify: Join edges between junctions, as osmnx does.
         retain_all: Keep every disconnected part, not only the largest.
         truncate_by_edge: Keep edges that leave the area at one end.
@@ -134,7 +142,7 @@ class OSMRoadsReadOptions(ReadOptions):
     """
 
     network_type: str = "drive_service"
-    tags: Optional[Dict[str, Sequence[str]]] = None
+    tags: Optional[Dict[str, Optional[Sequence[str]]]] = None
     simplify: bool = True
     retain_all: bool = False
     truncate_by_edge: bool = False
@@ -234,7 +242,30 @@ class OSMRoadsConfig(BaseHandlerConfig):
 
     def get_data_unit_path(self, unit: dict, options: Optional[OSMRoadsResolveOptions] = None) -> Path:
         """An extract's stored file: ``base_path / date / path.osm.pbf``, as in ``2026-10-27/africa/rwanda.osm.pbf``."""
-        return self.base_path / unit["date"] / f"{unit['path']}.osm.pbf"
+        return self.base_path / unit["date"] / f"{unit['path']}{EXTRACT_SUFFIX}"
+
+    def extract_of_path(self, path: Union[str, Path]) -> Optional[Dict[str, str]]:
+        """
+        The extract a stored file holds, read from its place in the layout.
+
+        Returns:
+            ``{"id", "date", "url", "path"}``, as in the file's data unit, or
+            None for a file outside ``base_path / date /``.
+        """
+        try:
+            relative = Path(path).relative_to(self.base_path)
+        except ValueError:
+            return None
+        date, *rest = relative.parts
+        if not rest or not _ISO_DATE.fullmatch(date) or not relative.name.endswith(EXTRACT_SUFFIX):
+            return None
+        extract_path = "/".join(rest)[: -len(EXTRACT_SUFFIX)]
+        return {
+            "id": extract_path.rsplit("/", 1)[-1],
+            "date": date,
+            "url": _dated_url(f"{GEOFABRIK_URL}/{extract_path}{LATEST}", date),
+            "path": extract_path,
+        }
 
     def choose_date(self, unit: dict, options: OSMRoadsResolveOptions) -> str:
         """
@@ -453,9 +484,7 @@ def replication_timestamp(path: Union[str, Path], data_store: Optional[DataStore
     Returns:
         The timestamp, in UTC, or None if the header has none.
     """
-    osmium = _import_osmium()
-    from gigaspatial.core.io.local_data_store import LocalDataStore
-
+    osmium = import_osmium()
     with (data_store or LocalDataStore()).open(str(path), "rb") as file:
         head = file.read(HEADER_BYTES)
     reader = osmium.io.Reader(osmium.io.FileBuffer(head, "pbf"), osmium.osm.osm_entity_bits.NOTHING)
@@ -468,14 +497,18 @@ def replication_timestamp(path: Union[str, Path], data_store: Optional[DataStore
     return datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
-def _import_osmium():
-    try:
-        import osmium
-    except ImportError as error:
-        raise ImportError(
-            "OSMRoadsHandler requires 'osmium' (pyosmium). Install it with: pip install 'giga-spatial[roads]'"
-        ) from error
-    return osmium
+@contextlib.contextmanager
+def _local_file(data_store: DataStore, path: Union[str, Path]):
+    """A local path for a stored file, which pyosmium needs: in place on a local store, else a temporary copy."""
+    if isinstance(data_store, LocalDataStore):
+        path = Path(path)
+        yield path if path.is_absolute() else data_store.base_path / path
+        return
+    with tempfile.TemporaryDirectory(prefix="gigaspatial-osm-") as scratch:
+        local = Path(scratch) / Path(path).name
+        with data_store.open(str(path), "rb") as source, open(local, "wb") as target:
+            shutil.copyfileobj(source, target, 16 * 1024 * 1024)
+        yield local
 
 
 def _read_stamp(data_store: DataStore, path: Path) -> Optional[datetime.datetime]:
@@ -552,6 +585,35 @@ class OSMRoadsReader(BaseHandlerReader):
             A ``SpatialNetwork``.
         """
         raise NotImplementedError("OSMRoadsReader.load_from_paths is not implemented yet")
+
+    def build_network(
+        self, path: Union[str, Path], options: Optional[OSMRoadsReadOptions] = None
+    ) -> SpatialNetwork:
+        """
+        The road network of one stored extract, as osmnx builds it (``osm_pbf.build_road_network``).
+
+        The network covers the whole extract, with every connected part
+        (ADR 0006); cropping and keeping the largest part happen at load.
+
+        Args:
+            path: A stored ``.osm.pbf`` file.
+            options: ``network_type``, ``tags``, ``simplify``, and ``node_index``.
+
+        Returns:
+            A directed network whose metadata records the extract's ID, date,
+            URL, and replication timestamp.
+        """
+        options = options or OSMRoadsReadOptions()
+        with _local_file(self.data_store, path) as local:
+            return build_road_network(
+                local,
+                network_type=options.network_type,
+                tags=options.tags,
+                simplify=options.simplify,
+                node_index=options.node_index,
+                extract=self.config.extract_of_path(path),
+                logger=self.logger,
+            )
 
 
 class OSMRoadsHandler(BaseHandler):

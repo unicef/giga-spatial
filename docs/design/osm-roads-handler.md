@@ -17,7 +17,7 @@ This page is not in the docs site navigation.
 
 - Overpass is a shared service. A country-scale fetch takes many queries (osmnx splits areas above 2,500 km²), can take hours, runs into fair-use limits (roughly 10,000 queries and 1 GB a day), and needs osmnx's networkx graph in memory: about 2.3 GB for unsimplified Rwanda. Every public Overpass server was unreachable on 26–27 October 2026.
 - An extract is a file kept in a data store and reused, which the glossary calls a handler. Users need both small areas (the fetcher) and whole countries or provinces (this handler).
-- The handler reads extracts with pyosmium and builds the node and edge tables directly, without osmnx or networkx. On Rwanda, pyosmium read every road way with coordinates in 8.4 s, and `simplify` takes 9 s; the route through OSM XML and osmnx took 300 s.
+- The handler reads extracts with pyosmium and builds the node and edge tables directly, without osmnx or networkx. On Rwanda, the handler builds the simplified `drive_service` network in 15 s; the route through OSM XML and osmnx took 300 s.
 
 ## 2. Names, modules, and dependencies
 
@@ -79,16 +79,25 @@ osm/geofabrik/2026-10-27/south-america/brazil/nordeste.networks/drive_service-si
 
 ## 7. Building a network from an extract
 
-The same network as osmnx for every `network_type`, tested against osmnx on the Kigali test extract.
+The same network as osmnx for every `network_type`, tested against osmnx on the Kigali test extract: the same nodes, `street_count`, and node tags; the same `(u, v, key)` edges with the same lengths, way IDs, `oneway`, `reversed`, kept tags, and simplified geometries. The builder is `gigaspatial/handlers/osm_pbf.py` (`build_road_network`); `OSMRoadsReader.build_network` adds the extract's ID, date, and URL from its stored path.
 
-1. Read the ways without coordinates (0.4 s for Rwanda): way IDs, node references, and the kept tags. Apply the filter in Python.
-2. Read only the referenced nodes' coordinates, into numpy arrays.
-3. Cut ways into edges and compute lengths in numpy; build the `SpatialNetwork` tables directly; run `simplify` for the simplified variant.
+1. Read the file once, with pyosmium's node location index. pyosmium preselects ways by key in C++; Python applies the filter to each way, keeps its ID, node references, and kept tags, and has pyosmium write its line (every node, in order) as WKB. Nodes reach Python only when they carry a kept node tag.
+2. In numpy: drop consecutive repeated nodes, reverse ways that run against their node order, cut ways into edges, number parallel edges as networkx does, and compute lengths and `street_count`; build the `SpatialNetwork`; run `simplify` for the simplified variant.
+
+Two reads (ways, then only the referenced nodes) were measured first: reading Rwanda's 4.1 million node references took 4.2 s, and the referenced nodes' coordinates another 6.6 s through Python, or 3.7 s with the location index and WKB. One read with the index takes 6 s for all of it.
+
+| Rwanda (68 MB extract) | Raw | Simplified |
+|---|---|---|
+| `drive_service` | 2.3 M nodes, 4.6 M edges, 8.9 s | 129 k nodes, 339 k edges, 15.4 s |
+| `walk` | 3.8 M nodes, 7.8 M edges, 15.0 s | 263 k nodes, 698 k edges, 27.3 s |
+
+`drive_service` peaks at 1.6 GB of memory (`benchmarks/osm_roads/build_rwanda.py`).
 
 osmnx rules to reproduce exactly (osmnx 2.0.2):
 
+- Ways with nodes missing from the file are skipped with a warning; Geofabrik's extracts have none. osmnx would fail on them.
 - Every preset requires `highway`, excludes `area=yes`, and, except `all`, excludes `access=private`. The presets' excluded `highway` values and extra conditions are in `osmnx/_overpass.py` (`drive` 75–82, `drive_service` 85–92, `walk` 99–106, `bike` 110–115, `all_public` 119–123, `all` 127–130). Their conditions are Overpass `!~` patterns: unanchored regular expressions, and a way without the key passes (so `walk`'s `motor` also drops `motorway`).
-- `tags=` replaces Overpass's `custom_filter`: a dict of key to allowed values, such as `{"highway": ["primary", "secondary"]}`.
+- `tags=` replaces Overpass's `custom_filter`: a dict of key to allowed values, such as `{"highway": ["primary", "secondary"]}`. A way must match every key; `None` allows any value. `tags=` networks are one-way where tagged, as osmnx's `custom_filter` networks are.
 - One-way: `oneway` in `{"yes", "true", "1", "-1", "reverse", "T", "F"}`, or `junction=roundabout`; `walk` is two-way everywhere. Reversed: `oneway` in `{"-1", "reverse", "T"}`, and the node order is reversed. Two-way ways get both directions, the reverse edges with `reversed=True`.
 - Kept tags: osmnx's `useful_tags_way` (`access`, `area`, `bridge`, `est_width`, `highway`, `junction`, `landuse`, `lanes`, `maxspeed`, `name`, `oneway`, `ref`, `service`, `tunnel`, `width`) and `useful_tags_node` (`highway`, `junction`, `railway`, `ref`). Consecutive duplicate nodes are dropped.
 - Lengths: great-circle per segment before simplification, summed by `simplify`. `street_count` per node as osmnx's `count_streets_per_node`.
@@ -113,7 +122,7 @@ Parameters, matching the fetcher where they overlap: `network_type="drive_servic
 
 | Operation | Target |
 |---|---|
-| Build Rwanda's network from its extract | under 30 s (osmnx route: 300 s) |
+| Build Rwanda's network from its extract | under 30 s (osmnx route: 300 s); `drive_service` 15.4 s |
 | Nigeria (680 MiB) on a 16 GB machine | fits in memory with the default index |
 | Load a stored network | under 1 s for Rwanda (ADR 0005 load: 0.48 s) |
 | Extracts over 1 GiB | use the disk-backed index automatically |
@@ -133,7 +142,7 @@ Each sub-task is its own chat and pull request on `feat/osm-roads-handler`, stac
 | 1 | Scaffolding | `osmium` in `[roads]`; `.pbf` in `DATA_FILE_SUFFIXES`; `DATA_TYPES["osm"]`; the module skeleton; the index subset and Kigali `.pbf` fixtures, with the scripts that make them |
 | 2 | Choosing extracts | storing the index; smallest covering extract by polygon with the ISO fast path; the own-country rule and curated multi-country list; `regions=` and `extracts=`; continents only when named |
 | 3 | Downloads and storage | `-latest` to the dated file; streaming and checksum; the date-first layout; `refresh`, `max_age_days`, `date=`; the offline replication timestamp |
-| 4 | Building a network | the three-pass read; osmnx's filters, one-way rules, kept tags, lengths, and `street_count`; `simplify`; the node index by size; the equivalence test on the Kigali extract; Rwanda under 30 s |
+| 4 | Building a network | the single read with numpy assembly (planned as three passes); osmnx's filters, one-way rules, kept tags, lengths, and `street_count`; `simplify`; the node index by size; the equivalence test on the Kigali extract; Rwanda under 30 s |
 | 5 | Loading for a source | network folders per variant, built once and reused; clipping, the largest part, `concat`; the no-crop rule; local copies for remote stores; the reader's crop |
 | 6 | Handler and docs | wiring `OSMRoadsHandler`, import registration, a live test, a country-scale section in the road networks guide, the API reference, and the changelog |
 
