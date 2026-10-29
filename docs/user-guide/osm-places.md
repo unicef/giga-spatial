@@ -1,6 +1,6 @@
-# OSM places
+# OSM points of interest
 
-OpenStreetMap places are a fetcher. `OSMLocationFetcher` queries the Overpass API and returns a table of records. It does not store the dataset as files. The public Overpass instance needs no API key.
+OpenStreetMap points of interest, such as clinics, schools, and shops, come from a fetcher. `OSMLocationFetcher` queries the Overpass API and returns a table of records. It does not store the dataset as files. The public Overpass instance needs no API key.
 
 ```python
 from gigaspatial import OSMLocationFetcher

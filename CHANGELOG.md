@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
--   **Road networks from OpenStreetMap (`gigaspatial/fetchers/osm_roads.py`)**
+-   **Road networks from OpenStreetMap (`gigaspatial/fetchers/osm/roads.py`)**
     -   `OSMRoadsFetcher` fetches the road network of a source (a country, a geometry, a frame, or points) through osmnx and the Overpass API, and returns a `SpatialNetwork`. Points become their convex hull, bounding box, or buffers, widened by `buffer` meters. List-valued OSM attributes are normalised so the network can be saved.
     -   Failed requests are retried with growing pauses, and the last error suggests an Overpass mirror. Areas above 50,000 km² log a warning.
     -   New setting `OVERPASS_URL` chooses the Overpass endpoint.
@@ -30,6 +30,9 @@ All notable changes to this project will be documented in this file.
 
 -   **Source geometry shared by handlers and fetchers (`gigaspatial/handlers/base/config.py`)**
     -   The body of `BaseHandlerConfig.extract_search_geometry` moved into the function `source_geometry`, which the method calls. Handler behaviour is unchanged.
+
+-   **OpenStreetMap fetchers grouped in `gigaspatial/fetchers/osm/`**
+    -   `OSMLocationFetcher` moved from `gigaspatial/fetchers/osm.py` to `gigaspatial/fetchers/osm/pois.py`, beside `OSMRoadsFetcher` in `roads.py`, as the OSM handler is grouped in `gigaspatial/handlers/osm/`. `from gigaspatial import OSMLocationFetcher`, `from gigaspatial.fetchers import OSMLocationFetcher`, and `from gigaspatial.fetchers.osm import OSMLocationFetcher` all still work.
 
 -   **Download checksums (`gigaspatial/handlers/base/fetch.py`)**
     -   `stream_to_store` takes `md5=`, checked while the file streams; on a mismatch the file is removed and `ValueError` raised.

@@ -23,7 +23,7 @@ This page is not in the docs site navigation. The user-facing description is the
 | Item | Location |
 |---|---|
 | `SpatialNetwork` | `gigaspatial/processing/network.py`, possibly split into a `gigaspatial/processing/network/` package if it grows past one module |
-| `OSMRoadsFetcher` | `gigaspatial/fetchers/osm_roads.py` |
+| `OSMRoadsFetcher` | `gigaspatial/fetchers/osm/roads.py` |
 | Public names | `from gigaspatial import SpatialNetwork, OSMRoadsFetcher`; `gigaspatial.processing.SpatialNetwork`; `gigaspatial.fetchers.OSMRoadsFetcher` |
 | Lazy registration | Add both to the `attach` dictionaries and the `TYPE_CHECKING` blocks, per ADR 0003. `tests/test_public_api.py` checks the two lists match and that every exported name resolves. `SpatialNetwork` is registered in sub-task 1; `OSMRoadsFetcher` is registered in sub-task 8, when it exists. |
 
