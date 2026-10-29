@@ -157,7 +157,8 @@ class InsertionMixin:
         twins = self._twin_rows(np.unique(foot.row[splitting]))
         road = foot.row[splitting].copy()
         for row, twin in twins.items():
-            if twin < row:
+            # A one-way road has no twin (-1) and keeps its own row.
+            if 0 <= twin < row:
                 road[road == row] = twin
         split_plan = self._split_plan(road, foot.x[splitting], foot.y[splitting])
         first_id = _lowest_negative_id(ids)

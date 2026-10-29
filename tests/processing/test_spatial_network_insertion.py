@@ -137,6 +137,21 @@ def test_one_way_and_undirected_roads():
     assert_valid(undirected)
 
 
+def test_points_on_separate_one_way_roads_split_their_own_roads():
+    nodes = pd.DataFrame({"x": [30.0, 30.01, 30.0, 30.01], "y": [-1.95, -1.95, -1.96, -1.96]}, index=["a", "b", "c", "d"])
+    edges = pd.DataFrame({"u": ["a", "c"], "v": ["b", "d"], "oneway": [True, True]})
+    net = SpatialNetwork(nodes, edges, directed=True)
+    out = net.insert_points(points((-1.95 + 30 * M, 30.003), (-1.96 - 30 * M, 30.007)))
+    feet = out.nodes.loc[[-1, -2], ["x", "y"]].sort_values("x")
+    assert feet["x"].to_numpy() == pytest.approx([30.003, 30.007])
+    assert feet["y"].to_numpy() == pytest.approx([-1.95, -1.96])
+    assert set(edge(out, "p0", out.edges[out.edges["u"] == "p0"]["v"].iloc[0])[["u"]]) == {"p0"}
+    pieces = out.edges[out.edges["kind"] == "split"]
+    assert set(zip(pieces["u"], pieces["v"])) == {("a", -1), (-1, "b"), ("c", -2), (-2, "d")}
+    assert line_lengths(pieces["geometry"]) == pytest.approx(pieces["length"].to_numpy(), rel=1e-6)
+    assert_valid(out)
+
+
 def test_split_ids_continue_below_existing_ones():
     once = road().insert_points(points((-1.95 + 50 * M, 30.004)))
     twice = once.insert_points(points((-1.95 + 50 * M, 30.008), ids=["q"]))
@@ -204,6 +219,13 @@ def test_kigali_insertion(kigali, schools):
     expected = haversine(schools["lat"].to_numpy(), schools["lon"].to_numpy(), feet.y.to_numpy(), feet.x.to_numpy())
     connections = out.edges[out.edges["u"].isin(schools["school"])].set_index("u")["length"]
     assert connections.loc[schools["school"]].to_numpy() == pytest.approx(expected, abs=0.01)
+
+    # Each school's connection ends at its own foot, and every split piece runs where its length says.
+    ends = out.edges[out.edges["u"].isin(schools["school"])].set_index("u")["v"].loc[schools["school"]]
+    end_xy = out.nodes.loc[ends, ["y", "x"]].to_numpy()
+    assert haversine(end_xy[:, 0], end_xy[:, 1], feet.y.to_numpy(), feet.x.to_numpy()) == pytest.approx(0, abs=0.05)
+    pieces = out.edges[out.edges["kind"] == "split"]
+    assert line_lengths(pieces["geometry"]) == pytest.approx(pieces["length"].to_numpy(), rel=1e-3)
 
 
 def test_kigali_points_reach_their_road(kigali, schools):
