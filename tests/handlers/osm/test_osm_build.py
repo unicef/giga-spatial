@@ -8,14 +8,14 @@ import pytest
 import shapely
 
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.osm_pbf import (
+from gigaspatial.handlers.osm.pbf import (
     IN_MEMORY_INDEX_MAX_BYTES,
     NETWORK_FILTERS,
     build_road_network,
     node_index_for,
     way_filter,
 )
-from gigaspatial.handlers.osm_roads import OSMRoadsHandler, OSMRoadsReadOptions, _local_file
+from gigaspatial.handlers.osm.roads import OSMRoadsHandler, OSMRoadsReadOptions, _local_file
 from gigaspatial.processing.network import SpatialNetwork
 
 osmium = pytest.importorskip("osmium")

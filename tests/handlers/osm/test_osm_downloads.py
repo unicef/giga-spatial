@@ -4,12 +4,8 @@ from pathlib import Path
 import pytest
 import requests
 
-from gigaspatial.handlers.osm_roads import (
-    OSMRoadsDownloader,
-    OSMRoadsHandler,
-    OSMRoadsResolveOptions,
-    replication_timestamp,
-)
+from gigaspatial.handlers.osm.pbf import replication_timestamp
+from gigaspatial.handlers.osm.roads import OSMRoadsDownloader, OSMRoadsHandler, OSMRoadsResolveOptions
 
 DATA = Path(__file__).resolve().parents[2] / "data" / "osm_roads"
 GEOFABRIK = "https://download.geofabrik.de"

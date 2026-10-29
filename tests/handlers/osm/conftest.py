@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.osm_roads import OSMRoadsConfig
+from gigaspatial.handlers.osm.roads import OSMRoadsConfig
 
 DATA = Path(__file__).resolve().parents[2] / "data" / "osm_roads"
 GEOFABRIK = "https://download.geofabrik.de"

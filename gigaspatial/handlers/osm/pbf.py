@@ -12,6 +12,7 @@ and writes each kept way's line in C++, so Python touches each way but no
 node coordinate; the edges are then cut and measured in numpy.
 """
 
+import datetime
 import re
 import tempfile
 import time
@@ -25,6 +26,8 @@ import pandas as pd
 import shapely
 
 from gigaspatial.config import config as global_config
+from gigaspatial.core.io.data_store import DataStore
+from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.processing.network import SpatialNetwork
 from gigaspatial.processing.network.geodesy import haversine
 
@@ -116,6 +119,8 @@ NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     ),
 }
 
+# A file's header block sits in its first bytes, so its timestamp is read without the rest.
+HEADER_BYTES = 64 * 1024
 # The in-memory index takes about 16 bytes per node in the file; above this
 # extract size (Nigeria is 680 MiB, about 2 GB of index) it moves to disk.
 IN_MEMORY_INDEX_MAX_BYTES = 1 << 30
@@ -429,6 +434,33 @@ def _node_tag_columns(node_ids: np.ndarray, node_tags: Dict[int, Dict[str, str]]
         if any(v is not None for v in values[rows[inside]]):
             columns[name] = pd.Categorical(values)
     return columns
+
+
+def replication_timestamp(path: Union[str, Path], data_store: Optional[DataStore] = None) -> Optional[datetime.datetime]:
+    """
+    The time a file's data was taken from OpenStreetMap, from its header.
+
+    Reads only the file's first bytes, so it works offline and on remote data
+    stores. For a Geofabrik extract, its UTC date is the extract's date.
+
+    Args:
+        path: A stored ``.osm.pbf`` file.
+        data_store: The store holding it; a local one by default.
+
+    Returns:
+        The timestamp, in UTC, or None if the header has none.
+    """
+    osmium = import_osmium()
+    with (data_store or LocalDataStore()).open(str(path), "rb") as file:
+        head = file.read(HEADER_BYTES)
+    reader = osmium.io.Reader(osmium.io.FileBuffer(head, "pbf"), osmium.osm.osm_entity_bits.NOTHING)
+    try:
+        stamp = reader.header().get("osmosis_replication_timestamp")
+    finally:
+        reader.close()
+    if not stamp:
+        return None
+    return datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
 def import_osmium():

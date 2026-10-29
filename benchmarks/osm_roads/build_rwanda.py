@@ -11,7 +11,7 @@ import resource
 import sys
 import time
 
-from gigaspatial.handlers.osm_pbf import build_road_network
+from gigaspatial.handlers.osm.pbf import build_road_network
 
 PBF = os.path.join(os.environ.get("GS_BENCH_DIR", "/tmp/gs_bench"), "rwanda.osm.pbf")
 

@@ -23,7 +23,8 @@ This page is not in the docs site navigation.
 
 | Item | Decision |
 |---|---|
-| Classes | `OSMRoadsConfig`, `OSMRoadsDownloader`, `OSMRoadsReader`, `OSMRoadsHandler` in `gigaspatial/handlers/osm_roads.py` |
+| Classes | `OSMRoadsConfig`, `OSMRoadsDownloader`, `OSMRoadsReader`, `OSMRoadsHandler` in `gigaspatial/handlers/osm/roads.py` |
+| Package | `gigaspatial/handlers/osm/`, grouped by provider as `nasa/` and `wri/` are: `roads.py` (the handler), `geofabrik.py` (the index, choosing extracts, dated files), `pbf.py` (building a network from a `.pbf`, and its header timestamp). `geofabrik.py` and `pbf.py` know nothing about the handler base, so other datasets in the same extracts can reuse them |
 | Public names | `from gigaspatial import OSMRoadsHandler`; config, downloader, and reader from `gigaspatial.handlers` (ADR 0003) |
 | Dependency | `osmium` (pyosmium) added to `giga-spatial[roads]`, imported lazily with the usual `ImportError` naming the extra. Wheels exist for Python 3.10 to 3.14 on macOS, Linux, and Windows |
 | Data type | a new `DATA_TYPES` key `osm`, so `config.get_path("osm", "bronze")` works |
@@ -79,7 +80,7 @@ osm/geofabrik/2026-10-27/south-america/brazil/nordeste.networks/drive_service-si
 
 ## 7. Building a network from an extract
 
-The same network as osmnx for every `network_type`, tested against osmnx on the Kigali test extract: the same nodes, `street_count`, and node tags; the same `(u, v, key)` edges with the same lengths, way IDs, `oneway`, `reversed`, kept tags, and simplified geometries. The builder is `gigaspatial/handlers/osm_pbf.py` (`build_road_network`); `OSMRoadsReader.build_network` adds the extract's ID, date, and URL from its stored path.
+The same network as osmnx for every `network_type`, tested against osmnx on the Kigali test extract: the same nodes, `street_count`, and node tags; the same `(u, v, key)` edges with the same lengths, way IDs, `oneway`, `reversed`, kept tags, and simplified geometries. The builder is `gigaspatial/handlers/osm/pbf.py` (`build_road_network`); `OSMRoadsReader.build_network` adds the extract's ID, date, and URL from its stored path.
 
 1. Read the file once, with pyosmium's node location index. pyosmium preselects ways by key in C++; Python applies the filter to each way, keeps its ID, node references, and kept tags, and has pyosmium write its line (every node, in order) as WKB. Nodes reach Python only when they carry a kept node tag.
 2. In numpy: drop consecutive repeated nodes, reverse ways that run against their node order, cut ways into edges, number parallel edges as networkx does, and compute lengths and `street_count`; build the `SpatialNetwork`; run `simplify` for the simplified variant.

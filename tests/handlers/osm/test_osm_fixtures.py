@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from gigaspatial.handlers.osm_roads import OSMRoadsHandler, OSMRoadsReadOptions, OSMRoadsResolveOptions
+from gigaspatial.handlers.osm.roads import OSMRoadsHandler, OSMRoadsReadOptions, OSMRoadsResolveOptions
 from gigaspatial.processing.network import SpatialNetwork
 
 DATA = Path(__file__).resolve().parents[2] / "data" / "osm_roads"

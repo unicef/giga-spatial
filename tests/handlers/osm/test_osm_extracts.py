@@ -7,14 +7,8 @@ import pytest
 from shapely.geometry import Point, box
 
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.osm_roads import (
-    CODE_FIXES,
-    MULTI_COUNTRY_EXTRACTS,
-    GeofabrikIndex,
-    OSMRoadsConfig,
-    OSMRoadsHandler,
-    OSMRoadsResolveOptions,
-)
+from gigaspatial.handlers.osm.geofabrik import CODE_FIXES, MULTI_COUNTRY_EXTRACTS, GeofabrikIndex
+from gigaspatial.handlers.osm.roads import OSMRoadsConfig, OSMRoadsHandler, OSMRoadsResolveOptions
 
 DATA = Path(__file__).resolve().parents[2] / "data" / "osm_roads"
 SUBSET = DATA / "geofabrik_index_subset.json"

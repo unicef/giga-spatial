@@ -131,6 +131,7 @@ Search for classes that inherit the four bases. Do not treat the list below as c
 - `gigaspatial/handlers/rwi.py` (via HDX)
 - `gigaspatial/handlers/nasa/srtm.py`
 - `gigaspatial/handlers/wri/aqueduct_flood.py`
+- `gigaspatial/handlers/osm/roads.py`
 
 ## Leaks to watch for
 
