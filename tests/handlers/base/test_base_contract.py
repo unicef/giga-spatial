@@ -589,6 +589,7 @@ def test_extract_search_geometry_rejects_sources_without_geometry(handler):
         ("KEN", SourceKind.COUNTRY),
         ("St. Lucia", SourceKind.COUNTRY),
         ("t00.csv", SourceKind.PATHS),
+        ("rwanda-latest.osm.pbf", SourceKind.PATHS),
         ("data/t00", SourceKind.PATHS),
         (Path("t00"), SourceKind.PATHS),
         (["a.tif", Path("b.tif")], SourceKind.PATHS),
