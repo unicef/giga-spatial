@@ -146,6 +146,14 @@ A **key vertex** is a node of the tree that is a terminal, a root, or a Steiner 
 
 Moves are tried cheapest-to-evaluate first (key paths in decreasing weight), and each Dijkstra is limited by the weight it must beat, so most searches stop early. Vertex insertion and elimination are deferred, until real data shows a large remaining gap.
 
+As built (`benchmarks/connection_planning/improve.py`):
+
+- **The plan is rebuilt as one tree first.** With roots, the virtual root is joined to every root the plan touches, and a spanning tree with pruned dangling branches is taken. This alone never costs more, and turns a `nearest_root` or `all_pairs` plan, which may hold cycles, into a tree.
+- **Key paths are listed once per pass.** An earlier move can leave a listed path's end only continuing it; such a path is extended to the next key vertex before it is tried, and paths whose edges are gone are skipped.
+- **Key-vertex elimination searches only near the removed nodes:** its links start from the parts' nodes within the removed weight of them. Searching from every node left in the plan took 20 ms per vertex on Rwanda; the local search found plans within 0.01% of it on Kigali, in half the time.
+- **A move must save a billionth of the weight it replaces**, so rounding cannot make it loop.
+- On Rwanda with 1,000 terminals and 20 roots, a pass takes 5.8 s from `steiner`, and the plan improves 4.7%, from 3,942 to 3,755 km. From `shortest_path` it improves 2.2%, and from `nearest_root` 31.8%. All three end within 0.1% of each other, so with `improve()` the choice of first method matters little.
+
 ## 8. Lower bound (`lower_bound`)
 
 Wong's dual ascent (1984) gives a lower bound on the optimum, and with it the gap of any plan.

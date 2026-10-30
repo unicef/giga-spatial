@@ -11,7 +11,7 @@ from scipy.sparse.csgraph import dijkstra
 
 from gigaspatial.processing.network import ConnectionPlan, ConnectionPlanner, SpatialNetwork
 from gigaspatial.processing.network.geodesy import haversine, line_lengths
-from gigaspatial.processing.network.planning import BRIDGES_PER_COMPONENT, _bridge_candidates
+from gigaspatial.processing.network.planning import BRIDGES_PER_COMPONENT, _bridge_candidates, _pair_weights, _Tree
 
 
 def nodes_on_a_line(ids):
@@ -397,9 +397,15 @@ def test_the_rollout_matches_the_naive_version(seed, rooted):
     rng = np.random.default_rng(seed)
     G = nx.grid_2d_graph(6, 6)
     ids = {node: f"n{i}" for i, node in enumerate(G)}
-    nodes = pd.DataFrame({"x": [30.0 + 0.01 * c for _, c in G], "y": [-1.95 + 0.01 * r for r, _ in G]}, index=list(ids.values()))
+    nodes = pd.DataFrame(
+        {"x": [30.0 + 0.01 * c for _, c in G], "y": [-1.95 + 0.01 * r for r, _ in G]}, index=list(ids.values())
+    )
     edges = pd.DataFrame(
-        {"u": [ids[a] for a, _ in G.edges], "v": [ids[b] for _, b in G.edges], "length": rng.uniform(1, 10, G.number_of_edges())}
+        {
+            "u": [ids[a] for a, _ in G.edges],
+            "v": [ids[b] for _, b in G.edges],
+            "length": rng.uniform(1, 10, G.number_of_edges()),
+        }
     )
     network = SpatialNetwork(nodes, edges, directed=False)
     picked = list(rng.choice(list(ids.values()), 12, replace=False))
@@ -460,3 +466,126 @@ def test_the_rollout_on_kigali(connected, chosen):
     assert nx.is_forest(plan_trees(plan))
     assert plan.terminals["marginal_cost"].sum() == pytest.approx(plan.cost)
     assert "order" not in planner.plan().terminals.columns
+
+
+# ----- local search
+
+
+def tree_weight(tree):
+    a, b = tree.edges()
+    return float(_pair_weights(tree.graph, a, b).sum())
+
+
+def star():
+    """A hub H 10 from each of A, B, and C, which roads of 4 also join: A-B and B-C."""
+    edges = pd.DataFrame(
+        {"u": ["H", "H", "H", "A", "B"], "v": ["A", "B", "C", "B", "C"], "length": [10.0, 10.0, 10.0, 4.0, 4.0]}
+    )
+    return SpatialNetwork(nodes_on_a_line(["H", "A", "B", "C"]), edges, directed=False)
+
+
+def star_tree():
+    network = star()
+    graph = network._graph("length", False)
+    h, a, b, c = network._positions(["H", "A", "B", "C"])
+    return _Tree(graph, np.array([h, h, h]), np.array([a, b, c]), np.array([a, b, c])), (h, a, b, c)
+
+
+def test_key_vertex_elimination_replaces_a_hub():
+    tree, (h, a, b, c) = star_tree()
+    assert tree_weight(tree) == 30.0
+    assert tree.eliminate(h)
+    assert tree_weight(tree) == 8.0 and h not in tree.adjacent
+
+
+def test_key_path_exchange_replaces_a_spoke():
+    tree, (h, a, b, c) = star_tree()
+    assert tree.exchange([a, h])
+    assert tree_weight(tree) == 24.0
+
+
+def test_moves_that_do_not_save_are_refused(chain):
+    graph = chain._graph("length", False)
+    r1, a, b, r2 = chain._positions(["R1", "A", "B", "R2"])
+    tree = _Tree(graph, np.array([r1, a]), np.array([a, b]), np.array([r1, b]))
+    assert not tree.exchange([r1, a, b])
+    assert tree_weight(tree) == 11.0
+
+
+def test_improve_fixes_the_nearest_root_plan(chain):
+    planner = ConnectionPlanner(chain, ["A", "B"], roots=["R1", "R2"])
+    plan = planner.plan("nearest_root")
+    better = planner.improve(plan)
+    assert (plan.cost, better.cost) == (20.5, 11.0)
+    assert better.metadata["method"] == "nearest_root"
+    assert better.metadata["improved"]["cost_before"] == 20.5 and better.metadata["improved"]["moves"] >= 1
+    assert better.terminals["root"].tolist() == ["R1", "R1"]
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_improve_is_never_worse_and_never_below_the_optimum(seed):
+    network, terminals, roots = random_grid(seed)
+    for some in (roots, []):
+        best = optimum(network, terminals, some)
+        planner = ConnectionPlanner(network, terminals, roots=some)
+        for method in ("steiner", "shortest_path", "all_pairs") + (("nearest_root",) if some else ()):
+            plan = planner.plan(method)
+            better = planner.improve(plan)
+            assert best - 1e-9 <= better.cost <= plan.cost + 1e-9
+
+
+def test_improve_on_kigali(connected, chosen):
+    terminals, roots = chosen
+    planner = ConnectionPlanner(connected, terminals, roots=roots)
+    plan = planner.plan()
+    better = planner.improve(plan)
+    assert better.cost < plan.cost
+    forest = plan_trees(better)
+    assert nx.is_forest(forest)
+    for tree in nx.connected_components(forest):
+        assert tree & set(roots)
+    degree = dict(forest.degree())
+    assert {n for n, d in degree.items() if d == 1} <= set(terminals) | set(roots)
+    assert (better.terminals["status"] == "connected").all()
+    assert better.terminals["distance"].to_numpy() == pytest.approx(
+        better.network.nearest_by_network(terminals, roots)["distance"].to_numpy()
+    )
+    assert len(better.metadata["improved"]["pass_seconds"]) >= 1
+
+
+def test_improve_without_roots(connected, chosen):
+    terminals, _ = chosen
+    planner = ConnectionPlanner(connected, terminals)
+    plan = planner.plan()
+    better = planner.improve(plan)
+    assert better.cost <= plan.cost and nx.is_tree(plan_trees(better))
+
+
+def test_improve_keeps_bridges_and_unreachable_terminals(two_parts):
+    planner = ConnectionPlanner(two_parts, ["A", "B"], roots=["R"], bridge_cost=0.001)
+    better = planner.improve(planner.plan("all_pairs"))
+    assert better.terminals["bridged"].tolist() == [False, True] and better.metadata["bridges"]["used"] == 1
+    alone = ConnectionPlanner(two_parts, ["A", "B"], roots=["R"])
+    kept = alone.improve(alone.plan())
+    assert kept.terminals["status"].tolist() == ["connected", "unreachable"] and kept.cost == 1.0
+
+
+def test_improve_drops_the_rollout_columns(connected, chosen):
+    terminals, roots = chosen
+    planner = ConnectionPlanner(connected, terminals, roots=roots)
+    better = planner.improve(planner.plan("shortest_path"))
+    assert "order" not in better.terminals.columns and better.metadata["method"] == "shortest_path"
+
+
+def test_improve_stops_at_the_time_limit(connected, chosen):
+    terminals, roots = chosen
+    planner = ConnectionPlanner(connected, terminals, roots=roots)
+    plan = planner.plan("all_pairs")
+    stopped = planner.improve(plan, time_limit=0)
+    assert stopped.metadata["improved"]["moves"] == 0 and stopped.cost <= plan.cost
+
+
+def test_improve_needs_the_planners_own_plan(chain):
+    plan = ConnectionPlanner(chain, ["A"], roots=["R1"]).plan()
+    with pytest.raises(ValueError, match="other terminals"):
+        ConnectionPlanner(chain, ["B"], roots=["R1"]).improve(plan)
