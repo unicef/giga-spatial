@@ -1,5 +1,6 @@
 """Planning how to connect points to an existing network along a spatial network, at the smallest shared cost."""
 
+import heapq
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional, Tuple
@@ -21,7 +22,7 @@ from gigaspatial.processing.network.kinds import EDGE_KINDS, as_kinds
 if TYPE_CHECKING:
     from gigaspatial.processing.network.core import SpatialNetwork
 
-METHODS = ("steiner", "nearest_root", "all_pairs")
+METHODS = ("steiner", "shortest_path", "nearest_root", "all_pairs")
 # Each part of the network is offered bridges to at most this many of its nearest other parts.
 BRIDGES_PER_COMPONENT = 5
 _FIRST_NEIGHBOURS = 16
@@ -49,7 +50,10 @@ class ConnectionPlan:
             root; and ``bridged``, whether that path uses a bridge. Without
             roots, ``root`` is missing, ``distance`` is NaN, and ``bridged``
             says whether the terminal is joined to the others only through a
-            bridge.
+            bridge. Plans by ``"shortest_path"`` add ``order``, when the
+            terminal was connected (0 for a terminal that is a root, missing
+            when unreachable), and ``marginal_cost``, the weight of the edges
+            its connection added.
         cost: The total weight of ``edges``, with each bridge at
             ``bridge_cost`` per metre.
         metadata: The method, the weight, ``bridge_cost``, the numbers of
@@ -164,7 +168,12 @@ class ConnectionPlanner:
             method: ``"steiner"``: Mehlhorn's 2-approximation of the Steiner
                 tree, with roots the rooted tree, without them the tree joining
                 the terminals; within a few percent of the optimum in practice.
-                ``"nearest_root"``: each terminal's shortest path to its nearest
+                ``"shortest_path"``: Takahashi and Matsuyama's 2-approximation,
+                a model of a phased rollout: starting from the roots (or the
+                first terminal), repeatedly connect the terminal nearest to
+                anything connected so far, along its shortest path. Gives each
+                terminal's order and marginal cost; ties go to the terminal
+                listed first. ``"nearest_root"``: each terminal's shortest path to its nearest
                 root, and the union of those paths; needs roots, and never lets a
                 terminal connect through another one. ``"all_pairs"``: the
                 shortest paths between every terminal and every terminal or
@@ -188,11 +197,14 @@ class ConnectionPlanner:
         graph = self._graph
         terminal = np.unique(self._terminal)
         planned = terminal[self._reachable(terminal)]
+        rollout = None
         if method == "steiner":
             if len(self._root):
                 a, b = _rooted_steiner_edges(graph, planned, self._root)
             else:
                 a, b = _steiner_edges(graph, planned)
+        elif method == "shortest_path":
+            a, b, rollout = _shortest_path_edges(graph, self._planned_in_given_order(planned), self._root)
         elif method == "nearest_root":
             a, b = _nearest_root_edges(graph, planned, self._root)
         else:
@@ -208,6 +220,8 @@ class ConnectionPlanner:
         kept = np.union1d(np.union1d(terminal, self._root), ends)
         sub = _plan_subnetwork(self.network, rows, self._bridges, self.bridge_cost, self.weight, kept)
         terminals = self._terminals_table(pairs, weights, bridge, planned)
+        if rollout is not None:
+            terminals = _with_rollout(terminals, self._terminal, self._root, *rollout)
         summed = ("length",) if self.weight == "length" else ("length", self.weight)
         contracted = sub.simplify(keep=self.network.node_index.take(kept), sum_columns=summed)
         status = terminals["status"].value_counts()
@@ -228,6 +242,11 @@ class ConnectionPlanner:
             cost=float(weights.sum()),
             metadata=metadata,
         )
+
+    def _planned_in_given_order(self, planned: np.ndarray) -> np.ndarray:
+        """The planned terminals' positions in the order the terminals were given, the order that breaks ties."""
+        given = self._terminal
+        return given[np.isin(given, planned)]
 
     def _reachable(self, terminal: np.ndarray) -> np.ndarray:
         """Which terminals the plan can connect: those sharing a part of the network with a root,
@@ -537,6 +556,125 @@ def _prune_leaves(a: np.ndarray, b: np.ndarray, kept: np.ndarray, n: int) -> Tup
             break
         a, b = a[~dangling], b[~dangling]
     return a, b
+
+
+def _shortest_path_edges(
+    graph: Graph, terminal: np.ndarray, root: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Takahashi and Matsuyama's heuristic, with distances to the connected set updated incrementally.
+
+    ``terminal`` is in the order that breaks ties; it holds only terminals the
+    roots, or without roots its first terminal, can reach. One Dijkstra from
+    the connected set gives every node its distance to it and the path there.
+    After each connection, distances can only fall, and only for nodes nearer
+    to the new path than to anything connected before. A Dijkstra from the
+    path's new nodes that stops wherever a distance does not fall updates
+    them, so its work is the region the path wins, not the whole network.
+    It runs in Python, since scipy's Dijkstra cannot stop that way; on
+    Rwanda's roads that was 15 times faster than scipy limited to the largest
+    distance of a waiting terminal.
+
+    Returns:
+        The plan's edges, and the connected terminals with their order and
+        marginal cost.
+    """
+    empty = np.empty(0, dtype=np.int64)
+    n = graph.n
+    order_of, marginal_of, done = [], [], []
+    if len(root):
+        start = root
+    elif len(terminal):
+        start = terminal[:1]
+        done, order_of, marginal_of = [int(terminal[0])], [1], [0.0]
+    else:
+        return empty, empty, (empty, empty, np.empty(0))
+    distance, predecessors = dijkstra(
+        graph.matrix, directed=True, indices=start, min_only=True, return_predecessors=True
+    )[:2]
+    indptr, indices, weights = graph.matrix.indptr.tolist(), graph.matrix.indices.tolist(), graph.matrix.data.tolist()
+    dist, pred = distance.tolist(), predecessors.tolist()
+    connected = [False] * n
+    for s in start.tolist():
+        connected[s] = True
+    waiting = [False] * n
+    rank = {}
+    for i, t in enumerate(terminal.tolist()):
+        if not connected[t]:
+            waiting[t] = True
+            rank.setdefault(t, i)
+    heap = [(dist[t], rank[t], t) for t in rank]
+    heapq.heapify(heap)
+    a_parts, b_parts = [], []
+    step = len(done)
+    while heap:
+        d, _, t = heapq.heappop(heap)
+        if not waiting[t] or d != dist[t]:
+            continue
+        if d == np.inf:
+            break
+        path = [t]
+        while not connected[path[-1]]:
+            path.append(pred[path[-1]])
+        outward = path[::-1]
+        last = 0.0
+        for v in outward[1:]:
+            if waiting[v]:
+                step += 1
+                done.append(v)
+                order_of.append(step)
+                marginal_of.append(dist[v] - last)
+                last = dist[v]
+        a_parts.append(outward[:-1])
+        b_parts.append(outward[1:])
+        front = []
+        for v in outward[1:]:
+            connected[v] = True
+            waiting[v] = False
+            dist[v] = 0.0
+            pred[v] = -9999
+            front.append((0.0, v))
+        while front:
+            dv, v = heapq.heappop(front)
+            if dv > dist[v]:
+                continue
+            for e in range(indptr[v], indptr[v + 1]):
+                u = indices[e]
+                nd = dv + weights[e]
+                if nd < dist[u]:
+                    dist[u] = nd
+                    pred[u] = v
+                    heapq.heappush(front, (nd, u))
+                    if waiting[u]:
+                        heapq.heappush(heap, (nd, rank[u], u))
+    if not a_parts:
+        a, b = empty, empty
+    else:
+        a = np.fromiter((x for part in a_parts for x in part), dtype=np.int64)
+        b = np.fromiter((x for part in b_parts for x in part), dtype=np.int64)
+    return a, b, (np.array(done, dtype=np.int64), np.array(order_of, dtype=np.int64), np.array(marginal_of))
+
+
+def _with_rollout(
+    terminals: pd.DataFrame,
+    position: np.ndarray,
+    root: np.ndarray,
+    done: np.ndarray,
+    order_of: np.ndarray,
+    marginal_of: np.ndarray,
+) -> pd.DataFrame:
+    """The terminals table with each terminal's order and marginal cost."""
+    order = pd.array(np.full(len(position), pd.NA), dtype="Int64")
+    marginal = np.full(len(position), np.nan)
+    at_root = np.isin(position, root)
+    order[at_root] = 0
+    marginal[at_root] = 0.0
+    lookup = pd.Series(np.arange(len(done)), index=done)
+    which = lookup.reindex(position).to_numpy()
+    found = ~np.isnan(which) & ~at_root
+    picks = which[found].astype(np.int64)
+    order[found] = order_of[picks]
+    marginal[found] = marginal_of[picks]
+    return terminals.assign(order=order, marginal_cost=marginal)
 
 
 def _all_pairs_edges(graph: Graph, terminal: np.ndarray, targets: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

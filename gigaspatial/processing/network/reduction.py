@@ -175,7 +175,9 @@ class ReductionMixin:
             method: ``"steiner"``: a tree with close to the smallest total
                 weight (Mehlhorn's 2-approximation of the Steiner tree); with
                 ``roots``, a forest whose every tree reaches a root, so a
-                terminal may connect through other terminals. ``"nearest_root"``:
+                terminal may connect through other terminals. ``"shortest_path"``:
+                terminals connected one at a time, nearest first, to everything
+                connected so far (Takahashi and Matsuyama). ``"nearest_root"``:
                 each terminal's shortest path to its nearest root.
                 ``"all_pairs"``: the shortest paths between every terminal and
                 every terminal and root; their number grows with the square of

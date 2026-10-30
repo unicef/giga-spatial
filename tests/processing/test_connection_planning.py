@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 import shapely
 from networkx.algorithms.approximation import steiner_tree
+from scipy.sparse.csgraph import dijkstra
 
 from gigaspatial.processing.network import ConnectionPlan, ConnectionPlanner, SpatialNetwork
 from gigaspatial.processing.network.geodesy import haversine, line_lengths
@@ -140,6 +141,7 @@ def test_plans_against_the_optimum(seed):
     planner = ConnectionPlanner(network, terminals, roots=roots)
     steiner = planner.plan().cost
     assert rooted - 1e-9 <= steiner <= 2 * rooted + 1e-9
+    assert rooted - 1e-9 <= planner.plan("shortest_path").cost <= 2 * rooted + 1e-9
     for method in ("nearest_root", "all_pairs"):
         assert planner.plan(method).cost >= rooted - 1e-9
     unrooted = optimum(network, terminals, [])
@@ -225,7 +227,7 @@ def test_edges_are_the_uncontracted_plan(connected, chosen):
 
 def test_connecting_subnetwork_is_the_plans_network(connected, chosen):
     terminals, roots = chosen
-    for method in ("steiner", "nearest_root", "all_pairs"):
+    for method in ("steiner", "shortest_path", "nearest_root", "all_pairs"):
         plan = ConnectionPlanner(connected, terminals, roots=roots).plan(method)
         sub = connected.connecting_subnetwork(terminals, roots=roots, method=method)
         assert set(sub.node_index) == set(plan.network.node_index)
@@ -353,3 +355,108 @@ def test_bridge_candidates_are_the_closest_pairs(kigali):
         assert tuple(sorted((part, nearest))) in found
     largest = np.argsort(closest[0])[:BRIDGES_PER_COMPONENT]
     assert {tuple(sorted((0, int(p)))) for p in largest} <= set(found)
+
+
+# ----- the rollout order
+
+
+def naive_rollout(network, terminals, roots):
+    """Takahashi and Matsuyama with a full Dijkstra from the connected set at every step."""
+    graph = network._graph(network.weight, False)
+    position = {t: i for i, t in enumerate(network.node_index)}
+    connected = np.zeros(graph.n, dtype=bool)
+    waiting = list(terminals)
+    order, step, cost = {}, 0, 0.0
+    if roots:
+        connected[[position[r] for r in roots]] = True
+    else:
+        connected[position[waiting[0]]] = True
+        order[waiting.pop(0)] = 1
+        step = 1
+    while waiting:
+        distance, predecessors = dijkstra(
+            graph.matrix, directed=True, indices=np.flatnonzero(connected), min_only=True, return_predecessors=True
+        )[:2]
+        best = min(waiting, key=lambda t: (distance[position[t]], waiting.index(t)))
+        if not np.isfinite(distance[position[best]]):
+            break
+        cost += distance[position[best]]
+        node = position[best]
+        while not connected[node]:
+            connected[node] = True
+            node = predecessors[node]
+        step += 1
+        order[best] = step
+        waiting = [t for t in waiting if not connected[position[t]]]
+    return order, cost
+
+
+@pytest.mark.parametrize("seed", range(6))
+@pytest.mark.parametrize("rooted", [True, False])
+def test_the_rollout_matches_the_naive_version(seed, rooted):
+    rng = np.random.default_rng(seed)
+    G = nx.grid_2d_graph(6, 6)
+    ids = {node: f"n{i}" for i, node in enumerate(G)}
+    nodes = pd.DataFrame({"x": [30.0 + 0.01 * c for _, c in G], "y": [-1.95 + 0.01 * r for r, _ in G]}, index=list(ids.values()))
+    edges = pd.DataFrame(
+        {"u": [ids[a] for a, _ in G.edges], "v": [ids[b] for _, b in G.edges], "length": rng.uniform(1, 10, G.number_of_edges())}
+    )
+    network = SpatialNetwork(nodes, edges, directed=False)
+    picked = list(rng.choice(list(ids.values()), 12, replace=False))
+    terminals, roots = picked[:9], (picked[9:] if rooted else [])
+    plan = ConnectionPlanner(network, terminals, roots=roots).plan("shortest_path")
+    order, cost = naive_rollout(network, terminals, roots)
+    assert plan.cost == pytest.approx(cost)
+    assert plan.terminals["order"].dropna().astype(int).to_dict() == order
+    assert plan.terminals["marginal_cost"].sum() == pytest.approx(plan.cost)
+
+
+def test_the_rollout_on_a_chain(chain):
+    plan = ConnectionPlanner(chain, ["B", "A", "R2"], roots=["R1", "R2"]).plan("shortest_path")
+    assert plan.cost == 11.0
+    assert plan.terminals[["order", "marginal_cost"]].to_dict("index") == {
+        "B": {"order": 2, "marginal_cost": 1.0},
+        "A": {"order": 1, "marginal_cost": 10.0},
+        "R2": {"order": 0, "marginal_cost": 0.0},
+    }
+
+
+def test_ties_go_to_the_terminal_listed_first():
+    edges = pd.DataFrame({"u": ["R", "A"], "v": ["A", "B"], "length": [1.0, 0.0]})
+    network = SpatialNetwork(nodes_on_a_line(["R", "A", "B"]), edges, directed=False)
+    plan = ConnectionPlanner(network, ["B", "A"], roots=["R"]).plan("shortest_path")
+    assert plan.terminals["order"].tolist() == [2, 1]
+    assert plan.terminals["marginal_cost"].tolist() == [0.0, 1.0]
+    flipped = ConnectionPlanner(network, ["A", "B"], roots=["R"]).plan("shortest_path")
+    assert flipped.terminals["order"].tolist() == [1, 2]
+
+
+def test_the_rollout_without_roots_starts_from_the_first_terminal(chain):
+    plan = ConnectionPlanner(chain, ["B", "R1", "A"]).plan("shortest_path")
+    assert plan.terminals["order"].tolist() == [1, 3, 2]
+    assert plan.terminals["marginal_cost"].tolist() == [0.0, 10.0, 1.0] and plan.cost == 11.0
+
+
+def test_unreachable_terminals_have_no_order(kigali, chosen):
+    terminals, roots = chosen
+    island = kigali.connected_components().idxmax()
+    plan = ConnectionPlanner(kigali, terminals[:5] + [island], roots=roots).plan("shortest_path")
+    assert plan.terminals.loc[island, "order"] is pd.NA and np.isnan(plan.terminals.loc[island, "marginal_cost"])
+    assert sorted(plan.terminals["order"].dropna().astype(int)) == [1, 2, 3, 4, 5]
+
+
+def test_the_rollout_uses_bridges(two_parts):
+    plan = ConnectionPlanner(two_parts, ["A", "B"], roots=["R"], bridge_cost=0.001).plan("shortest_path")
+    assert plan.terminals["order"].tolist() == [1, 2] and plan.terminals["bridged"].tolist() == [False, True]
+    assert plan.metadata["bridges"]["used"] == 1
+
+
+def test_the_rollout_on_kigali(connected, chosen):
+    terminals, roots = chosen
+    planner = ConnectionPlanner(connected, terminals, roots=roots)
+    plan = planner.plan("shortest_path")
+    order, cost = naive_rollout(connected.to_undirected(), terminals, roots)
+    assert plan.cost == pytest.approx(cost)
+    assert nx.is_forest(plan_trees(plan))
+    assert plan.terminals["marginal_cost"].sum() == pytest.approx(plan.cost)
+    assert "order" not in planner.plan().terminals.columns
