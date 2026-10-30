@@ -115,16 +115,25 @@ For very many origin-destination pairs, `backend="pandana"` is faster once its i
 ## The roads that connect the schools
 
 ```python
-to_fiber = network.connecting_subnetwork(school_ids, sources=["fiber-1"])
+to_fiber = network.connecting_subnetwork(school_ids, roots=["fiber-1"])
 print(to_fiber.total_length())
 
 tree = network.connecting_subnetwork(school_ids)
 branches = tree.degree()[tree.degree() >= 3]
 ```
 
-A connecting subnetwork keeps only the roads that join the points, contracted to the points and the nodes where the paths branch. With `sources`, each school takes its shortest path to its nearest source. Without them, the schools are joined by a tree of close to the smallest total length (a Steiner tree approximation). `method="all_pairs"` keeps the shortest path between every pair instead; its cost grows with the square of the number of points.
+A connecting subnetwork keeps only the roads that join the points, contracted to the points and the nodes where the paths branch. With `roots`, nodes already connected to each other such as fibre nodes, the schools are joined to the roots at close to the smallest total length: a school may connect through another school, and a road shared by several schools counts once. Without roots, the schools are joined by a tree of close to the smallest total length. Both are Steiner tree approximations. `method="nearest_root"` gives each school its own shortest path to its nearest root instead, and `method="all_pairs"` the shortest path between every pair; its cost grows with the square of the number of points.
 
 `tree.edges_gdf` is the result as lines, ready to map or export.
+
+`ConnectionPlanner` makes the same plans and says more about them: each school's status (connected, itself a root, or unreachable), the root it reaches and its distance along the plan, the plan's uncontracted edges, and its cost.
+
+```python
+from gigaspatial import ConnectionPlanner
+
+plan = ConnectionPlanner(network, school_ids, roots=["fiber-1"], weight="length").plan()
+print(plan.cost, plan.terminals["status"].value_counts())
+```
 
 ## Save and load
 

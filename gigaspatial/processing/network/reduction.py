@@ -8,12 +8,12 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import shapely
 from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import connected_components, dijkstra, minimum_spanning_tree
+from scipy.sparse.csgraph import connected_components
 
 from gigaspatial.processing.network._arrays import as_positions, next_keys
-from gigaspatial.processing.network.algorithms import Graph, _dijkstra_blocks
 from gigaspatial.processing.network.attributes import _BOOLEAN_RULES, normalize_attributes
 from gigaspatial.processing.network.editing import _concat_tables, _with_columns
+from gigaspatial.processing.network.planning import ConnectionPlanner
 
 _PROTECTED_KINDS = ("point", "split")
 _STRUCTURAL = ("u", "v", "key", "kind", "geometry")
@@ -155,67 +155,39 @@ class ReductionMixin:
     def connecting_subnetwork(
         self,
         terminals: Any,
-        sources: Any = None,
+        roots: Any = None,
         method: str = "steiner",
         weight: Optional[str] = None,
     ) -> "SpatialNetwork":
         """The part of the network that joins a set of points, contracted to the points and branching nodes.
 
-        Directions are ignored. The result is undirected; it keeps the
-        terminals, the sources, and the nodes where paths branch, with joined
-        edges as :meth:`simplify` makes them, so lengths are added up and
-        geometries joined.
+        The network of :meth:`ConnectionPlanner.plan`. Directions are ignored.
+        The result is undirected; it keeps the terminals, the roots, and the
+        nodes where paths branch, with joined edges as :meth:`simplify` makes
+        them, so lengths are added up and geometries joined. Use
+        :class:`ConnectionPlanner` for each terminal's status, its distance to
+        a root, and the plan's cost.
 
         Args:
             terminals: Node IDs to join, such as schools.
-            sources: Node IDs the terminals connect to, such as fiber nodes.
-            method: ``"steiner"``: without ``sources``, a tree joining all
-                terminals with close to the smallest total weight (Mehlhorn's
-                2-approximation of the Steiner tree); with ``sources``, each
-                terminal's shortest path to its nearest source. ``"all_pairs"``:
-                the shortest paths between every terminal and every terminal
-                and source; their number grows with the square of the
-                terminals.
+            roots: Node IDs already connected to each other, such as fibre
+                nodes. Reaching any root is enough.
+            method: ``"steiner"``: a tree with close to the smallest total
+                weight (Mehlhorn's 2-approximation of the Steiner tree); with
+                ``roots``, a forest whose every tree reaches a root, so a
+                terminal may connect through other terminals. ``"nearest_root"``:
+                each terminal's shortest path to its nearest root.
+                ``"all_pairs"``: the shortest paths between every terminal and
+                every terminal and root; their number grows with the square of
+                the terminals.
             weight: Edge column to minimise. The network's weight otherwise.
 
         Returns:
-            An undirected network. Terminals that cannot reach the others are
-            kept without edges.
+            An undirected network. Terminals that cannot be connected are kept
+            without edges.
         """
-        graph = self._graph(weight, False)
-        terminal = np.unique(self._positions(terminals))
-        source = np.unique(self._positions(sources)) if sources is not None else np.empty(0, dtype=np.int64)
-        if method == "steiner":
-            if len(source):
-                a, b = _nearest_source_edges(graph, terminal, source)
-            else:
-                a, b = _steiner_edges(graph, terminal)
-        elif method == "all_pairs":
-            a, b = _all_pairs_edges(graph, terminal, np.union1d(terminal, source))
-        else:
-            raise ValueError(f'method must be "steiner" or "all_pairs", got {method!r}')
-        kept = np.union1d(terminal, source)
-        sub = self._edge_subnetwork(graph, a, b, kept)
-        summed = ("length",) if weight is None else ("length", weight)
-        return sub.simplify(keep=self._nodes.index.take(kept), sum_columns=summed)
-
-    def _edge_subnetwork(self, graph: Graph, a: np.ndarray, b: np.ndarray, kept: np.ndarray) -> "SpatialNetwork":
-        """An undirected network of the cheapest edge behind each (a, b) pair, plus the kept nodes."""
-        low, high = np.minimum(a, b), np.maximum(a, b)
-        pairs = np.unique(low.astype(np.int64) * graph.n + high)
-        rows = np.sort(graph.entry_rows[np.searchsorted(graph.entry_keys, pairs)])
-        pu, pv = self._edge_positions
-        members = np.union1d(np.union1d(pu[rows], pv[rows]), kept)
-        nodes = self._nodes.iloc[members]
-        edges = _with_columns(self._edges.iloc[rows], {"key": np.zeros(len(rows), dtype=np.int16)})
-        edges.index = pd.RangeIndex(len(rows))
-        positions = (
-            as_positions(np.searchsorted(members, pu[rows]), len(members)),
-            as_positions(np.searchsorted(members, pv[rows]), len(members)),
-        )
-        return type(self)._from_tables(
-            nodes, edges, directed=False, weight=self._weight, metadata=self._metadata, positions=positions
-        )
+        planner = ConnectionPlanner(self, terminals, roots=roots, weight=weight)
+        return planner.plan(method).network
 
 
 # ----- simplify helpers
@@ -417,93 +389,3 @@ def _joined_lists(column: pd.Series, rows: np.ndarray, starts: np.ndarray) -> An
     joined = pa.ListArray.from_arrays(pa.array(offsets), pa.array(values[unique], type=lists.type.value_type))
     return pd.arrays.ArrowExtensionArray(joined)
 
-
-# ----- connecting subnetwork helpers
-
-
-def _forest_edges(predecessors: np.ndarray, starts: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Edges on the predecessor paths from ``starts`` back to their roots."""
-    visited = np.zeros(len(predecessors), dtype=bool)
-    a_parts, b_parts = [], []
-    frontier = np.unique(starts)
-    visited[frontier] = True
-    while len(frontier):
-        parent = predecessors[frontier]
-        step = parent >= 0
-        a_parts.append(frontier[step])
-        b_parts.append(parent[step])
-        frontier = np.unique(parent[step][~visited[parent[step]]])
-        visited[frontier] = True
-    if not a_parts:
-        return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
-    return np.concatenate(a_parts), np.concatenate(b_parts)
-
-
-def _nearest_source_edges(graph: Graph, terminal: np.ndarray, source: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    _, predecessors, _ = dijkstra(
-        graph.matrix, directed=True, indices=source, min_only=True, return_predecessors=True
-    )
-    return _forest_edges(predecessors, terminal)
-
-
-def _steiner_edges(graph: Graph, terminal: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Mehlhorn's 2-approximation: Voronoi regions of the terminals, an MST of their cheapest links, then pruning."""
-    empty = np.empty(0, dtype=np.int64)
-    if len(terminal) < 2:
-        return empty, empty
-    n = graph.n
-    distance, predecessors, nearest = dijkstra(
-        graph.matrix, directed=True, indices=terminal, min_only=True, return_predecessors=True
-    )
-    a, b = graph.entry_keys // n, graph.entry_keys % n
-    crossing = (a < b) & (nearest[a] >= 0) & (nearest[b] >= 0) & (nearest[a] != nearest[b])
-    a, b = a[crossing], b[crossing]
-    cost = distance[a] + graph.entry_weights[crossing] + distance[b]
-    ta = np.searchsorted(terminal, np.minimum(nearest[a], nearest[b]))
-    tb = np.searchsorted(terminal, np.maximum(nearest[a], nearest[b]))
-    order = np.lexsort((cost, tb, ta))
-    first = order[np.r_[True, (ta[order][1:] != ta[order][:-1]) | (tb[order][1:] != tb[order][:-1])]]
-    k = len(terminal)
-    link_cost = np.where(cost[first] == 0, np.nextafter(0, 1), cost[first])
-    tree = minimum_spanning_tree(csr_matrix((link_cost, (ta[first], tb[first])), shape=(k, k))).tocoo()
-    low, high = np.minimum(tree.row, tree.col).astype(np.int64), np.maximum(tree.row, tree.col)
-    chosen = first[np.searchsorted(ta[first].astype(np.int64) * k + tb[first], low * k + high)]
-    pa_, pb_ = _forest_edges(predecessors, np.concatenate([a[chosen], b[chosen]]))
-    sub_a = np.concatenate([pa_, a[chosen]])
-    sub_b = np.concatenate([pb_, b[chosen]])
-    sub_a, sub_b = _spanning_tree(graph, sub_a, sub_b)
-    return _prune_leaves(sub_a, sub_b, terminal, n)
-
-
-def _spanning_tree(graph: Graph, a: np.ndarray, b: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    n = graph.n
-    low, high = np.minimum(a, b).astype(np.int64), np.maximum(a, b).astype(np.int64)
-    keys = np.unique(low * n + high)
-    weights = graph.entry_weights[np.searchsorted(graph.entry_keys, keys)]
-    weights = np.where(weights == 0, np.nextafter(0, 1), weights)
-    tree = minimum_spanning_tree(csr_matrix((weights, (keys // n, keys % n)), shape=(n, n))).tocoo()
-    return tree.row.astype(np.int64), tree.col.astype(np.int64)
-
-
-def _prune_leaves(a: np.ndarray, b: np.ndarray, kept: np.ndarray, n: int) -> Tuple[np.ndarray, np.ndarray]:
-    protected = np.zeros(n, dtype=bool)
-    protected[kept] = True
-    while len(a):
-        degree = np.bincount(a, minlength=n) + np.bincount(b, minlength=n)
-        dangling = ((degree[a] == 1) & ~protected[a]) | ((degree[b] == 1) & ~protected[b])
-        if not dangling.any():
-            break
-        a, b = a[~dangling], b[~dangling]
-    return a, b
-
-
-def _all_pairs_edges(graph: Graph, terminal: np.ndarray, targets: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    a_parts, b_parts = [], []
-    for _, _, predecessors in _dijkstra_blocks(graph.matrix, terminal, predecessors=True):
-        for row in predecessors:
-            pa_, pb_ = _forest_edges(row, targets)
-            a_parts.append(pa_)
-            b_parts.append(pb_)
-    if not a_parts:
-        return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
-    return np.concatenate(a_parts), np.concatenate(b_parts)

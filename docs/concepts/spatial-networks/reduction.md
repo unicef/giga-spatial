@@ -69,8 +69,8 @@ clinic_ids = [clinic for clinic in clinics["clinic_id"] if clinic in inserted]
 
 for label, call in [
     ("Steiner tree joining the schools", lambda: network.connecting_subnetwork(school_ids)),
-    ("each school to its nearest fibre node", lambda: network.connecting_subnetwork(school_ids, sources=fibre_ids)),
-    ("all pairs, 30 schools and the fibre nodes", lambda: network.connecting_subnetwork(school_ids[:30], sources=fibre_ids, method="all_pairs")),
+    ("each school to its nearest fibre node", lambda: network.connecting_subnetwork(school_ids, roots=fibre_ids, method="nearest_root")),
+    ("all pairs, 30 schools and the fibre nodes", lambda: network.connecting_subnetwork(school_ids[:30], roots=fibre_ids, method="all_pairs")),
 ]:
     started = time.perf_counter()
     result = call()
@@ -89,7 +89,7 @@ all pairs, 30 schools and the fibre nodes: 424.7 km, 748 edges, 0.92 s
 
 The three methods answer different questions:
 
-**`method="steiner"`, without sources (the default).** The tree that joins all the points at close to the smallest total length: a Steiner tree, which may use road junctions as branching points. It is the model for a backbone that links every school to every other, such as a ring of schools sharing one uplink. Finding the shortest Steiner tree is NP-hard, so the method uses Mehlhorn's approximation:
+**`method="steiner"`, without roots (the default).** The tree that joins all the points at close to the smallest total length: a Steiner tree, which may use road junctions as branching points. It is the model for a backbone that links every school to every other, such as a ring of schools sharing one uplink. Finding the shortest Steiner tree is NP-hard, so the method uses Mehlhorn's approximation:
 
 1. One multi-source Dijkstra from all the points gives every node its nearest point, which splits the network into one region per point (a Voronoi partition by road distance).
 2. Every edge whose ends lie in two different regions is a candidate link between those two points, with a length of the distance from each end to its point plus the edge itself. The cheapest link is kept for each pair of points.
@@ -98,13 +98,15 @@ The three methods answer different questions:
 
 The result is never more than twice as long as the shortest possible tree, \(2(1 - 1/\ell)\) times it for \(\ell\) leaves, and in practice it is close. The test suite checks that it is never longer than networkx's two approximations on the same network. Its cost is one multi-source Dijkstra and two spanning trees, whatever the number of points: 0.18 s for 1,000 schools on Rwanda's roads.
 
-**With `sources=`.** Each point takes its shortest path to its nearest source, such as each school to its nearest fibre node, and the result is the union of those paths. It is the model when every school must reach some fibre node and the schools need not reach each other. One multi-source Dijkstra from the sources gives every point its nearest source and the path to it.
+**`method="steiner"`, with `roots=`.** Roots are nodes already connected to each other, such as fibre nodes, so reaching any of them is enough. Joining every root to one virtual root at length 0 turns the problem into a Steiner tree over the points and that virtual root, solved by the same algorithm. Without the virtual root, the plan is a forest whose every tree reaches a fibre node, and a school may connect through another school. [`ConnectionPlanner`](../../api/network.md#connection-planning) makes the same plan, and adds each school's status, the fibre node it reaches, and its distance along the plan.
 
-**`method="all_pairs"`.** The shortest path between every point and every other point or source, as Giga's earlier code computed it. It shows every route that might matter, but the number of paths grows with the square of the number of points, so keep it for small sets.
+**`method="nearest_root"`.** Each point takes its shortest path to its nearest root, such as each school to its nearest fibre node, and the result is the union of those paths. Schools share a road only where their own shortest paths overlap, so it is longer than the rooted tree. One multi-source Dijkstra from the roots gives every point its nearest root and the path to it.
 
-In every case, the paths are collected from Dijkstra's predecessor arrays all at once, and the result is contracted with `simplify(keep=points and sources)`, so it keeps the points, the sources, and the branching nodes, with lengths added up and geometries joined. `weight="cost"` minimises another column, such as the cost of laying fibre (see [Worked use cases](use-cases.md)). A point that cannot reach the others stays in the result as a node without edges.
+**`method="all_pairs"`.** The shortest path between every point and every other point or root, as Giga's earlier code computed it. It shows every route that might matter, but the number of paths grows with the square of the number of points, so keep it for small sets.
 
-**Use cases.** Fibre backbone planning (the Steiner tree), extending fibre from existing nodes (with `sources`), and estimating the trench length or cost of a plan, which is `total_length()` of the result or the sum of its cost column.
+In every case, the paths are collected from Dijkstra's predecessor arrays all at once, and the result is contracted with `simplify(keep=points and roots)`, so it keeps the points, the roots, and the branching nodes, with lengths added up and geometries joined. `weight="cost"` minimises another column, such as the cost of laying fibre (see [Worked use cases](use-cases.md)). A point that cannot be connected stays in the result as a node without edges.
+
+**Use cases.** Fibre backbone planning (the Steiner tree), extending fibre from existing nodes (with `roots`), and estimating the trench length or cost of a plan, which is `total_length()` of the result or the sum of its cost column.
 
 ## How a source is cut from an extract
 

@@ -25,8 +25,8 @@ connection      29550.0  7.387490e+05
 
 ```python
 plans = {
-    "shortest routes to the nearest fibre node": planned.connecting_subnetwork(school_ids, sources=fibre_ids),
-    "cheapest routes to a fibre node": planned.connecting_subnetwork(school_ids, sources=fibre_ids, weight="cost"),
+    "shortest routes to the nearest fibre node": planned.connecting_subnetwork(school_ids, roots=fibre_ids, method="nearest_root"),
+    "cheapest routes to a fibre node": planned.connecting_subnetwork(school_ids, roots=fibre_ids, method="nearest_root", weight="cost"),
     "one tree joining schools and fibre nodes": planned.connecting_subnetwork(school_ids + fibre_ids),
 }
 for label, plan in plans.items():

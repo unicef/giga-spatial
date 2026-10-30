@@ -11,3 +11,4 @@ These records explain decisions that are hard to reverse or surprising without c
 | [0005](0005-spatial-network-storage.md) | A saved spatial network is a folder with a nodes Parquet file, an edges GeoParquet file, and a JSON metadata file. |
 | [0006](0006-osm-extract-storage.md) | OSM extracts are stored by date, and the network built from each is saved uncropped beside it; cropping happens at load. |
 | [0007](0007-osm-extract-choice.md) | OSM extracts are chosen by polygon, with ISO codes only as a fast path and a curated list of multi-country extracts. |
+| [0008](0008-connection-planning.md) | Connecting points to an existing network is a rooted Steiner tree with the existing network as one virtual root, solved by `ConnectionPlanner`. |
