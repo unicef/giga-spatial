@@ -135,3 +135,9 @@ version = { attr = "gigaspatial.__init__.__version__" }
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["gigaspatial*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "live: reaches a real data source over the network; run with -m live",
+]
+addopts = "-m 'not live'"

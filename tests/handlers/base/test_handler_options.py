@@ -839,3 +839,27 @@ def test_google_open_buildings_failed_download_leaves_no_file(
     assert gob.handler.ensure_data_available(AOI) is False
     stored = gob.config.base_path / "polygons_s2_level_4_abc_buildings.csv.gz"
     assert not gob.store.file_exists(str(stored))
+
+
+def test_srtm_downloader_without_a_config_uses_the_defaults(tmp_path):
+    from gigaspatial.handlers.nasa.srtm import NasaSRTMConfig, NasaSRTMDownloader
+
+    store = LocalDataStore(base_path=tmp_path)
+    downloader = NasaSRTMDownloader(data_store=store)
+
+    assert isinstance(downloader.config, NasaSRTMConfig)
+    assert downloader.data_store is store
+
+
+def test_ookla_reader_builds_its_config_from_a_dict(tmp_path):
+    from gigaspatial.handlers.ookla_speedtest import (
+        OoklaSpeedtestConfig,
+        OoklaSpeedtestReader,
+    )
+
+    reader = OoklaSpeedtestReader(
+        {"type": "fixed", "year": 2023, "quarter": 1, "base_path": tmp_path}
+    )
+
+    assert isinstance(reader.config, OoklaSpeedtestConfig)
+    assert reader.config.type == "fixed"

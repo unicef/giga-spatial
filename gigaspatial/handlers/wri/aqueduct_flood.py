@@ -490,14 +490,7 @@ class AqueductFloodDownloader(BaseHandlerDownloader):
 
     options_type = DownloadOptions
 
-    def __init__(
-        self,
-        config: Optional[AqueductFloodConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config or AqueductFloodConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = AqueductFloodConfig
 
     def download_data_unit(self, url: str, options: DownloadOptions) -> Path:
         """Download a single Aqueduct raster file.
@@ -529,14 +522,7 @@ class AqueductFloodReader(BaseHandlerReader):
 
     options_type = ReadOptions
 
-    def __init__(
-        self,
-        config: Optional[AqueductFloodConfig] = None,
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config or AqueductFloodConfig()
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = AqueductFloodConfig
 
     def load_from_paths(
         self, source_data_path: List[Union[str, Path]], options: ReadOptions

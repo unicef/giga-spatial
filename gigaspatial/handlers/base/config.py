@@ -352,3 +352,33 @@ class BaseHandlerConfig(ABC):
         """Clear cached units."""
         self._units.clear()
         self.logger.debug("Unit cache cleared")
+
+
+def build_component_config(
+    config_type: Optional[Type[BaseHandlerConfig]],
+    config: Union[BaseHandlerConfig, dict, None],
+) -> Optional[BaseHandlerConfig]:
+    """
+    Return the config a downloader or reader works with.
+
+    Args:
+        config_type: The component's ``config_type``; None on the bare base.
+        config: A config, a dict of its fields, or None for the defaults.
+
+    Returns:
+        ``config`` itself, or a ``config_type`` built from the dict or from
+        the defaults.
+
+    Raises:
+        TypeError: If ``config`` is a dict and the component declares no
+            ``config_type``.
+    """
+    if isinstance(config, dict):
+        if config_type is None:
+            raise TypeError(
+                "A config given as a dict needs a component with a config_type"
+            )
+        return config_type(**config)
+    if config is None and config_type is not None:
+        return config_type()
+    return config

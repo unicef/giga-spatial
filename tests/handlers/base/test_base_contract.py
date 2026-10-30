@@ -198,6 +198,40 @@ def test_config_fields_with_a_config_raise(tmp_path):
         ForwardingHandler(config=config, n_workers=3)
 
 
+class TypedDownloader(FakeDownloader):
+    config_type = FakeConfig
+
+
+class TypedReader(FakeReader):
+    config_type = FakeConfig
+
+
+@pytest.mark.parametrize("component", [TypedDownloader, TypedReader])
+def test_component_builds_its_config_from_a_dict(tmp_path, component):
+    built = component({"base_path": tmp_path / "fake", "n_workers": 2})
+
+    assert isinstance(built.config, FakeConfig)
+    assert built.config.n_workers == 2
+
+
+@pytest.mark.parametrize("component", [TypedDownloader, TypedReader])
+def test_component_without_a_config_uses_the_defaults(component):
+    assert isinstance(component().config, FakeConfig)
+
+
+@pytest.mark.parametrize("component", [TypedDownloader, TypedReader])
+def test_component_keeps_the_config_it_is_given(tmp_path, component):
+    config = FakeConfig(base_path=tmp_path / "fake")
+
+    assert component(config).config is config
+
+
+@pytest.mark.parametrize("component", [FakeDownloader, FakeReader])
+def test_dict_config_needs_a_config_type(component):
+    with pytest.raises(TypeError, match="config_type"):
+        component({"n_workers": 2})
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Availability and download
 # ─────────────────────────────────────────────────────────────────────────────

@@ -405,14 +405,7 @@ class HDXDownloader(BaseHandlerDownloader):
 
     options_type = DownloadOptions
 
-    def __init__(
-        self,
-        config: Union[HDXConfig, dict],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config if isinstance(config, HDXConfig) else HDXConfig(**config)
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = HDXConfig
 
     def download_data_unit(self, resource: Resource, options: DownloadOptions) -> str:
         """
@@ -450,14 +443,7 @@ class HDXReader(BaseHandlerReader):
 
     options_type = HDXReadOptions
 
-    def __init__(
-        self,
-        config: Union[HDXConfig, dict],
-        data_store: Optional[DataStore] = None,
-        logger: Optional[logging.Logger] = None,
-    ):
-        config = config if isinstance(config, HDXConfig) else HDXConfig(**config)
-        super().__init__(config=config, data_store=data_store, logger=logger)
+    config_type = HDXConfig
 
     def load_from_paths(
         self,

@@ -1,7 +1,7 @@
 """Abstract downloader for dataset handlers (`BaseHandlerDownloader`)."""
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, ClassVar, List, Optional, Iterable, Type
+from typing import Any, ClassVar, List, Optional, Iterable, Type, Union
 import pandas as pd
 import logging
 from tqdm import tqdm
@@ -9,7 +9,7 @@ from tqdm import tqdm
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.base.config import BaseHandlerConfig
+from gigaspatial.handlers.base.config import BaseHandlerConfig, build_component_config
 from gigaspatial.handlers.base.options import DownloadOptions, sort_options
 
 
@@ -27,16 +27,27 @@ class BaseHandlerDownloader(ABC):
         logger: Logger instance for tracking download progress.
         options_type: The `DownloadOptions` subclass ``download_data_unit``
             takes.
+        config_type: The config class built when the downloader is given a
+            dict or no config.
     """
 
     options_type: ClassVar[Type[DownloadOptions]] = DownloadOptions
+    config_type: ClassVar[Optional[Type[BaseHandlerConfig]]] = None
 
     def __init__(
         self,
-        config: Optional[BaseHandlerConfig] = None,
+        config: Union[BaseHandlerConfig, dict, None] = None,
         data_store: Optional[DataStore] = None,
         logger: Optional[logging.Logger] = None,
     ):
+        """
+        Args:
+            config: The handler's config, a dict of ``config_type`` fields, or
+                None for a default ``config_type``.
+            data_store: Data store to write to; defaults to the config's.
+            logger: Logger; defaults to the config's.
+        """
+        config = build_component_config(self.config_type, config)
         self.config = config
         if data_store:
             self.data_store = data_store

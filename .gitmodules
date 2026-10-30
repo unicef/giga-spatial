@@ -1,0 +1,3 @@
+[submodule ".agents/vendor/di-applied-science-skills"]
+	path = .agents/vendor/di-applied-science-skills
+	url = ../di-applied-science-skills.git
