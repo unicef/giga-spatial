@@ -28,8 +28,6 @@ BRIDGES_PER_COMPONENT = 5
 _FIRST_NEIGHBOURS = 16
 # A move must save at least this share of the weight it replaces, so rounding never loops.
 _GAIN = 1e-9
-# The dual ascent recomputes distances after this fraction (1 / value) of its waiting terminals.
-_REFRESH_SHARE = 50
 
 
 @dataclass
@@ -291,11 +289,12 @@ class ConnectionPlanner:
 
         The network becomes directed, with both directions of every edge,
         rooted at the virtual root, or without roots at the first terminal
-        that can be connected. Each terminal in turn grows the set of nodes
-        that reach it along arcs of reduced cost 0, raising the bound by the
-        smallest reduced cost of the arcs entering the set and lowering theirs
-        by as much, until the root is in the set. The sum of the raises is a
-        lower bound on the optimum. Unreachable terminals are left out.
+        that can be connected. Each terminal's region is the set of nodes
+        that reach it along arcs of reduced cost 0. Repeatedly, the terminal
+        whose region has the fewest entering arcs raises the bound by their
+        smallest reduced cost and lowers theirs by as much, until every
+        region holds the root. The sum of the raises is a lower bound on the
+        optimum. Unreachable terminals are left out.
 
         A bound reached when ``time_limit`` stops the ascent is still valid,
         only looser. A complete bound is kept, so later calls return it at once.
@@ -589,113 +588,83 @@ def _with_bridges(graph: Graph, bridges: _Bridges, bridge_cost: Optional[float],
 # ----- lower bound
 
 
-class _DualAscent:
-    """Wong's dual ascent on a graph's arcs, one terminal's turn at a time.
+def _dual_ascent(graph: Graph, root: int, terminals: np.ndarray, deadline: float) -> Tuple[float, bool]:
+    """Wong's dual ascent; the bound, and whether every terminal reached the root before the deadline.
 
-    A turn grows the set of nodes that reach the terminal along arcs of
-    reduced cost 0 like a reverse Dijkstra: arcs entering the set wait in a
-    heap keyed by reduced cost plus the bound raised so far in the turn, so
-    all their reduced costs fall together without being touched. When the
-    turn ends, each arc's reduced cost is lowered by the raises made while it
-    entered the set.
+    Each terminal has a region, the nodes that reach it along arcs of reduced
+    cost 0, and the arcs entering it. A step takes the active terminal whose
+    region has the fewest entering arcs, raises the bound by their smallest
+    reduced cost, and lowers all of theirs by as much. Terminals whose region
+    holds the root are done.
+
+    Reduced costs only fall, so a region only grows: each terminal keeps its
+    region and entering arcs between steps, and a step only checks the
+    entering arcs for any that reached 0 and grows the region from their
+    tails. Terminals wait in a heap keyed by the size of their cut when last
+    seen; a terminal whose cut has grown past the next one goes back.
     """
+    n = graph.n
+    indptr, indices = graph.matrix.indptr.tolist(), graph.matrix.indices.tolist()
+    a, b = graph.entry_keys // n, graph.entry_keys % n
+    reverse = np.searchsorted(graph.entry_keys, b * n + a).tolist()
+    cost = graph.entry_weights.tolist()
+    region: Dict[int, set] = {}
+    entering: Dict[int, list] = {}
+    heap = [(0, int(t)) for t in terminals]
+    heapq.heapify(heap)
+    bound = 0.0
 
-    def __init__(self, graph: Graph, root: int):
-        matrix = graph.matrix
-        n = graph.n
-        self.graph, self.root, self.n = graph, root, n
-        self.indptr, self.indices = matrix.indptr.tolist(), matrix.indices.tolist()
-        a, b = graph.entry_keys // n, graph.entry_keys % n
-        self.reverse = np.searchsorted(graph.entry_keys, b * n + a).tolist()
-        self.cost = graph.entry_weights.tolist()
-        self.reduced = csr_matrix((graph.entry_weights.copy(), matrix.indices, matrix.indptr), shape=matrix.shape)
-        self.member = [-1] * n
-        self.turns = 0
-        self.bound = 0.0
-
-    def reduced_distances(self) -> np.ndarray:
-        """Each node's distance from the root along arcs at their reduced costs."""
-        return dijkstra(self.reduced, directed=True, indices=self.root)
-
-    def turn(self, terminal: int, deadline: float, cap: float = np.inf) -> bool:
-        """Raise the bound until the root reaches ``terminal`` at reduced cost 0, or the deadline; whether it does."""
-        indptr, indices, reverse, cost, member = self.indptr, self.indices, self.reverse, self.cost, self.member
-        turn = self.turns
-        self.turns += 1
-        offset = 0.0
-        heap, waiting, joined = [], [], {}
-        stack = [terminal]
-        member[terminal] = turn
+    def grow(members: set, frontier: list, found: list) -> bool:
         rooted = False
-        while True:
-            while stack:
-                x = stack.pop()
-                joined[x] = offset
-                if x == self.root:
-                    rooted = True
-                for e in range(indptr[x], indptr[x + 1]):
-                    y = indices[e]
-                    if member[y] == turn:
-                        continue
-                    arc = reverse[e]
-                    if cost[arc] <= 0.0:
-                        member[y] = turn
-                        stack.append(y)
-                    else:
-                        key = cost[arc] + offset
-                        heapq.heappush(heap, (key, arc, y))
-                        waiting.append((arc, key, y))
-            if rooted or not heap or time.perf_counter() >= deadline:
-                break
-            if heap[0][0] > cap:
-                offset = cap
-                break
-            key, arc, y = heapq.heappop(heap)
-            if member[y] == turn:
-                continue
-            offset = key
-            member[y] = turn
-            stack.append(y)
-        changed = []
-        for arc, key, tail in waiting:
-            cost[arc] = max(0.0, key - min(joined.get(tail, offset), offset))
-            changed.append(arc)
-        if changed:
-            self.reduced.data[changed] = [cost[arc] for arc in changed]
-        self.bound += offset
+        while frontier:
+            x = frontier.pop()
+            if x == root:
+                rooted = True
+            for e in range(indptr[x], indptr[x + 1]):
+                y = indices[e]
+                if y in members:
+                    continue
+                arc = reverse[e]
+                if cost[arc] <= 0.0:
+                    members.add(y)
+                    frontier.append(y)
+                else:
+                    found.append((arc, y))
         return rooted
 
-
-def _dual_ascent(graph: Graph, root: int, terminals: np.ndarray, deadline: float) -> Tuple[float, bool]:
-    """The dual ascent's bound, and whether every terminal reached the root before the deadline.
-
-    Terminals take turns nearest the root first, at the current reduced
-    costs: a turn raises the bound by exactly that distance. Distances are
-    recomputed after every 2% of the waiting terminals have had their turn;
-    on Rwanda with 1,000 terminals that was 7 times faster than after every
-    turn, and the bound came out 0.5% higher, while on Kigali with 60
-    terminals, every turn, it gave the highest bound.
-    """
-    ascent = _DualAscent(graph, root)
-    waiting = np.asarray(terminals, dtype=np.int64)
-    queue: list = []
-    since = every = 0
-    while len(waiting):
+    while heap:
         if time.perf_counter() >= deadline:
-            return ascent.bound, False
-        if not queue or since >= every:
-            distance = ascent.reduced_distances()[waiting]
-            waiting = waiting[distance > 0]
-            if not len(waiting):
-                break
-            queue = waiting[np.argsort(distance[distance > 0], kind="stable")].tolist()[::-1]
-            since, every = 0, max(1, len(waiting) // _REFRESH_SHARE)
-        terminal = queue.pop()
-        if not ascent.turn(terminal, deadline):
-            return ascent.bound, False
-        since += 1
-        waiting = waiting[waiting != terminal]
-    return ascent.bound, True
+            return bound, False
+        _, terminal = heapq.heappop(heap)
+        found: list = []
+        if terminal not in region:
+            members = region[terminal] = {terminal}
+            rooted = grow(members, [terminal], found)
+        else:
+            members, frontier = region[terminal], []
+            for arc, y in entering[terminal]:
+                if y in members:
+                    continue
+                if cost[arc] <= 0.0:
+                    members.add(y)
+                    frontier.append(y)
+                else:
+                    found.append((arc, y))
+            rooted = grow(members, frontier, found)
+        if rooted or root in members:
+            del region[terminal]
+            entering.pop(terminal, None)
+            continue
+        cut = entering[terminal] = [(arc, y) for arc, y in found if y not in members]
+        if heap and len(cut) > heap[0][0]:
+            heapq.heappush(heap, (len(cut), terminal))
+            continue
+        delta = min(cost[arc] for arc, _ in cut)
+        for arc, _ in cut:
+            cost[arc] -= delta
+        bound += delta
+        heapq.heappush(heap, (len(cut), terminal))
+    return bound, True
 
 
 # ----- local search

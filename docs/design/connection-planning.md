@@ -166,11 +166,10 @@ The sum of the raises is a lower bound on the optimal tree's weight. Each round 
 
 As built (`benchmarks/connection_planning/bound.py`):
 
-- **One terminal's turn at a time, grown like a reverse Dijkstra.** Recomputing the set from scratch every round would cost a search over it each time. Instead, a turn keeps the arcs entering its set in a heap keyed by reduced cost plus the bound raised so far in the turn, so all their reduced costs fall together without being touched, and writes each arc's lowered cost back when the turn ends. A turn stopped by `time_limit` writes back what it raised, so the bound stays valid.
-- **The next terminal is the one nearest the root at the current reduced costs.** A turn raises the bound by exactly that distance. On Kigali this gave gaps of 0.6 to 7.6% against the improved plans, where the given order gave 26 to 38% and the nearest by road distance 1.7 to 13.1%. Capping a turn's raise, so terminals grow in alternation as in Wong's original rule, changed nothing, since the same terminal stays nearest.
-- **Distances are recomputed after every 2% of the waiting terminals' turns,** with scipy's Dijkstra on the reduced costs, kept in a sparse matrix updated only where a turn changed them. On Rwanda with 1,000 terminals that is 7 times faster than every turn, with a bound 0.5% higher.
-- **A complete bound is kept by the planner,** so the gap of every later plan costs nothing. A bound stopped by `time_limit` is recomputed on the next call.
-- On Rwanda with 20 roots the bound takes 2.1 s for 100 terminals, 7.0 s for 1,000, and 31.6 s for 10,000. Improved plans have gaps of 5.5%, 10.9%, and 12.0%.
+- **Wong's rule chooses the terminal.** Every step, the active terminal whose region (the nodes that reach it at reduced cost 0) has the fewest entering arcs raises the bound by their smallest reduced cost. A first version gave each terminal one whole turn, until its region held the root, nearest the root first; it was valid but much weaker. Against SteinLib's proven optima its bound was on average 9.7% below the optimum on set C, at worst 45%, against 0.42%, at worst 3.1%, for Wong's rule; on Rwanda with 1,000 terminals it left a gap of 10.9% to the improved plan, against 1.4%.
+- **Regions are kept between steps.** Reduced costs only fall, so a region only grows. Each terminal keeps its region and its entering arcs, and a step checks only those arcs for any that reached 0, growing the region from their tails. Recomputing each region every step gave the same bounds and took 41 s for 100 terminals on Rwanda, against 1.5 s.
+- **A complete bound is kept by the planner,** so the gap of every later plan costs nothing. A bound stopped by `time_limit` is still valid, only looser, and is recomputed on the next call.
+- On Rwanda with 20 roots the bound takes 1.7 s for 100 terminals, 5.0 s for 1,000, and 40.5 s for 10,000. Improved plans have gaps of 2.1%, 1.4%, and 0.6%.
 
 ## 9. Edge cases
 

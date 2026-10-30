@@ -635,7 +635,7 @@ def test_the_bound_on_kigali(connected, chosen):
     planner = ConnectionPlanner(connected, terminals, roots=roots)
     plan = planner.improve(planner.plan())
     bound = planner.lower_bound(plan)
-    assert 0 < bound <= plan.cost and 0 <= plan.gap < 0.15
+    assert 0 < bound <= plan.cost and 0 <= plan.gap < 0.02
     assert planner.lower_bound() == bound
 
 

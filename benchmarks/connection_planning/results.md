@@ -31,12 +31,14 @@ Passes run until neither move improves the plan; `time_limit` stops earlier. The
 
 | terminals | bound s | bound | steiner (gap) | improved, 120 s at most (gap) |
 |---|---|---|---|---|
-| 100 | 2.1 | 1,090 km | 1,194 km (9.6%) | 1,150 km (5.5%) |
-| 1,000 | 7.0 | 3,388 km | 3,942 km (16.4%) | 3,755 km (10.9%) |
-| 10,000 | 31.6 | 9,458 km | 10,954 km (15.8%) | 10,591 km (12.0%) |
+| 100 | 1.7 | 1,127 km | 1,194 km (6.0%) | 1,150 km (2.1%) |
+| 1,000 | 5.0 | 3,703 km | 3,942 km (6.5%) | 3,755 km (1.4%) |
+| 10,000 | 40.5 | 10,530 km | 10,954 km (4.0%) | 10,591 km (0.6%) |
 
-The gap says how far above the optimum a plan can be at most; how much of it is the bound's own looseness is measured against exact solutions in sub-task 6.
+The gap says how far above the optimum a plan can be at most.
 
-How terminals take their turns decides the bound. On Kigali with 60 terminals and 3 roots (5 instances), against the improved plans: in the given order, gaps of 26 to 38%; nearest the root first by road distance, 1.7 to 13.1%; nearest first at the current reduced costs, recomputed before every turn, 0.6 to 7.6%. Farthest first gave up to 100%. Recomputing the reduced distances after every 2% of the waiting terminals, instead of every turn, made 1,000 terminals on Rwanda 7 times faster (3.3 against 23.6 s on another draw of terminals) and the bound 0.5% higher; on Kigali it is every turn.
+The ascent follows Wong's rule: every step, the terminal whose region has the fewest entering arcs raises the bound by one arc. The first version gave each terminal one whole turn until it reached the root, nearest the root first. It was valid but much weaker: against SteinLib's proven optima (sub-task 6), its bound was on average 7.0% below the optimum on set B and 9.7% on set C, at worst 45%, against 0.05% and 0.42%, at worst 3.1%, for Wong's rule. On Rwanda it gave gaps of 5.5%, 10.9%, and 12.0% for the improved plans above, in 2.1, 7.0, and 31.6 s.
 
-A single-commodity flow model of one Kigali instance in scipy's `milp` (HiGHS) did not finish in 600 s: its best plan was 29,413 m against the planner's improved 28,079 m, and its proven lower bound 20,997 m against the dual ascent's 26,092 m, found in 0.02 s.
+Wong's rule recomputing each region from scratch every step took 41 s for 100 terminals on Rwanda, where few far-apart terminals grow large regions. Regions only grow, since reduced costs only fall, so each terminal keeps its region and entering arcs, and a step checks only those arcs: the same bounds on every B and C instance, in 1.5 s.
+
+A single-commodity flow model of one Kigali instance in scipy's `milp` (HiGHS) did not finish in 600 s: its best plan was 29,413 m against the planner's improved 28,079 m, and its proven lower bound 20,997 m against the first version's dual ascent at 26,092 m.
