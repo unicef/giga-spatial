@@ -6,14 +6,14 @@ This page is not in the docs site navigation. The user-facing description will b
 
 ## 1. The problem
 
-Given a spatial network with a non-negative weight on every edge, a set of **terminals** that must be connected, and a set of **sources** that are already connected to each other through an existing network, find the set of edges of smallest total weight such that every terminal can reach some source. A terminal may reach a source directly or through other terminals, and an edge used by several terminals counts once.
+Given a spatial network with a non-negative weight on every edge, a set of **terminals** that must be connected, and a set of **roots** that are already connected to each other through an existing network, find the set of edges of smallest total weight such that every terminal can reach some root. A terminal may reach a root directly or through other terminals, and an edge used by several terminals counts once.
 
-Merging every source into one virtual root, joined to each source at weight 0, makes this the Steiner tree problem in graphs over the terminals and the root ([ADR 0008](../adr/0008-connection-planning.md)). Removing the root from the tree leaves a forest whose every tree contains at least one source.
+Joining every root to one virtual root at weight 0 makes this the Steiner tree problem in graphs over the terminals and the root ([ADR 0008](../adr/0008-connection-planning.md)). Removing the root from the tree leaves a forest whose every tree contains at least one root.
 
 - **Directions are ignored.** A cable or a duct does not follow one-way streets.
 - **The cost is per edge used, paid once.** That is trench length, or a cost per metre of trench through `weight=`. A cost per cable, which grows with the number of terminals behind an edge, is out of scope: it makes the problem fixed-charge network design.
-- **The sources are one backbone.** Reaching any source is enough. Separate networks, each terminal assigned to one of them, are deferred.
-- **No sources** gives an unrooted Steiner tree joining the terminals, as `connecting_subnetwork(terminals)` does today.
+- **The roots are one backbone.** Reaching any root is enough. Separate networks, each terminal assigned to one of them, are deferred.
+- **No roots** gives an unrooted Steiner tree joining the terminals, as `connecting_subnetwork(terminals)` does today.
 
 Complexity: NP-hard, and NP-hard to approximate within 96/95. The best known approximation is ln 4 + ε ≈ 1.39 (Byrka et al., 2010), through large linear programs. Mehlhorn's algorithm gives at most 2(1 − 1/ℓ) times the optimum for ℓ leaves in O(m + n log n), and is within a few percent in practice. SCIP-Jack solves instances of a few hundred thousand edges exactly, typically in minutes.
 
@@ -34,8 +34,8 @@ The rooted tree was computed with today's code by joining the fibre nodes with z
 |---|---|
 | Classes | `ConnectionPlanner` and `ConnectionPlan` in `gigaspatial/processing/network/planning.py` |
 | Public names | `from gigaspatial import ConnectionPlanner`; `gigaspatial.processing.ConnectionPlanner`, `ConnectionPlan` (ADR 0003) |
-| Terms | terminals, sources, bridges, connection plan. Glossary entries for **Connection planner** and **Connection plan** beside **Connecting subnetwork** |
-| Steiner routines | `_steiner_edges`, `_nearest_source_edges`, `_all_pairs_edges`, `_forest_edges`, `_spanning_tree`, and `_prune_leaves` move from `reduction.py` to `planning.py`; `reduction.py` keeps `simplify` |
+| Terms | terminals, roots, bridges, connection plan. Glossary entries for **Connection planner**, **Connection plan**, and **Root** beside **Connecting subnetwork** |
+| Steiner routines | `_steiner_edges`, `_nearest_source_edges` (renamed `_nearest_root_edges`), `_all_pairs_edges`, `_forest_edges`, `_spanning_tree`, and `_prune_leaves` move from `reduction.py` to `planning.py`; `reduction.py` keeps `simplify` |
 | Dependencies | none new: numpy, scipy, pandas, shapely |
 
 The docs use fibre as the main example, but the names and docstrings stay generic, so the planner reads as naturally for a power grid or water mains.
@@ -44,36 +44,36 @@ The docs use fibre as the main example, but the names and docstrings stay generi
 
 ```python
 planner = ConnectionPlanner(
-    network,                    # a SpatialNetwork, with terminals and sources already inserted
+    network,                    # a SpatialNetwork, with terminals and roots already inserted
     terminals,                  # node IDs to connect
-    sources=(),                 # node IDs already connected to each other
+    roots=(),                   # node IDs already connected to each other
     weight=None,                # edge column to minimise; the network's weight otherwise
     bridge_cost=None,           # weight per metre of a straight-line link; no bridges when None
     bridge_max_distance=5000,   # metres
 )
-plan = planner.plan(method="steiner")        # or "shortest_path", "nearest_source", "all_pairs"
+plan = planner.plan(method="steiner")        # or "shortest_path", "nearest_root", "all_pairs"
 plan = planner.improve(plan, time_limit=None)
 bound = planner.lower_bound(time_limit=60)   # also sets plan.bound and plan.gap when given a plan
 ```
 
-`SpatialNetwork.connecting_subnetwork(terminals, sources=None, method="steiner", weight=None)` builds a planner and returns `planner.plan(method).network`, so it keeps its signature.
+`SpatialNetwork.connecting_subnetwork(terminals, roots=None, method="steiner", weight=None)` builds a planner and returns `planner.plan(method).network`. Its `sources=` parameter becomes `roots=`, and `method="nearest_source"` becomes `"nearest_root"`; neither is released yet.
 
 | `method` | Meaning |
 |---|---|
-| `"steiner"` (default) | Mehlhorn's 2-approximation. With sources, the rooted tree (section 4); without, the unrooted tree joining the terminals |
+| `"steiner"` (default) | Mehlhorn's 2-approximation. With roots, the rooted tree (section 4); without, the unrooted tree joining the terminals |
 | `"shortest_path"` | Takahashi and Matsuyama's heuristic: connect terminals one at a time, cheapest first, to everything connected so far. Gives the rollout order (section 5) |
-| `"nearest_source"` | Each terminal's shortest path to its nearest source; the union of those paths. Today's behaviour of `sources=` |
-| `"all_pairs"` | The shortest path between every terminal and every terminal or source, as the old Giga code did; grows with the square of the terminals |
+| `"nearest_root"` | Each terminal's shortest path to its nearest root; the union of those paths. Today's behaviour of `sources=` |
+| `"all_pairs"` | The shortest path between every terminal and every terminal or root, as the old Giga code did; grows with the square of the terminals |
 
-Inputs are node IDs of the network. Inserting points is the user's step (`insert_points`, then plan), so insertion's options and its skipped points stay visible. A source that is also a terminal is connected from the start. Unknown IDs raise `KeyError`. Weights must be present on every edge and not negative; zero is allowed.
+Inputs are node IDs of the network. Inserting points is the user's step (`insert_points`, then plan), so insertion's options and its skipped points stay visible. A root that is also a terminal is connected from the start. Unknown IDs raise `KeyError`. Weights must be present on every edge and not negative; zero is allowed.
 
 ### `ConnectionPlan`
 
 | Field | Meaning |
 |---|---|
-| `network` | The connecting subnetwork, contracted with `simplify(keep=terminals and sources)`, as `connecting_subnetwork` returns today. Undirected |
+| `network` | The connecting subnetwork, contracted with `simplify(keep=terminals and roots)`, as `connecting_subnetwork` returns today. Undirected |
 | `edges` | The chosen edges of the original network, uncontracted, one row per undirected edge with its attributes and geometry; bridges included with `kind="bridge"` |
-| `terminals` | One row per terminal: `status` (`connected`, `source`, or `unreachable`), `source` (a source its tree reaches), `distance` (weight along the plan to the nearest source in its tree), `bridged` (whether its path uses a bridge), and for `shortest_path` `order` and `marginal_cost` |
+| `terminals` | One row per terminal: `status` (`connected`, `root`, or `unreachable`), `root` (a root its tree reaches), `distance` (weight along the plan to the nearest root in its tree), `bridged` (whether its path uses a bridge), and for `shortest_path` `order` and `marginal_cost` |
 | `cost` | The total weight of `edges` |
 | `bound`, `gap` | Filled by `lower_bound`: the bound, and `cost / bound - 1`, so the plan costs at most `1 + gap` times the optimum |
 | `metadata` | Method, weight, `bridge_cost`, counts, and the time each step took |
@@ -82,9 +82,9 @@ Order and marginal cost come only from `shortest_path`. A Steiner tree's shared 
 
 ## 4. The rooted Steiner tree
 
-The adjacency matrix of the undirected network (`_graph(weight, directed=False)`) gets one extra node, the virtual root, joined to every source. scipy's minimum spanning tree drops zero entries, so these joins get the smallest positive float, as zero weights already do. Mehlhorn's routine then runs unchanged with terminals ∪ {root}:
+The adjacency matrix of the undirected network (`_graph(weight, directed=False)`) gets one extra node, the virtual root, joined to every root node. scipy's minimum spanning tree drops zero entries, so these joins get the smallest positive float, as zero weights already do. Mehlhorn's routine then runs unchanged with terminals ∪ {root}:
 
-1. One multi-source Dijkstra from terminals and root gives every node its nearest terminal. Because the root is joined to every source at (almost) zero, the root's Voronoi region is everything nearer to some source than to any terminal.
+1. One multi-source Dijkstra from terminals and root gives every node its nearest terminal. Because the virtual root is joined to every root node at (almost) zero, its Voronoi region is everything nearer to some root node than to any terminal.
 2. Edges between regions give candidate links; an MST over the cheapest link per pair of regions picks the pairs.
 3. The links are expanded into paths, a second MST removes cycles, and leaves that are neither terminals nor the root are pruned.
 4. The root and its joins are removed. What is left is the plan's edges.
@@ -93,7 +93,7 @@ The cost is the same as today's Steiner tree: one Dijkstra and two MSTs over a m
 
 ## 5. The rollout order (`method="shortest_path"`)
 
-Takahashi and Matsuyama's heuristic, a 2-approximation, is the planner's model of a phased rollout. Start with the sources as the connected set. Repeatedly connect the unconnected terminal nearest (by weight) to anything connected so far, along its shortest path, and add that path to the connected set. A terminal's `order` is when it was connected, and its `marginal_cost` the weight of its path, which uses only new edges. Ties go to the lower terminal ID, so plans are reproducible. Terminals that the connected set cannot reach are `unreachable`.
+Takahashi and Matsuyama's heuristic, a 2-approximation, is the planner's model of a phased rollout. Start with the roots as the connected set. Repeatedly connect the unconnected terminal nearest (by weight) to anything connected so far, along its shortest path, and add that path to the connected set. A terminal's `order` is when it was connected, and its `marginal_cost` the weight of its path, which uses only new edges. Ties go to the lower terminal ID, so plans are reproducible. Terminals that the connected set cannot reach are `unreachable`.
 
 Implemented incrementally:
 
@@ -105,7 +105,7 @@ Sub-task 3 benchmarks this against the naive version (one full Dijkstra per term
 
 ## 6. Bridges
 
-With `bridge_cost=c`, the planner may use straight-line links between the network's connected components, for terminals that no road connects to a source: microwave, wireless, or a planned road.
+With `bridge_cost=c`, the planner may use straight-line links between the network's connected components, for terminals that no road connects to a root: microwave, wireless, or a planned road.
 
 - Candidates are found with a KD-tree on all nodes, on the unit sphere as `connect_components` does: for each component, its nearest node pairs to up to 5 other components within `bridge_max_distance`.
 - Each candidate gets the weight `c` times its great-circle length in metres, in the units of `weight`, and is added to the planner's internal network with `kind="bridge"` and a straight-line geometry.
@@ -118,7 +118,7 @@ A network loaded through `OSMRoadsHandler` keeps only its largest connected part
 
 `improve(plan)` applies two of Uchoa and Werneck's moves until neither improves the plan or `time_limit` passes. Neither ever makes a plan worse.
 
-A **key vertex** is a node of the tree that is a terminal, a source, or a Steiner node of degree 3 or more; a **key path** is a path of the tree between two key vertices whose inner nodes are Steiner nodes of degree 2.
+A **key vertex** is a node of the tree that is a terminal, a root, or a Steiner node of degree 3 or more; a **key path** is a path of the tree between two key vertices whose inner nodes are Steiner nodes of degree 2.
 
 - **Key-path exchange.** Remove one key path; the tree falls into two parts. Find the cheapest path joining the two parts, with a Dijkstra from one part limited to the removed path's weight. If it is cheaper, replace the key path with it.
 - **Key-vertex elimination.** Remove one Steiner key vertex and its key paths; the tree falls into three or more parts. A multi-source Dijkstra labelled by part, as in Mehlhorn's algorithm, gives the cheapest links between parts, and an MST over them reconnects all parts. If the reconnection is cheaper than what was removed, keep it.
@@ -129,7 +129,7 @@ Moves are tried cheapest-to-evaluate first (key paths in decreasing weight), and
 
 Wong's dual ascent (1984) gives a lower bound on the optimum, and with it the gap of any plan.
 
-- The undirected network becomes a directed one with both directions of every edge, rooted at the virtual root (or at one terminal when there are no sources). Each arc starts with its weight as its reduced cost.
+- The undirected network becomes a directed one with both directions of every edge, rooted at the virtual root (or at one terminal when there are no roots). Each arc starts with its weight as its reduced cost.
 - Repeatedly, pick a terminal that cannot yet be reached from the root along arcs of reduced cost 0, and the set of nodes that reach it along such arcs. Raise the bound by the smallest reduced cost of the arcs entering that set, and lower those arcs' reduced costs by it.
 - Stop when every terminal is reachable along arcs of reduced cost 0.
 
@@ -137,16 +137,16 @@ The sum of the raises is a lower bound on the optimal tree's weight. Each round 
 
 ## 9. Edge cases
 
-- No sources: the unrooted tree over the terminals.
-- One terminal and no sources: an empty plan.
-- A terminal that is a source: `status="source"`, distance 0.
+- No roots: the unrooted tree over the terminals.
+- One terminal and no roots: an empty plan.
+- A terminal that is a root: `status="root"`, distance 0.
 - A terminal unreachable, even through bridges: `status="unreachable"`, left out of the plan and the bound.
 - Weights: zero allowed, negative or missing refused with `ValueError`, as the algorithms do today.
 - `bridge_cost` set without any component to bridge: no bridges, no warning.
 
 ## 10. Performance targets
 
-On Rwanda's simplified network (125,058 nodes, 332,535 edges), with 1,000 terminals and 20 sources, on the benchmark laptop:
+On Rwanda's simplified network (125,058 nodes, 332,535 edges), with 1,000 terminals and 20 roots, on the benchmark laptop:
 
 | Step | Target |
 |---|---|
@@ -176,14 +176,14 @@ Each sub-task is its own pull request on `feat/connection-planner`, stacked on #
 ## 13. Deferred
 
 - **Prize-collecting plans** (`prizes=`, a value per terminal such as its pupils): connect only the terminals worth their cost, or the most value within a budget. Goemans and Williamson's 2-approximation, with Hegde, Indyk, and Schmidt's nearly linear version (`pcst_fast`), fits the planner's virtual root.
-- **Capacities** (`demands=` per terminal, `capacities=` per source): the capacitated Steiner tree, with the capacitated shortest-path heuristic (PLOS One, 2022); and Ito, Zhou, and Nishizeki's partitioning of a tree among capacitated sources as a second stage.
-- **Separate source networks**, each terminal assigned to one.
+- **Capacities** (`demands=` per terminal, `capacities=` per root): the capacitated Steiner tree, with the capacitated shortest-path heuristic (PLOS One, 2022); and Ito, Zhou, and Nishizeki's partitioning of a tree among capacitated roots as a second stage.
+- **Separate root networks**, each terminal assigned to one.
 - **Cost per cable**: fixed-charge network design or buy-at-bulk.
 - **Vertex insertion and elimination** in `improve`.
 
-## 14. Open question
+## 14. Why "roots"
 
-**"Source" is already a glossary term.** It means the place a dataset is requested for (a country, a geometry, points, a frame), and the handlers and fetchers use it in that sense. Using `sources` for the existing network's nodes gives one word two meanings in the same library. `connecting_subnetwork` already takes `sources=`, but it is not released yet. Options: keep `sources` and qualify it in the glossary; or rename to `roots` (the Steiner literature's term, matching the virtual root) or `anchors`. To be decided before sub-task 1.
+The existing network's nodes are called **roots**, not sources. "Source" is already a glossary term: the place a dataset is requested for (a country, a geometry, points, a frame), which every handler and fetcher uses. Using it for fibre nodes would give one word two meanings in the same library. "Root" is the Steiner literature's term and matches the virtual root the roots join. `connecting_subnetwork`'s `sources=` and `method="nearest_source"` become `roots=` and `"nearest_root"` in sub-task 1, before their first release. "Anchors" and "connected nodes" were considered and rejected as less precise.
 
 ## 15. References
 
