@@ -137,6 +137,8 @@ print(plan.cost, plan.terminals["status"].value_counts())
 
 `plan("shortest_path")` models a phased rollout: schools are connected one at a time, nearest first, to everything connected so far, and the terminals table gains each school's `order` and `marginal_cost`, the cost its connection added.
 
+`planner.improve(plan)` shortens any plan by local search, and never makes it worse; `time_limit=` stops it after that many seconds. On Rwanda's roads it shortens the Steiner tree for 1,000 schools by about 5%.
+
 Schools on roads that do not join the rest, such as an island or a clipped corner, are unreachable. `bridge_cost` lets the plan use straight-line links between such parts, such as microwave links, at a weight per metre and up to `bridge_max_distance` metres (5,000 by default). A link is used only where it is cheaper than the roads:
 
 ```python
