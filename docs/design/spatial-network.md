@@ -201,6 +201,8 @@ Problems in the old `merge_points_to_graph` that must not come back:
 
 ### `connecting_subnetwork(terminals, sources=None, method="steiner", weight=None)`
 
+Superseded by the [connection planning design](connection-planning.md): `sources=` is now `roots=`, and with roots the default is the rooted Steiner tree. The record below is the design as first built.
+
 This works on the undirected form of the network. The result is contracted to the terminals, the sources, and the branching nodes (degree 3 or more), with lengths added up and geometries joined.
 
 - `method="steiner"` (the default) uses Mehlhorn's 2-approximation of the Steiner tree. One multi-source Dijkstra run from the terminals (scipy `dijkstra(min_only=True, return_predecessors=True)`) finds each node's nearest terminal. Edges between different terminals' regions give candidate links. Then come an MST over the terminals, expansion of the links into paths, a second MST, and removal of leaves that are not terminals.
