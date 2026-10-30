@@ -177,7 +177,7 @@ class GlofasConfig(BaseHandlerConfig):
                 self.tiles_gdf = _as_wgs84(grid)
                 self.logger.info("Loaded GloFAS tile grid from cache")
                 return self.tiles_gdf
-            except Exception:
+            except ValueError:
                 self.logger.warning(
                     "Cached GloFAS tile grid is unreadable, downloading it again"
                 )
