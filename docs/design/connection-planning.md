@@ -164,6 +164,13 @@ Wong's dual ascent (1984) gives a lower bound on the optimum, and with it the ga
 
 The sum of the raises is a lower bound on the optimal tree's weight. Each round costs a search over arcs of reduced cost 0, and the number of rounds can be large, so `time_limit` stops early and returns the bound reached so far, which is still valid, only looser. Terminals unreachable from the root are left out of the bound and reported.
 
+As built (`benchmarks/connection_planning/bound.py`):
+
+- **Wong's rule chooses the terminal.** Every step, the active terminal whose region (the nodes that reach it at reduced cost 0) has the fewest entering arcs raises the bound by their smallest reduced cost. A first version gave each terminal one whole turn, until its region held the root, nearest the root first; it was valid but much weaker. Against SteinLib's proven optima its bound was on average 9.7% below the optimum on set C, at worst 45%, against 0.42%, at worst 3.1%, for Wong's rule; on Rwanda with 1,000 terminals it left a gap of 10.9% to the improved plan, against 1.4%.
+- **Regions are kept between steps.** Reduced costs only fall, so a region only grows. Each terminal keeps its region and its entering arcs, and a step checks only those arcs for any that reached 0, growing the region from their tails. Recomputing each region every step gave the same bounds and took 41 s for 100 terminals on Rwanda, against 1.5 s.
+- **A complete bound is kept by the planner,** so the gap of every later plan costs nothing. A bound stopped by `time_limit` is still valid, only looser, and is recomputed on the next call.
+- On Rwanda with 20 roots the bound takes 1.7 s for 100 terminals, 5.0 s for 1,000, and 40.5 s for 10,000. Improved plans have gaps of 2.1%, 1.4%, and 0.6%.
+
 ## 9. Edge cases
 
 - No roots: the unrooted tree over the terminals.

@@ -589,3 +589,79 @@ def test_improve_needs_the_planners_own_plan(chain):
     plan = ConnectionPlanner(chain, ["A"], roots=["R1"]).plan()
     with pytest.raises(ValueError, match="other terminals"):
         ConnectionPlanner(chain, ["B"], roots=["R1"]).improve(plan)
+
+
+# ----- lower bound
+
+
+def test_the_bound_on_a_chain_is_exact(chain):
+    planner = ConnectionPlanner(chain, ["A", "B"], roots=["R1", "R2"])
+    plan = planner.plan()
+    assert planner.lower_bound(plan) == 11.0
+    assert (plan.bound, plan.gap) == (11.0, 0.0) and "gap=0.0%" in repr(plan)
+    assert plan.metadata["bound"]["complete"]
+    assert ConnectionPlanner(chain, ["A", "B", "R1", "R2"]).lower_bound() == 21.5
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_bound_never_exceeds_the_optimum(seed):
+    network, terminals, roots = random_grid(seed)
+    for some in (roots, []):
+        best = optimum(network, terminals, some)
+        planner = ConnectionPlanner(network, terminals, roots=some)
+        bound = planner.lower_bound()
+        assert 0 <= bound <= best + 1e-9
+        plan = planner.improve(planner.plan())
+        planner.lower_bound(plan)
+        assert plan.gap >= -1e-12
+
+
+def test_the_bound_is_exact_on_a_tree():
+    rng = np.random.default_rng(3)
+    G = nx.random_labeled_tree(40, seed=3)
+    nodes = pd.DataFrame(
+        {"x": 30.0 + rng.uniform(0, 0.1, 40), "y": -1.95 + rng.uniform(0, 0.1, 40)}, index=[f"n{i}" for i in G]
+    )
+    edges = pd.DataFrame(
+        {"u": [f"n{a}" for a, _ in G.edges], "v": [f"n{b}" for _, b in G.edges], "length": rng.uniform(1, 10, 39)}
+    )
+    network = SpatialNetwork(nodes, edges, directed=False)
+    planner = ConnectionPlanner(network, [f"n{i}" for i in range(0, 40, 4)], roots=["n1", "n2"])
+    assert planner.lower_bound() == pytest.approx(planner.plan().cost)
+
+
+def test_the_bound_on_kigali(connected, chosen):
+    terminals, roots = chosen
+    planner = ConnectionPlanner(connected, terminals, roots=roots)
+    plan = planner.improve(planner.plan())
+    bound = planner.lower_bound(plan)
+    assert 0 < bound <= plan.cost and 0 <= plan.gap < 0.02
+    assert planner.lower_bound() == bound
+
+
+def test_unreachable_terminals_are_left_out_of_the_bound(kigali, chosen):
+    terminals, roots = chosen
+    island = kigali.connected_components().idxmax()
+    with_island = ConnectionPlanner(kigali, terminals[:5] + [island], roots=roots).lower_bound()
+    assert with_island == pytest.approx(ConnectionPlanner(kigali, terminals[:5], roots=roots).lower_bound())
+
+
+def test_the_bound_counts_bridges(two_parts):
+    planner = ConnectionPlanner(two_parts, ["A", "B"], roots=["R"], bridge_cost=0.001)
+    plan = planner.plan()
+    assert planner.lower_bound(plan) == pytest.approx(plan.cost)
+
+
+def test_a_bound_stopped_by_the_time_limit_is_valid_and_recomputed(connected, chosen):
+    terminals, roots = chosen
+    planner = ConnectionPlanner(connected, terminals, roots=roots)
+    plan = planner.plan()
+    early = planner.lower_bound(plan, time_limit=0)
+    assert early == 0.0 and not plan.metadata["bound"]["complete"] and plan.gap == np.inf
+    full = planner.lower_bound(plan)
+    assert full > 0 and plan.metadata["bound"]["complete"]
+
+
+def test_the_bound_without_terminals(chain):
+    island = SpatialNetwork(chain.nodes, chain.edges.iloc[:1], directed=False)
+    assert ConnectionPlanner(island, ["R2"], roots=["R1"]).lower_bound() == 0.0

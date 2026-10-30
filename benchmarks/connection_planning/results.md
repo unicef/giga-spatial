@@ -26,3 +26,19 @@ An earlier version updated distances with scipy's Dijkstra limited to the larges
 | 1,000 | nearest_root | 5,510 km (0.18 s) | 3,759 km | 31.8% | 1,051 | 5 | 9.4 | 31.6 |
 
 Passes run until neither move improves the plan; `time_limit` stops earlier. The last pass of each run found nothing, so it only confirms the plan. An earlier version searched for key-vertex elimination's links from every node left in the plan; with 1,000 terminals from `steiner` it took 60 s for four passes, against about 5 s per pass now, to within 0.01% of the same cost on Kigali.
+
+### Sub-task 5: lower_bound() (`bound.py 100 1000 10000`)
+
+| terminals | bound s | bound | steiner (gap) | improved, 120 s at most (gap) |
+|---|---|---|---|---|
+| 100 | 1.7 | 1,127 km | 1,194 km (6.0%) | 1,150 km (2.1%) |
+| 1,000 | 5.0 | 3,703 km | 3,942 km (6.5%) | 3,755 km (1.4%) |
+| 10,000 | 40.5 | 10,530 km | 10,954 km (4.0%) | 10,591 km (0.6%) |
+
+The gap says how far above the optimum a plan can be at most.
+
+The ascent follows Wong's rule: every step, the terminal whose region has the fewest entering arcs raises the bound by one arc. The first version gave each terminal one whole turn until it reached the root, nearest the root first. It was valid but much weaker: against SteinLib's proven optima (sub-task 6), its bound was on average 7.0% below the optimum on set B and 9.7% on set C, at worst 45%, against 0.05% and 0.42%, at worst 3.1%, for Wong's rule. On Rwanda it gave gaps of 5.5%, 10.9%, and 12.0% for the improved plans above, in 2.1, 7.0, and 31.6 s.
+
+Wong's rule recomputing each region from scratch every step took 41 s for 100 terminals on Rwanda, where few far-apart terminals grow large regions. Regions only grow, since reduced costs only fall, so each terminal keeps its region and entering arcs, and a step checks only those arcs: the same bounds on every B and C instance, in 1.5 s.
+
+A single-commodity flow model of one Kigali instance in scipy's `milp` (HiGHS) did not finish in 600 s: its best plan was 29,413 m against the planner's improved 28,079 m, and its proven lower bound 20,997 m against the first version's dual ascent at 26,092 m.
