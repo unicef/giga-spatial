@@ -1,12 +1,16 @@
+import warnings
 from itertools import combinations
 
 import networkx as nx
 import numpy as np
 import pandas as pd
 import pytest
+import shapely
 from networkx.algorithms.approximation import steiner_tree
 
 from gigaspatial.processing.network import ConnectionPlan, ConnectionPlanner, SpatialNetwork
+from gigaspatial.processing.network.geodesy import haversine, line_lengths
+from gigaspatial.processing.network.planning import BRIDGES_PER_COMPONENT, _bridge_candidates
 
 
 def nodes_on_a_line(ids):
@@ -56,8 +60,8 @@ def test_the_methods_on_a_chain(chain):
     assert (rooted.cost, nearest.cost, pairs.cost) == (11.0, 20.5, 21.5)
     assert ConnectionPlanner(chain, ["A", "B", "R1", "R2"]).plan().cost == 21.5
     assert rooted.terminals.to_dict("index") == {
-        "A": {"status": "connected", "root": "R1", "distance": 10.0},
-        "B": {"status": "connected", "root": "R1", "distance": 11.0},
+        "A": {"status": "connected", "root": "R1", "distance": 10.0, "bridged": False},
+        "B": {"status": "connected", "root": "R1", "distance": 11.0, "bridged": False},
     }
     assert nearest.terminals.loc["B", "root"] == "R2" and nearest.terminals.loc["B", "distance"] == 10.5
 
@@ -147,7 +151,7 @@ def test_plans_against_the_optimum(seed):
 
 def test_a_terminal_that_is_a_root(chain):
     plan = ConnectionPlanner(chain, ["R1", "B"], roots=["R1", "R2"]).plan()
-    assert plan.terminals.loc["R1"].to_dict() == {"status": "root", "root": "R1", "distance": 0.0}
+    assert plan.terminals.loc["R1"].to_dict() == {"status": "root", "root": "R1", "distance": 0.0, "bridged": False}
     assert plan.terminals.loc["B", "distance"] == 10.5
     assert plan.cost == 10.5 and plan.metadata["status"] == {"connected": 1, "root": 1, "unreachable": 0}
 
@@ -241,3 +245,111 @@ def test_input_errors(chain):
     negative = SpatialNetwork(chain.nodes, chain.edges.assign(cost=[1.0, -1.0, 1.0]), directed=False)
     with pytest.raises(ValueError, match="negative"):
         ConnectionPlanner(negative, ["A"], weight="cost")
+
+
+# ----- bridges
+
+
+@pytest.fixture
+def two_parts():
+    """R -1- A and B -1- C -10- R2, with no road between A and B, which are about 1,112 m apart."""
+    edges = pd.DataFrame({"u": ["R", "B", "C"], "v": ["A", "C", "R2"], "length": [1.0, 1.0, 10.0]})
+    return SpatialNetwork(nodes_on_a_line(["R", "A", "B", "C", "R2"]), edges, directed=False)
+
+
+def gap(network, a, b):
+    lat, lon = network.node_coordinates([a, b]).T
+    return haversine(lat[0], lon[0], lat[1], lon[1])
+
+
+def test_a_bridge_connects_a_part_without_roots(two_parts):
+    ab = gap(two_parts, "A", "B")
+    without = ConnectionPlanner(two_parts, ["A", "B"], roots=["R"]).plan()
+    assert without.terminals.loc["B", "status"] == "unreachable" and without.metadata["bridges"]["offered"] == 0
+    plan = ConnectionPlanner(two_parts, ["A", "B"], roots=["R"], bridge_cost=0.001).plan()
+    assert plan.cost == pytest.approx(1 + 0.001 * ab)
+    assert plan.terminals["bridged"].tolist() == [False, True]
+    assert plan.terminals.loc["B", "distance"] == pytest.approx(1 + 0.001 * ab)
+    bridge = plan.edges[plan.edges["kind"] == "bridge"]
+    assert len(bridge) == 1 and bridge["length"].iloc[0] == pytest.approx(ab)
+    assert {bridge["u"].iloc[0], bridge["v"].iloc[0]} == {"A", "B"}
+    assert (plan.network.edges["kind"] == "bridge").sum() == 1
+    assert plan.metadata["bridges"] == {"offered": 1, "used": 1} and plan.metadata["bridge_cost"] == 0.001
+
+
+def test_a_bridge_is_used_only_when_cheaper(two_parts):
+    ab = gap(two_parts, "A", "B")
+    cheap = ConnectionPlanner(two_parts, ["A", "C"], roots=["R", "R2"], bridge_cost=0.001).plan()
+    assert cheap.cost == pytest.approx(1 + 0.001 * ab + 1) and cheap.terminals.loc["C", "root"] == "R"
+    costly = ConnectionPlanner(two_parts, ["A", "C"], roots=["R", "R2"], bridge_cost=0.01).plan()
+    assert costly.cost == pytest.approx(11.0) and costly.terminals.loc["C", "root"] == "R2"
+    assert costly.metadata["bridges"]["used"] == 0 and not costly.terminals["bridged"].any()
+
+
+def test_bridges_respect_the_longest_link(two_parts):
+    plan = ConnectionPlanner(two_parts, ["A", "B"], roots=["R"], bridge_cost=0.001, bridge_max_distance=1000).plan()
+    assert plan.metadata["bridges"]["offered"] == 0 and plan.terminals.loc["B", "status"] == "unreachable"
+
+
+def test_bridges_without_roots(two_parts):
+    plan = ConnectionPlanner(two_parts, ["A", "C"], bridge_cost=0.001).plan()
+    assert (plan.terminals["status"] == "connected").all()
+    assert plan.terminals["bridged"].tolist() == [False, True]
+
+
+def test_bridges_on_a_connected_network_change_nothing(chain):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        plan = ConnectionPlanner(chain, ["A", "B"], roots=["R1", "R2"], bridge_cost=0.001).plan()
+    assert plan.cost == 11.0 and plan.metadata["bridges"] == {"offered": 0, "used": 0}
+
+
+def test_bridges_in_a_cost_weight(two_parts):
+    network = SpatialNetwork(two_parts.nodes, two_parts.edges.assign(cost=[2.0, 2.0, 20.0]), directed=False)
+    plan = ConnectionPlanner(network, ["A", "B"], roots=["R"], weight="cost", bridge_cost=0.01).plan()
+    bridge = plan.edges[plan.edges["kind"] == "bridge"].iloc[0]
+    assert bridge["cost"] == pytest.approx(0.01 * bridge["length"])
+    assert plan.cost == pytest.approx(plan.edges["cost"].sum())
+
+
+def test_bridge_options_are_checked(chain):
+    with pytest.raises(ValueError, match="bridge_cost"):
+        ConnectionPlanner(chain, ["A"], bridge_cost=-1)
+    with pytest.raises(ValueError, match="bridge_max_distance"):
+        ConnectionPlanner(chain, ["A"], bridge_cost=1, bridge_max_distance=0)
+
+
+def test_bridges_join_kigalis_islands(kigali, chosen):
+    terminals, _ = chosen
+    labels = kigali.connected_components()
+    islands = list(labels[labels > 0].groupby(labels[labels > 0]).head(1).index)
+    roots = list(labels[labels == 0].index[:3])
+    plan = ConnectionPlanner(kigali, terminals + islands, roots=roots, bridge_cost=1.0).plan()
+    assert (plan.terminals["status"] == "connected").all()
+    assert set(plan.terminals.index[plan.terminals["bridged"]]) == set(islands)
+    bridges = plan.edges[plan.edges["kind"] == "bridge"]
+    assert line_lengths(bridges.geometry) == pytest.approx(bridges["length"].to_numpy())
+    assert shapely.get_num_coordinates(bridges.geometry.to_numpy()).tolist() == [2] * len(bridges)
+
+
+def test_bridge_candidates_are_the_closest_pairs(kigali):
+    labels = kigali.connected_components().to_numpy()
+    candidates = _bridge_candidates(kigali, labels, 5000.0)
+    lat, lon = kigali.node_coordinates().T
+    distance = haversine(lat[:, None], lon[:, None], lat[None, :], lon[None, :])
+    count = labels.max() + 1
+    closest = np.full((count, count), np.inf)
+    np.minimum.at(closest, (labels[:, None].repeat(len(labels), 1), labels[None, :].repeat(len(labels), 0)), distance)
+    found = {}
+    for a, b, length in zip(*candidates):
+        pair = tuple(sorted((labels[a], labels[b])))
+        assert pair[0] != pair[1] and pair not in found
+        found[pair] = length
+    for pair, length in found.items():
+        assert length == pytest.approx(closest[pair])
+    np.fill_diagonal(closest, np.inf)
+    for part in range(count):
+        nearest = int(np.argmin(closest[part]))
+        assert tuple(sorted((part, nearest))) in found
+    largest = np.argsort(closest[0])[:BRIDGES_PER_COMPONENT]
+    assert {tuple(sorted((0, int(p)))) for p in largest} <= set(found)

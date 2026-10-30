@@ -135,6 +135,13 @@ plan = ConnectionPlanner(network, school_ids, roots=["fiber-1"], weight="length"
 print(plan.cost, plan.terminals["status"].value_counts())
 ```
 
+Schools on roads that do not join the rest, such as an island or a clipped corner, are unreachable. `bridge_cost` lets the plan use straight-line links between such parts, such as microwave links, at a weight per metre and up to `bridge_max_distance` metres (5,000 by default). A link is used only where it is cheaper than the roads:
+
+```python
+plan = ConnectionPlanner(network, school_ids, roots=["fiber-1"], bridge_cost=3.0).plan()
+links = plan.edges[plan.edges["kind"] == "bridge"]
+```
+
 ## Save and load
 
 ```python
