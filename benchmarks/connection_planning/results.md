@@ -26,3 +26,17 @@ An earlier version updated distances with scipy's Dijkstra limited to the larges
 | 1,000 | nearest_root | 5,510 km (0.18 s) | 3,759 km | 31.8% | 1,051 | 5 | 9.4 | 31.6 |
 
 Passes run until neither move improves the plan; `time_limit` stops earlier. The last pass of each run found nothing, so it only confirms the plan. An earlier version searched for key-vertex elimination's links from every node left in the plan; with 1,000 terminals from `steiner` it took 60 s for four passes, against about 5 s per pass now, to within 0.01% of the same cost on Kigali.
+
+### Sub-task 5: lower_bound() (`bound.py 100 1000 10000`)
+
+| terminals | bound s | bound | steiner (gap) | improved, 120 s at most (gap) |
+|---|---|---|---|---|
+| 100 | 2.1 | 1,090 km | 1,194 km (9.6%) | 1,150 km (5.5%) |
+| 1,000 | 7.0 | 3,388 km | 3,942 km (16.4%) | 3,755 km (10.9%) |
+| 10,000 | 31.6 | 9,458 km | 10,954 km (15.8%) | 10,591 km (12.0%) |
+
+The gap says how far above the optimum a plan can be at most; how much of it is the bound's own looseness is measured against exact solutions in sub-task 6.
+
+How terminals take their turns decides the bound. On Kigali with 60 terminals and 3 roots (5 instances), against the improved plans: in the given order, gaps of 26 to 38%; nearest the root first by road distance, 1.7 to 13.1%; nearest first at the current reduced costs, recomputed before every turn, 0.6 to 7.6%. Farthest first gave up to 100%. Recomputing the reduced distances after every 2% of the waiting terminals, instead of every turn, made 1,000 terminals on Rwanda 7 times faster (3.3 against 23.6 s on another draw of terminals) and the bound 0.5% higher; on Kigali it is every turn.
+
+A single-commodity flow model of one Kigali instance in scipy's `milp` (HiGHS) did not finish in 600 s: its best plan was 29,413 m against the planner's improved 28,079 m, and its proven lower bound 20,997 m against the dual ascent's 26,092 m, found in 0.02 s.

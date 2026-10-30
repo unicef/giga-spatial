@@ -28,6 +28,8 @@ BRIDGES_PER_COMPONENT = 5
 _FIRST_NEIGHBOURS = 16
 # A move must save at least this share of the weight it replaces, so rounding never loops.
 _GAIN = 1e-9
+# The dual ascent recomputes distances after this fraction (1 / value) of its waiting terminals.
+_REFRESH_SHARE = 50
 
 
 @dataclass
@@ -61,6 +63,10 @@ class ConnectionPlan:
         metadata: The method, the weight, ``bridge_cost``, the numbers of
             terminals and roots, terminals by status, bridges offered and used,
             and the seconds each step took.
+        bound: A lower bound on the cost of any plan connecting the same
+            terminals, set by :meth:`ConnectionPlanner.lower_bound`.
+        gap: ``cost / bound - 1``: the plan costs at most ``1 + gap`` times
+            the optimum.
     """
 
     network: "SpatialNetwork"
@@ -68,11 +74,14 @@ class ConnectionPlan:
     terminals: pd.DataFrame
     cost: float
     metadata: Dict[str, Any] = field(default_factory=dict)
+    bound: Optional[float] = None
+    gap: Optional[float] = None
 
     def __repr__(self) -> str:
         reached = int(self.terminals["status"].isin(["connected", "root"]).sum())
+        gap = "" if self.gap is None else f", gap={self.gap:.1%}"
         return (
-            f"ConnectionPlan(method={self.metadata.get('method')!r}, cost={self.cost:,.1f}, "
+            f"ConnectionPlan(method={self.metadata.get('method')!r}, cost={self.cost:,.1f}{gap}, "
             f"terminals={reached:,} of {len(self.terminals):,} connected, edges={len(self.edges):,})"
         )
 
@@ -276,6 +285,49 @@ class ConnectionPlanner:
         improved = self._assemble(method, a, b, planned, None, {"improve": time.perf_counter() - started})
         improved.metadata["improved"] = {"cost_before": before, "moves": moves, "pass_seconds": passes}
         return improved
+
+    def lower_bound(self, plan: Optional[ConnectionPlan] = None, time_limit: Optional[float] = 60.0) -> float:
+        """A lower bound on the cost of any plan connecting the reachable terminals, by Wong's dual ascent.
+
+        The network becomes directed, with both directions of every edge,
+        rooted at the virtual root, or without roots at the first terminal
+        that can be connected. Each terminal in turn grows the set of nodes
+        that reach it along arcs of reduced cost 0, raising the bound by the
+        smallest reduced cost of the arcs entering the set and lowering theirs
+        by as much, until the root is in the set. The sum of the raises is a
+        lower bound on the optimum. Unreachable terminals are left out.
+
+        A bound reached when ``time_limit`` stops the ascent is still valid,
+        only looser. A complete bound is kept, so later calls return it at once.
+
+        Args:
+            plan: A plan of this planner, whose ``bound`` and ``gap`` are set.
+            time_limit: Seconds to stop after. No limit when ``None``.
+
+        Returns:
+            The bound, in the units of the weight.
+        """
+        cached = self.__dict__.get("_bound")
+        if cached is None or not cached["complete"]:
+            started = time.perf_counter()
+            deadline = np.inf if time_limit is None else started + float(time_limit)
+            terminal = np.unique(self._terminal)
+            planned = self._planned_in_given_order(terminal[self._reachable(terminal)])
+            graph = self._graph
+            if len(self._root):
+                graph, root, targets = _with_virtual_root(graph, self._root), self._graph.n, planned
+            elif len(planned):
+                root, targets = int(planned[0]), planned[1:]
+            else:
+                root, targets = None, planned[:0]
+            value, complete = _dual_ascent(graph, root, targets, deadline) if root is not None else (0.0, True)
+            cached = {"bound": value, "complete": complete, "seconds": time.perf_counter() - started}
+            self.__dict__["_bound"] = cached
+        if plan is not None:
+            plan.bound = cached["bound"]
+            plan.gap = plan.cost / cached["bound"] - 1 if cached["bound"] > 0 else (0.0 if plan.cost == 0 else np.inf)
+            plan.metadata["bound"] = dict(cached)
+        return cached["bound"]
 
     def _assemble(
         self,
@@ -532,6 +584,118 @@ def _with_bridges(graph: Graph, bridges: _Bridges, bridge_cost: Optional[float],
     order = np.argsort(keys, kind="stable")
     matrix = csr_matrix((w[order], (a[order], b[order])), shape=(n, n))
     return Graph(matrix, keys[order], rows[order], w[order], n)
+
+
+# ----- lower bound
+
+
+class _DualAscent:
+    """Wong's dual ascent on a graph's arcs, one terminal's turn at a time.
+
+    A turn grows the set of nodes that reach the terminal along arcs of
+    reduced cost 0 like a reverse Dijkstra: arcs entering the set wait in a
+    heap keyed by reduced cost plus the bound raised so far in the turn, so
+    all their reduced costs fall together without being touched. When the
+    turn ends, each arc's reduced cost is lowered by the raises made while it
+    entered the set.
+    """
+
+    def __init__(self, graph: Graph, root: int):
+        matrix = graph.matrix
+        n = graph.n
+        self.graph, self.root, self.n = graph, root, n
+        self.indptr, self.indices = matrix.indptr.tolist(), matrix.indices.tolist()
+        a, b = graph.entry_keys // n, graph.entry_keys % n
+        self.reverse = np.searchsorted(graph.entry_keys, b * n + a).tolist()
+        self.cost = graph.entry_weights.tolist()
+        self.reduced = csr_matrix((graph.entry_weights.copy(), matrix.indices, matrix.indptr), shape=matrix.shape)
+        self.member = [-1] * n
+        self.turns = 0
+        self.bound = 0.0
+
+    def reduced_distances(self) -> np.ndarray:
+        """Each node's distance from the root along arcs at their reduced costs."""
+        return dijkstra(self.reduced, directed=True, indices=self.root)
+
+    def turn(self, terminal: int, deadline: float, cap: float = np.inf) -> bool:
+        """Raise the bound until the root reaches ``terminal`` at reduced cost 0, or the deadline; whether it does."""
+        indptr, indices, reverse, cost, member = self.indptr, self.indices, self.reverse, self.cost, self.member
+        turn = self.turns
+        self.turns += 1
+        offset = 0.0
+        heap, waiting, joined = [], [], {}
+        stack = [terminal]
+        member[terminal] = turn
+        rooted = False
+        while True:
+            while stack:
+                x = stack.pop()
+                joined[x] = offset
+                if x == self.root:
+                    rooted = True
+                for e in range(indptr[x], indptr[x + 1]):
+                    y = indices[e]
+                    if member[y] == turn:
+                        continue
+                    arc = reverse[e]
+                    if cost[arc] <= 0.0:
+                        member[y] = turn
+                        stack.append(y)
+                    else:
+                        key = cost[arc] + offset
+                        heapq.heappush(heap, (key, arc, y))
+                        waiting.append((arc, key, y))
+            if rooted or not heap or time.perf_counter() >= deadline:
+                break
+            if heap[0][0] > cap:
+                offset = cap
+                break
+            key, arc, y = heapq.heappop(heap)
+            if member[y] == turn:
+                continue
+            offset = key
+            member[y] = turn
+            stack.append(y)
+        changed = []
+        for arc, key, tail in waiting:
+            cost[arc] = max(0.0, key - min(joined.get(tail, offset), offset))
+            changed.append(arc)
+        if changed:
+            self.reduced.data[changed] = [cost[arc] for arc in changed]
+        self.bound += offset
+        return rooted
+
+
+def _dual_ascent(graph: Graph, root: int, terminals: np.ndarray, deadline: float) -> Tuple[float, bool]:
+    """The dual ascent's bound, and whether every terminal reached the root before the deadline.
+
+    Terminals take turns nearest the root first, at the current reduced
+    costs: a turn raises the bound by exactly that distance. Distances are
+    recomputed after every 2% of the waiting terminals have had their turn;
+    on Rwanda with 1,000 terminals that was 7 times faster than after every
+    turn, and the bound came out 0.5% higher, while on Kigali with 60
+    terminals, every turn, it gave the highest bound.
+    """
+    ascent = _DualAscent(graph, root)
+    waiting = np.asarray(terminals, dtype=np.int64)
+    queue: list = []
+    since = every = 0
+    while len(waiting):
+        if time.perf_counter() >= deadline:
+            return ascent.bound, False
+        if not queue or since >= every:
+            distance = ascent.reduced_distances()[waiting]
+            waiting = waiting[distance > 0]
+            if not len(waiting):
+                break
+            queue = waiting[np.argsort(distance[distance > 0], kind="stable")].tolist()[::-1]
+            since, every = 0, max(1, len(waiting) // _REFRESH_SHARE)
+        terminal = queue.pop()
+        if not ascent.turn(terminal, deadline):
+            return ascent.bound, False
+        since += 1
+        waiting = waiting[waiting != terminal]
+    return ascent.bound, True
 
 
 # ----- local search

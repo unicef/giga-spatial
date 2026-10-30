@@ -164,6 +164,14 @@ Wong's dual ascent (1984) gives a lower bound on the optimum, and with it the ga
 
 The sum of the raises is a lower bound on the optimal tree's weight. Each round costs a search over arcs of reduced cost 0, and the number of rounds can be large, so `time_limit` stops early and returns the bound reached so far, which is still valid, only looser. Terminals unreachable from the root are left out of the bound and reported.
 
+As built (`benchmarks/connection_planning/bound.py`):
+
+- **One terminal's turn at a time, grown like a reverse Dijkstra.** Recomputing the set from scratch every round would cost a search over it each time. Instead, a turn keeps the arcs entering its set in a heap keyed by reduced cost plus the bound raised so far in the turn, so all their reduced costs fall together without being touched, and writes each arc's lowered cost back when the turn ends. A turn stopped by `time_limit` writes back what it raised, so the bound stays valid.
+- **The next terminal is the one nearest the root at the current reduced costs.** A turn raises the bound by exactly that distance. On Kigali this gave gaps of 0.6 to 7.6% against the improved plans, where the given order gave 26 to 38% and the nearest by road distance 1.7 to 13.1%. Capping a turn's raise, so terminals grow in alternation as in Wong's original rule, changed nothing, since the same terminal stays nearest.
+- **Distances are recomputed after every 2% of the waiting terminals' turns,** with scipy's Dijkstra on the reduced costs, kept in a sparse matrix updated only where a turn changed them. On Rwanda with 1,000 terminals that is 7 times faster than every turn, with a bound 0.5% higher.
+- **A complete bound is kept by the planner,** so the gap of every later plan costs nothing. A bound stopped by `time_limit` is recomputed on the next call.
+- On Rwanda with 20 roots the bound takes 2.1 s for 100 terminals, 7.0 s for 1,000, and 31.6 s for 10,000. Improved plans have gaps of 5.5%, 10.9%, and 12.0%.
+
 ## 9. Edge cases
 
 - No roots: the unrooted tree over the terminals.
