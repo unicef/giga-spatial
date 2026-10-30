@@ -1,0 +1,20 @@
+{
+  "format": "gigaspatial.spatial_network",
+  "format_version": 1,
+  "directed": true,
+  "crs": "EPSG:4326",
+  "weight": "length",
+  "metadata": {
+    "source": "Geofabrik africa/rwanda-latest.osm.pbf, built by step0.py",
+    "network_type": "drive_service (step0.py filter)",
+    "simplify": true,
+    "bbox": [
+      30.045,
+      -1.965,
+      30.085,
+      -1.935
+    ]
+  },
+  "library_version": null,
+  "created": "2026-10-27T15:12:21+00:00"
+}

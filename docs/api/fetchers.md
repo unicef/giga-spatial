@@ -3,7 +3,7 @@
 A fetcher queries an API or a database and returns records. It does not store the dataset as files.
 
 ```python
-from gigaspatial import OSMLocationFetcher, GigaSchoolLocationFetcher
+from gigaspatial import OSMLocationFetcher, OSMRoadsFetcher, GigaSchoolLocationFetcher
 from gigaspatial.fetchers import MLabConfig, GEEConfig
 ```
 
@@ -18,6 +18,15 @@ from gigaspatial.fetchers import MLabConfig, GEEConfig
         - fetch_locations
         - fetch_locations_changed_between
         - fetch_by_osmid
+
+`OSMRoadsFetcher` returns a road network rather than records: a [`SpatialNetwork`](network.md). It needs `pip install "giga-spatial[roads]"`, and the [road networks guide](../user-guide/road-networks.md) says which area sizes suit Overpass.
+
+::: gigaspatial.fetchers.osm_roads.OSMRoadsFetcher
+    options:
+      show_source: false
+      members:
+        - fetch
+        - query_area
 
 ## Giga schools
 
