@@ -138,6 +138,7 @@ class Config(BaseSettings):
             "srtm": "srtm",
             "worldpop": "worldpop",
             "ghsl": "ghsl",
+            "glofas": "glofas",
             "opencellid": "opencellid",
             "hdx": "hdx",
             "poi": "poi",

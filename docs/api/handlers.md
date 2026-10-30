@@ -139,6 +139,18 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
         - ensure_data_available
         - get_available_data_info
 
+## GloFAS flood hazard
+
+::: gigaspatial.handlers.glofas.GlofasHandler
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - load_data
+        - download_and_load
+        - ensure_data_available
+        - get_available_data_info
+
 ## WRI Aqueduct
 
 ::: gigaspatial.handlers.wri.aqueduct_flood.AqueductFloodHandler
