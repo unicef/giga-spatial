@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+-   **GloFAS flood hazard handler (`gigaspatial/handlers/glofas.py`)**
+    -   `GlofasHandler` loads Copernicus EMS flood maps for a country or a geometry. One load fetches one layer (`depth`, `depth_reclass`, `permanent_water`, or `spurious_depth`) and, for the depth layers, one return period (default 100).
+    -   Tiles come from the published `tile_extents.geojson`. Stored paths include the layer and, for depth layers, the return period. Mask layers reject an explicit `return_period`.
+
 ## [v0.10.0] - 2026-10-20
 
 ### Added
