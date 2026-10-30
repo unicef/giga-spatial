@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 NODE_KINDS = ("road", "point", "split")
-EDGE_KINDS = ("road", "split", "connection", "point_link", "component_link", "added")
+EDGE_KINDS = ("road", "split", "connection", "point_link", "component_link", "added", "bridge")
 
 
 def as_kinds(values: Any, default: str, known: Tuple[str, ...], length: int) -> pd.Categorical:

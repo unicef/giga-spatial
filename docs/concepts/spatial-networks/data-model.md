@@ -106,6 +106,7 @@ A node's or edge's `kind` records where it came from, so a result can always be 
 | edge kind `point_link` | A link between two points: from `from_points`, or from `insert_points(chain=True)` |
 | edge kind `component_link` | A link `connect_components` added between disconnected parts |
 | edge kind `added` | An edge you added with `add_weighted_edges` |
+| edge kind `bridge` | A straight-line link a connection plan uses between parts of the network that no road joins |
 | insertion | Adding points to a network as nodes, each joined to its nearest road |
 | connecting subnetwork | The part of a network that joins a set of points, reduced to those points and the places where the paths branch |
 | key | The number that tells apart parallel edges between the same two nodes |

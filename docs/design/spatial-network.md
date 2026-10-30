@@ -58,7 +58,7 @@ The edges table is a pandas DataFrame with a default RangeIndex. An edge is iden
 | `u`, `v` | node ID type | endpoints, which must exist in the nodes table |
 | `key` | int16 | distinguishes parallel edges, as in osmnx |
 | `length` | float64 | meters (see section 4) |
-| `kind` | categorical | `road`, `split`, `connection`, `point_link`, `component_link`, or `added` |
+| `kind` | categorical | `road`, `split`, `connection`, `point_link`, `component_link`, `added`, or `bridge` (from a connection plan) |
 | `geometry` | shapely LineString or missing | optional; missing means a straight line between the endpoints |
 | other | any | OSM attributes after normalisation (section 8), or user attributes |
 
