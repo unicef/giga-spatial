@@ -53,11 +53,11 @@ def subnetwork(reps):
     net.adjacency(directed=False)
     for k in (100, 1000):
         terminals = list(ids[rng.choice(n, k, replace=False)])
-        t, tree = timeit(lambda: net.connecting_subnetwork(terminals), reps)
+        t, tree = timeit(lambda: net.connecting_subnetwork(terminals, method="steiner"), reps)
         rows.append([f"steiner, {k:,} terminals ({len(tree.edges):,} edges, {tree.total_length() / 1000:,.0f} km)", f"{t:.3f}"])
     terminals = list(ids[rng.choice(n, 1000, replace=False)])
     roots = list(ids[rng.choice(n, 20, replace=False)])
-    t, sub = timeit(lambda: net.connecting_subnetwork(terminals, roots=roots), reps)
+    t, sub = timeit(lambda: net.connecting_subnetwork(terminals, roots=roots, method="steiner"), reps)
     rows.append([f"rooted steiner, 1,000 terminals, 20 roots ({sub.total_length() / 1000:,.0f} km)", f"{t:.3f}"])
     t, sub = timeit(lambda: net.connecting_subnetwork(terminals, roots=roots, method="nearest_root"), reps)
     rows.append([f"nearest root, 1,000 terminals, 20 roots ({sub.total_length() / 1000:,.0f} km)", f"{t:.3f}"])

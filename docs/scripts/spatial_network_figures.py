@@ -130,12 +130,10 @@ def simplify_figure(ns):
 def subnetwork_results(ns):
     network, school_ids, fibre_ids = ns["network"], ns["school_ids"], ns["fibre_ids"]
     return {
-        "Steiner tree joining the schools": network.connecting_subnetwork(school_ids),
+        "One tree joining the schools": network.connecting_subnetwork(school_ids),
+        "The schools connected to the fibre": network.connecting_subnetwork(school_ids, roots=fibre_ids),
         "Each school to its nearest fibre node": network.connecting_subnetwork(
             school_ids, roots=fibre_ids, method="nearest_root"
-        ),
-        "All pairs, 30 schools and the fibre nodes": network.connecting_subnetwork(
-            school_ids[:30], roots=fibre_ids, method="all_pairs"
         ),
     }
 
@@ -163,7 +161,7 @@ def connecting_figure(ns, results):
     m = interactive_map()
     colours = ["#ff7f0e", "#9467bd", "#8c564b"]
     for colour, (title, result) in zip(colours, results.items()):
-        layer = folium.FeatureGroup(name=f"{title} ({result.total_length() / 1000:.0f} km)", show=title.startswith("Steiner"))
+        layer = folium.FeatureGroup(name=f"{title} ({result.total_length() / 1000:.0f} km)", show=title.startswith("The schools"))
         e = result.edges_gdf[["length", "geometry"]].copy()
         e["geometry"] = shapely.set_precision(e.geometry.simplify(0.00002), 0.000001)
         e["length"] = e["length"].round(0)
@@ -212,7 +210,8 @@ def service_area_figure(ns):
 
 
 def fibre_plan_figure(ns):
-    plan = ns["plans"]["cheapest routes to a fibre node"]
+    cheapest = ns["cheapest"]
+    plan = cheapest.network
     e = lines(plan)
     background = lines(ns["kigali_roads"].filter_edges(mask=ns["kigali_roads"].edges["highway"].astype(str).str.contains("trunk|primary|secondary|tertiary").to_numpy()))
     fig, ax = plt.subplots(figsize=(8, 7))
@@ -225,7 +224,7 @@ def fibre_plan_figure(ns):
     frame(ax, box(29.99, -2.03, 30.20, -1.89))
     basemap(ax)
     cost = (plan.edges["rate"] * plan.edges["length"]).sum()
-    finish(ax, f"Cheapest routes from {len(schools)} schools to 5 fibre nodes: {plan.total_length() / 1000:.0f} km, {cost / 1e6:.1f} million (illustrative)")
+    finish(ax, f"Cheapest shared plan for {len(schools)} schools from 5 fibre nodes: {plan.total_length() / 1000:.0f} km, {cost / 1e6:.1f} million (illustrative)")
     fig.savefig(OUT / "fibre-plan.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -242,7 +241,7 @@ def fibre_plan_figure(ns):
         web,
         style_function=lambda feature: {"color": colours(feature["properties"]["rate"]), "weight": 4},
         tooltip=folium.GeoJsonTooltip(["rate", "length"]),
-        name="cheapest plan",
+        name="cheapest shared plan",
     ).add_to(m)
     colours.add_to(m)
     add_points(m, ns)

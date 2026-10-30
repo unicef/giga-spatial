@@ -69,7 +69,7 @@ def test_the_methods_on_a_chain(chain):
 
 def test_rooted_tree_matches_networkx_on_the_virtual_root_graph(connected, chosen):
     terminals, roots = chosen
-    plan = ConnectionPlanner(connected, terminals, roots=roots).plan()
+    plan = ConnectionPlanner(connected, terminals, roots=roots).plan("steiner")
     G = with_virtual_root(connected, roots)
     networkx_best = min(
         steiner_tree(G, terminals + ["virtual"], weight="length", method=m).size(weight="length")
@@ -77,13 +77,13 @@ def test_rooted_tree_matches_networkx_on_the_virtual_root_graph(connected, chose
     )
     # networkx 3.6 gives the same tree; older versions' approximations can be longer.
     assert plan.cost <= networkx_best * (1 + 1e-9)
-    assert plan.cost < ConnectionPlanner(connected, terminals + roots).plan().cost
+    assert plan.cost < ConnectionPlanner(connected, terminals + roots).plan("steiner").cost
     assert plan.cost < ConnectionPlanner(connected, terminals, roots=roots).plan("nearest_root").cost
 
 
 def test_a_rooted_plan_is_a_forest_whose_every_tree_reaches_a_root(connected, chosen):
     terminals, roots = chosen
-    plan = ConnectionPlanner(connected, terminals, roots=roots).plan()
+    plan = ConnectionPlanner(connected, terminals, roots=roots).plan("steiner")
     forest = plan_trees(plan)
     assert nx.is_forest(forest)
     for tree in nx.connected_components(forest):
@@ -139,13 +139,13 @@ def test_plans_against_the_optimum(seed):
     network, terminals, roots = random_grid(seed)
     rooted = optimum(network, terminals, roots)
     planner = ConnectionPlanner(network, terminals, roots=roots)
-    steiner = planner.plan().cost
+    steiner = planner.plan("steiner").cost
     assert rooted - 1e-9 <= steiner <= 2 * rooted + 1e-9
     assert rooted - 1e-9 <= planner.plan("shortest_path").cost <= 2 * rooted + 1e-9
     for method in ("nearest_root", "all_pairs"):
         assert planner.plan(method).cost >= rooted - 1e-9
     unrooted = optimum(network, terminals, [])
-    assert unrooted - 1e-9 <= ConnectionPlanner(network, terminals).plan().cost <= 2 * unrooted + 1e-9
+    assert unrooted - 1e-9 <= ConnectionPlanner(network, terminals).plan("steiner").cost <= 2 * unrooted + 1e-9
 
 
 # ----- terminals and edge cases
@@ -153,7 +153,9 @@ def test_plans_against_the_optimum(seed):
 
 def test_a_terminal_that_is_a_root(chain):
     plan = ConnectionPlanner(chain, ["R1", "B"], roots=["R1", "R2"]).plan()
-    assert plan.terminals.loc["R1"].to_dict() == {"status": "root", "root": "R1", "distance": 0.0, "bridged": False}
+    assert plan.terminals.loc["R1"].to_dict() == {
+        "status": "root", "root": "R1", "distance": 0.0, "bridged": False, "order": 0, "marginal_cost": 0.0
+    }
     assert plan.terminals.loc["B", "distance"] == 10.5
     assert plan.cost == 10.5 and plan.metadata["status"] == {"connected": 1, "root": 1, "unreachable": 0}
 
@@ -221,7 +223,7 @@ def test_edges_are_the_uncontracted_plan(connected, chosen):
     assert len(plan.edges) > len(plan.network.edges)
     assert plan.edges["length"].sum() == pytest.approx(plan.network.total_length())
     assert plan.cost == pytest.approx(plan.edges["length"].sum())
-    assert plan.metadata["method"] == "steiner" and set(plan.metadata["seconds"]) == {"plan", "assemble"}
+    assert plan.metadata["method"] == "shortest_path" and set(plan.metadata["seconds"]) == {"plan", "assemble"}
     assert isinstance(plan, ConnectionPlan) and "terminals=30 of 30 connected" in repr(plan)
 
 
@@ -465,7 +467,7 @@ def test_the_rollout_on_kigali(connected, chosen):
     assert plan.cost == pytest.approx(cost)
     assert nx.is_forest(plan_trees(plan))
     assert plan.terminals["marginal_cost"].sum() == pytest.approx(plan.cost)
-    assert "order" not in planner.plan().terminals.columns
+    assert "order" not in planner.plan("steiner").terminals.columns
 
 
 # ----- local search
@@ -537,7 +539,7 @@ def test_improve_is_never_worse_and_never_below_the_optimum(seed):
 def test_improve_on_kigali(connected, chosen):
     terminals, roots = chosen
     planner = ConnectionPlanner(connected, terminals, roots=roots)
-    plan = planner.plan()
+    plan = planner.plan("steiner")
     better = planner.improve(plan)
     assert better.cost < plan.cost
     forest = plan_trees(better)
