@@ -22,7 +22,7 @@ from gigaspatial.processing.network.kinds import EDGE_KINDS, as_kinds
 if TYPE_CHECKING:
     from gigaspatial.processing.network.core import SpatialNetwork
 
-METHODS = ("steiner", "shortest_path", "nearest_root", "all_pairs")
+METHODS = ("shortest_path", "steiner", "nearest_root", "all_pairs")
 # Each part of the network is offered bridges to at most this many of its nearest other parts.
 BRIDGES_PER_COMPONENT = 5
 _FIRST_NEIGHBOURS = 16
@@ -170,19 +170,22 @@ class ConnectionPlanner:
             f"weight={self.weight!r}, bridges={len(self._bridges.a):,}, network={self.network!r})"
         )
 
-    def plan(self, method: str = "steiner") -> ConnectionPlan:
+    def plan(self, method: str = "shortest_path") -> ConnectionPlan:
         """Plan the connections.
 
         Args:
-            method: ``"steiner"``: Mehlhorn's 2-approximation of the Steiner
-                tree, with roots the rooted tree, without them the tree joining
-                the terminals; within a few percent of the optimum in practice.
-                ``"shortest_path"``: Takahashi and Matsuyama's 2-approximation,
-                a model of a phased rollout: starting from the roots (or the
-                first terminal), repeatedly connect the terminal nearest to
-                anything connected so far, along its shortest path. Gives each
+            method: ``"shortest_path"`` (the default): Takahashi and
+                Matsuyama's 2-approximation of the Steiner tree, and a model of
+                a phased rollout: starting from the roots (or the first
+                terminal), repeatedly connect the terminal nearest to anything
+                connected so far, along its shortest path. Gives each
                 terminal's order and marginal cost; ties go to the terminal
-                listed first. ``"nearest_root"``: each terminal's shortest path to its nearest
+                listed first. On Kigali's roads it came within 0.7 to 6% of the
+                optimum. ``"steiner"``: Mehlhorn's 2-approximation, with roots
+                the rooted tree, without them the tree joining the terminals;
+                5 to 20 times faster, and 3 to 9% above the optimum on Kigali.
+                :meth:`improve` brings either within about 1% of it.
+                ``"nearest_root"``: each terminal's shortest path to its nearest
                 root, and the union of those paths; needs roots, and never lets a
                 terminal connect through another one. ``"all_pairs"``: the
                 shortest paths between every terminal and every terminal or
@@ -279,7 +282,7 @@ class ConnectionPlanner:
         if rooted:
             real = (a != virtual) & (b != virtual)
             a, b = a[real], b[real]
-        method = plan.metadata.get("method", "steiner")
+        method = plan.metadata.get("method", "shortest_path")
         improved = self._assemble(method, a, b, planned, None, {"improve": time.perf_counter() - started})
         improved.metadata["improved"] = {"cost_before": before, "moves": moves, "pass_seconds": passes}
         return improved

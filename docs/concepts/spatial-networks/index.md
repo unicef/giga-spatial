@@ -39,7 +39,7 @@ Five applications come back throughout the note. Each method's section says whic
 
 | Use case | Question | Main methods |
 |---|---|---|
-| Fibre backbone planning | Which roads would carry fibre to these schools, and how long is it? | `insert_points`, `connecting_subnetwork`, custom weights |
+| Fibre backbone planning | Which roads would carry fibre from the existing fibre to these schools, what would it cost, and in which order? | `insert_points`, `ConnectionPlanner`, `connecting_subnetwork`, custom weights |
 | Last-mile cost | How far is each school from the nearest fibre node, by road? | `insert_points`, `nearest_by_network` |
 | Accessibility | Which schools have a clinic within 5 km by road, and what area does a facility serve? | `count_within`, `nearest_by_network`, `reachable` |
 | Network distance as a model feature | Road distances, and how much longer they are than straight lines, as covariates or outcomes | `shortest_path_lengths` |

@@ -25,7 +25,7 @@ def main(sizes):
     for k in sizes:
         terminals = list(ids[rng.choice(n, k, replace=False)])
         planner = ConnectionPlanner(net, terminals, roots=roots)
-        plan = planner.plan()
+        plan = planner.plan("steiner")
         started = time.perf_counter()
         planner.lower_bound(plan, time_limit=None)
         took = time.perf_counter() - started

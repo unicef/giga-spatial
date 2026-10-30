@@ -27,11 +27,13 @@ So insert all your points in one call where you can, rather than in many calls o
 | `reachable`, 100 origins within 5 km | 0.08 s |
 | `nearest_by_network`, 10,000 origins to 100 targets | 0.05 s |
 | `count_within`, 1,000 origins to 100 targets within 5 km | 0.04 s |
-| `connecting_subnetwork`, Steiner tree of 1,000 schools | 0.18 s |
+| `ConnectionPlanner.plan`, 1,000 schools and 20 fibre nodes: `shortest_path` (the default); `steiner` | 1.1 s; 0.2 s |
+| `improve`, the same plan: one pass of local search; until it stops | about 6 s; about 25 s |
+| `lower_bound`, the same schools | 5 s |
 | `simplify` of the unsimplified network (4.5 million edges) | 7 s |
 | Build Rwanda from its extract, then load it from storage | about 14 s, then 0.4 s |
 
-**How costs grow.** Shortest path lengths grow with the number of origins, since each origin is one Dijkstra search over the whole network; destinations are almost free. Put the smaller set first, or swap origins and destinations on an undirected network. `nearest_by_network` with `k=1` and `count_within` do not grow with the number of origins in the same way, because they search from the targets. `connecting_subnetwork` with the default method costs about the same for 100 or 1,000 points; `method="all_pairs"` grows with the square.
+**How costs grow.** Shortest path lengths grow with the number of origins, since each origin is one Dijkstra search over the whole network; destinations are almost free. Put the smaller set first, or swap origins and destinations on an undirected network. `nearest_by_network` with `k=1` and `count_within` do not grow with the number of origins in the same way, because they search from the targets. A plan by `steiner` costs about the same for 100 or 1,000 points, and one by `shortest_path` grows slowly with them: 4.4 s for 10,000 schools. `method="all_pairs"` grows with the square. `improve` and `lower_bound` take `time_limit=`.
 
 **Memory.** Rwanda's simplified network takes about 350 MB in memory with its tables and geometries. A shortest path matrix of 10,000 origins by 10,000 destinations is 800 MB of floats, and the library refuses matrices over 1 GiB, with advice to batch. `drop_geometry()` saves most of a network's memory when only routing matters, and `load(columns=[])` loads only the topology.
 

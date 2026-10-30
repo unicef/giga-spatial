@@ -135,9 +135,9 @@ plan = ConnectionPlanner(network, school_ids, roots=["fiber-1"], weight="length"
 print(plan.cost, plan.terminals["status"].value_counts())
 ```
 
-`plan("shortest_path")` models a phased rollout: schools are connected one at a time, nearest first, to everything connected so far, and the terminals table gains each school's `order` and `marginal_cost`, the cost its connection added.
+The default method, `shortest_path`, also models a phased rollout: schools are connected one at a time, nearest first, to everything connected so far, and the terminals table gives each school's `order` and `marginal_cost`, the cost its connection added. `plan("steiner")` uses Mehlhorn's faster approximation, a few percent longer on roads.
 
-`planner.improve(plan)` shortens any plan by local search, and never makes it worse; `time_limit=` stops it after that many seconds. On Rwanda's roads it shortens the Steiner tree for 1,000 schools by about 5%.
+`planner.improve(plan)` shortens any plan by local search, and never makes it worse; `time_limit=` stops it after that many seconds. On Kigali's roads, improved plans came within 0.9% of the optimum.
 
 `planner.lower_bound(plan)` computes a cost no plan can go below, and sets `plan.bound` and `plan.gap`: the plan costs at most `1 + gap` times the best possible one.
 
