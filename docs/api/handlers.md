@@ -139,6 +139,30 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
         - ensure_data_available
         - get_available_data_info
 
+## OpenStreetMap roads
+
+`OSMRoadsHandler` returns a [`SpatialNetwork`](network.md) built from Geofabrik's extracts, the same network [`OSMRoadsFetcher`](fetchers.md) returns for the same area. It needs `pip install "giga-spatial[roads]"`; the [road networks guide](../user-guide/road-networks.md#whole-countries) explains which extracts a source uses and how they are stored.
+
+::: gigaspatial.handlers.osm.roads.OSMRoadsHandler
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - load_data
+        - download_and_load
+        - ensure_data_available
+        - get_available_data_info
+
+::: gigaspatial.handlers.osm.roads.OSMRoadsResolveOptions
+    options:
+      show_source: false
+      members: false
+
+::: gigaspatial.handlers.osm.roads.OSMRoadsReadOptions
+    options:
+      show_source: false
+      members: false
+
 ## WRI Aqueduct
 
 ::: gigaspatial.handlers.wri.aqueduct_flood.AqueductFloodHandler

@@ -9,3 +9,5 @@ These records explain decisions that are hard to reverse or surprising without c
 | [0003](0003-public-import-paths.md) | Users import from the top level or a public subpackage, which load lazily. Every other module path is internal. |
 | [0004](0004-columnar-spatial-network.md) | A spatial network is held as node and edge tables; networkx and pandana are exports, and edits return a new network. |
 | [0005](0005-spatial-network-storage.md) | A saved spatial network is a folder with a nodes Parquet file, an edges GeoParquet file, and a JSON metadata file. |
+| [0006](0006-osm-extract-storage.md) | OSM extracts are stored by date, and the network built from each is saved uncropped beside it; cropping happens at load. |
+| [0007](0007-osm-extract-choice.md) | OSM extracts are chosen by polygon, with ISO codes only as a fast path and a curated list of multi-country extracts. |

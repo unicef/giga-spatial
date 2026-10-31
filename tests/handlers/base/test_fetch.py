@@ -85,6 +85,18 @@ def test_stream_to_store_removes_a_partial_file(respond, tmp_path):
     assert not (tmp_path / "f.bin").exists()
 
 
+def test_stream_to_store_checks_the_md5(respond, tmp_path):
+    respond(_Response(chunks=[b"ab", b"cd"]))
+    good = "e2fc714c4727ee9395f324cd2e7f331f"
+
+    fetch.stream_to_store("https://x/f.bin", tmp_path / "f.bin", LocalDataStore(), md5=good.upper())
+    assert (tmp_path / "f.bin").read_bytes() == b"abcd"
+
+    with pytest.raises(ValueError, match="checksum"):
+        fetch.stream_to_store("https://x/g.bin", tmp_path / "g.bin", LocalDataStore(), md5="0" * 32)
+    assert not (tmp_path / "g.bin").exists()
+
+
 def test_stream_to_store_uses_the_given_session(tmp_path):
     calls = []
 
