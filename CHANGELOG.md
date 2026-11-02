@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
     -   `simplify` removes nodes that only continue a road, with the same result as osmnx and 22 times faster on unsimplified Rwanda. `connecting_subnetwork` keeps only the roads that join a set of points: a Steiner tree, each point's path to its nearest source, or the paths between every pair.
     -   `save` and `load` store a network as a folder of Parquet files that GIS tools, DuckDB, and pandas read directly. `to_networkx` and `to_pandana` convert it for other libraries.
 
+-   **GloFAS flood hazard handler (`gigaspatial/handlers/glofas.py`)**
+    -   `GlofasHandler` loads Copernicus EMS flood maps for a country or a geometry. One load fetches one layer (`depth`, `depth_reclass`, `permanent_water`, or `spurious_depth`) and, for the depth layers, one return period (default 100).
+    -   Tiles come from the published `tile_extents.geojson`. Stored paths include the layer and, for depth layers, the return period. Mask layers reject an explicit `return_period`.
+
 -   **Optional extras.** `giga-spatial[roads]` installs osmnx for `OSMRoadsFetcher`. `giga-spatial[pandana]` installs pandana for `SpatialNetwork.to_pandana` and `backend="pandana"`. Both are part of `giga-spatial[all]`.
 
 ### Changed

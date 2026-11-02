@@ -56,6 +56,12 @@ __getattr__, __dir__, __all__ = attach(
             "HDXReader",
             "HDXHandler",
         ],
+        "gigaspatial.handlers.glofas": [
+            "GlofasConfig",
+            "GlofasDownloader",
+            "GlofasReader",
+            "GlofasHandler",
+        ],
         "gigaspatial.handlers.rwi": [
             "RWIConfig",
             "RWIDownloader",
@@ -124,6 +130,12 @@ if TYPE_CHECKING:
         OpenCellIDHandler,
     )
     from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
+    from gigaspatial.handlers.glofas import (
+        GlofasConfig,
+        GlofasDownloader,
+        GlofasReader,
+        GlofasHandler,
+    )
     from gigaspatial.handlers.rwi import RWIConfig, RWIDownloader, RWIReader, RWIHandler
     from gigaspatial.handlers.nasa.srtm import (
         NasaSRTMConfig,
