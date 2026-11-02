@@ -24,3 +24,5 @@ PYTHONPATH=/tmp/gs_geofabrik/pylib:../.. python build_rwanda.py drive_service wa
 ```
 
 `load_rwanda.py` times `OSMRoadsReader.load` on Rwanda's stored extract for school points, a box, and the country, first while the networks are built and saved, then from the saved networks. Results are in section 8 of the design.
+
+`read_strategies.py` compares three ways of reading an extract's highway ways with their coordinates through pyosmium, each in its own process. The last run of all three scripts is in [`results.md`](results.md).
