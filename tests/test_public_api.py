@@ -61,11 +61,16 @@ def test_removed_aliases_are_gone(alias):
 
 
 def test_bare_import_does_not_load_optional_or_heavy_dependencies():
+    # Snapshot sys.modules first. snowflake-connector-python ships a .pth that
+    # imports the snowflake namespace at interpreter startup, before any user
+    # code. Fail only on names that appear because of import gigaspatial.
+    # snowflake.connector is the heavy module; the .pth never loads it.
     code = (
-        "import sys, gigaspatial; "
-        "heavy = ['ee', 'geemap', 'snowflake', 'google.cloud.bigquery', "
-        "'azure.storage.blob', 'duckdb', 'geopandas', 'rasterio', 'osmnx', 'pandana']; "
-        "print(','.join(m for m in heavy if m in sys.modules))"
+        "import sys; before = set(sys.modules); import gigaspatial; "
+        "heavy = ['ee', 'geemap', 'snowflake', 'snowflake.connector', "
+        "'google.cloud.bigquery', 'azure.storage.blob', 'duckdb', "
+        "'geopandas', 'rasterio', 'osmnx', 'pandana']; "
+        "print(','.join(m for m in heavy if m in sys.modules and m not in before))"
     )
     result = subprocess.run(
         [sys.executable, "-W", "ignore", "-c", code],
