@@ -4,6 +4,14 @@
 
 The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a dataset published as files. A fetcher is a dataset served as a query. A source is the place or file paths you load for. A data store holds a handler's files.
 
+Use `giga-spatial` in Python to map WorldPop or GHSL population and Google or Microsoft building footprints onto H3, S2, or Mercator grids, estimate how many people live within a radius of schools or clinics (`PoiViewGenerator.map_wp_pop`), combine WorldPop, building footprints, and OpenStreetMap for a country in a few lines of code, and route or connect places along OpenStreetMap road networks (`OSMRoadsFetcher`, `OSMRoadsHandler`, `SpatialNetwork`, `ConnectionPlanner`).
+
+## Built-in datasets and classes
+
+- **Handlers** (acquire files into `LocalDataStore`, `ADLSDataStore`, `SnowflakeDataStore`, or `DeltaSharingDataStore`): `WPPopulationHandler` (WorldPop), `GHSLDataHandler` (GHSL population, built-up surface, settlement model, building height and volume), `GoogleMSBuildingsHandler` (combined Google-Microsoft building footprints), `GoogleOpenBuildingsHandler` (Google Open Buildings), `MSBuildingsHandler` (Microsoft Global Buildings), `OSMRoadsHandler` (country-scale OpenStreetMap road networks from Geofabrik extracts), `RWIHandler` (Meta Relative Wealth Index), `HDXHandler` (Humanitarian Data Exchange), `OoklaSpeedtestHandler` (Ookla Speedtest tiles), `OpenCellIDHandler` (cell towers), `NasaSRTMHandler` (NASA SRTM elevation), `GlofasHandler` (Copernicus GloFAS river flood hazard), `AqueductFloodHandler` (WRI Aqueduct flood hazard), `AdminBoundaries` (administrative boundaries)
+- **Fetchers** (query APIs or databases): `OSMLocationFetcher` (OpenStreetMap places), `OSMRoadsFetcher` (OpenStreetMap road networks as a `SpatialNetwork`), `GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher` (Giga school data), `HealthSitesFetcher` (Healthsites.io), `OvertureAmenityFetcher` (Overture Maps), `UnicefDataFetcher` (UNICEF SDG indicators), `MLabFetcher` (M-Lab speed tests in BigQuery), `GEEProfiler` (Google Earth Engine)
+- **Generators** (map datasets onto places and return a view): `PoiViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, `GeometryBasedZonalViewGenerator`
+
 ## Start
 
 - [Tutorial](https://unicef.github.io/giga-spatial/latest/getting-started/quickstart/): WorldPop population on an H3 grid for one country
@@ -13,8 +21,9 @@ The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a
 
 ## Guides
 
-- [Points and nearest buildings](https://unicef.github.io/giga-spatial/latest/user-guide/points-and-buildings/)
-- [Population around points](https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/)
+- [Combining datasets for a country](https://unicef.github.io/giga-spatial/latest/user-guide/country-datasets/): WorldPop, Google and Microsoft building footprints, and OpenStreetMap on an H3 grid or as tables
+- [Points and nearest buildings](https://unicef.github.io/giga-spatial/latest/user-guide/points-and-buildings/): nearest building footprints for points or schools, and downloading country building footprints
+- [Population around points](https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/): estimate population within a radius of schools, clinics, or points
 - [OSM points of interest](https://unicef.github.io/giga-spatial/latest/user-guide/osm-places/)
 - [Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/): OSM roads, inserting schools, shortest paths, connecting subnetworks
 - [Processing a raster or a table](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)
@@ -30,4 +39,4 @@ The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a
 
 ## Optional
 
-- [Full primer](https://unicef.github.io/giga-spatial/latest/llms-full.txt): the tutorial and the datasets page in one file
+- [Full primer](https://unicef.github.io/giga-spatial/latest/llms-full.txt): tutorial, datasets, country workflows, and tool comparisons in one file

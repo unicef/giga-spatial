@@ -31,9 +31,11 @@ print(view.head())
 
 ## Guides
 
+- [Combining datasets for a country](user-guide/country-datasets.md)
 - [Points and nearest buildings](user-guide/points-and-buildings.md)
 - [Population around points](user-guide/population-accessibility.md)
 - [OSM points of interest](user-guide/osm-places.md)
+- [Road networks](user-guide/road-networks.md)
 - [Processing a raster or a table](user-guide/processing.md)
 - [Settlement](user-guide/settlement-characterization.md)
 - [Infrastructure files](user-guide/infrastructure-normalization.md)

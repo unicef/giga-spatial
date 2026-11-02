@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giga-spatial"
-description = "Acquires published geospatial datasets into a data store you control, loads them for a source, and processes them."
+description = "Acquires published geospatial datasets (WorldPop, GHSL, Google and Microsoft building footprints, OpenStreetMap, Relative Wealth Index, Ookla, GloFAS, WRI Aqueduct, SRTM, HDX) into a data store you control, loads them for a country or source, and maps them onto H3/S2/Mercator grids, points of interest, and road networks."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
@@ -15,8 +15,11 @@ authors = [
 keywords = [
     "gigaspatial", "spatial", "geospatial", "gis", "remote sensing",
     "data processing", "download", "openstreetmap", "osm", "ghsl",
-    "grid", "h3", "worldpop", "buildings", "point of interest", "POI", "raster", "vector",
-    "school connectivity", "unicef", "giga", "mapping", "analysis", "python"
+    "grid", "h3", "h3 hexagons", "s2", "worldpop", "population",
+    "buildings", "building footprints", "google open buildings", "microsoft buildings",
+    "point of interest", "POI", "catchment", "zonal statistics",
+    "raster", "vector", "road network", "rwi", "ookla", "glofas", "flood hazard",
+    "humanitarian", "development", "school connectivity", "unicef", "giga", "mapping", "analysis", "python"
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",

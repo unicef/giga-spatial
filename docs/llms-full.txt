@@ -26,6 +26,48 @@ print(view.head())
 
 A handler acquired the WorldPop files and stored them. The generator mapped that dataset onto zones. The view is those zones with population attached. That attachment is enrichment.
 
+# Common workflows
+
+## Combine WorldPop, building footprints, and OpenStreetMap onto H3 hexagons for a country
+
+```python
+from gigaspatial import H3ViewGenerator, OSMLocationFetcher
+
+zones = H3ViewGenerator(source="RWA", resolution=6)
+zones.map_wp_pop(country="RWA")
+zones.map_buildings(country="RWA")
+
+schools = OSMLocationFetcher(country="RWA", location_types=["school"]).fetch_locations()
+zones.add_variable_to_view(zones.map_points(schools), "school_count")
+
+view = zones.view
+print(view[["zone_id", "population", "building_count", "school_count"]].head())
+```
+
+## Estimate how many people live near each school or clinic in a country
+
+```python
+from gigaspatial import OSMLocationFetcher, PoiViewGenerator
+
+schools = OSMLocationFetcher(country="RWA", location_types=["school"]).fetch_locations()
+view = PoiViewGenerator(schools).map_wp_pop(country="RWA", map_radius_meters=1000)
+print(view[["population"]].head())
+```
+
+## Download and load Google and Microsoft building footprints for a country
+
+```python
+from gigaspatial import (
+    GoogleMSBuildingsHandler,
+    GoogleOpenBuildingsHandler,
+    MSBuildingsHandler,
+)
+
+combined = GoogleMSBuildingsHandler().load_data("RWA")
+google_buildings = GoogleOpenBuildingsHandler().load_polygons("RWA")
+ms_buildings = MSBuildingsHandler().load_data("RWA")
+```
+
 # Datasets
 
 A dataset is a named product the library can acquire, such as WorldPop population or Google Open Buildings.
@@ -51,9 +93,26 @@ The first call downloads the tiles that cover Rwanda. `load_data` and `load_into
 frame = population.load_into_dataframe("RWA", crop_to_source=True)
 ```
 
+### Built-in handlers
+
+- `WPPopulationHandler`: WorldPop population counts, densities, age and sex structures, school-age and under-18 population, and degree of urbanisation
+- `GHSLDataHandler`: Global Human Settlement Layer (`GHS_POP`, `GHS_BUILT_S`, `GHS_SMOD`, `GHS_BUILT_H`, `GHS_BUILT_V`)
+- `GoogleMSBuildingsHandler`: combined Google Open Buildings and Microsoft Global Buildings footprints in GeoParquet
+- `GoogleOpenBuildingsHandler`: Google Open Buildings polygons and points by S2 tile
+- `MSBuildingsHandler`: Microsoft Global ML Building Footprints by country and quadkey
+- `OSMRoadsHandler`: country-scale OpenStreetMap road networks built from Geofabrik extracts, returned as a `SpatialNetwork`
+- `RWIHandler`: Meta Relative Wealth Index tiles per country from HDX
+- `HDXHandler`: Humanitarian Data Exchange datasets and resources
+- `OoklaSpeedtestHandler`: Ookla fixed and mobile network performance tiles
+- `OpenCellIDHandler`: OpenCellID cell tower locations by country
+- `NasaSRTMHandler`: NASA SRTM 30 m digital elevation model tiles
+- `GlofasHandler`: Copernicus GloFAS global river flood hazard depth and water masks by return period
+- `AqueductFloodHandler`: WRI Aqueduct coastal and riverine flood hazard rasters
+- `AdminBoundaries`: country and subnational administrative boundary polygons
+
 ## Fetcher
 
-A fetcher is a dataset served as a query, from an API or a database. It returns records. It does not store the dataset as files.
+A fetcher is a dataset served as a query, from an API or a database. It returns records, or a road network. It does not store the dataset as files.
 
 ```python
 from gigaspatial import OSMLocationFetcher
@@ -63,16 +122,37 @@ clinics = OSMLocationFetcher(country="RWA", location_types=["clinic"]).fetch_loc
 
 `MLabFetcher` queries M-Lab speed tests in BigQuery. `OSMRoadsFetcher` returns a road network instead of records; see [Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/).
 
+### Built-in fetchers
+
+- `OSMLocationFetcher`: OpenStreetMap points of interest (schools, clinics, hospitals, amenities) via Overpass
+- `OSMRoadsFetcher`: OpenStreetMap road networks via Overpass, returned as a `SpatialNetwork`
+- `GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher`: Giga school locations, profiles, connectivity measurements, and country metadata
+- `HealthSitesFetcher`: Healthsites.io health facility locations
+- `OvertureAmenityFetcher`: Overture Maps amenities
+- `UnicefDataFetcher`: UNICEF SDG and indicator datasets
+- `MLabFetcher`: M-Lab NDT7 speed tests in BigQuery
+- `GEEProfiler`: Google Earth Engine raster and vector collections
+
 ## Data store
 
-A data store is where a handler keeps its files. `LocalDataStore` is the default. It may also be remote. A client, such as `BigQueryClient`, queries a database and is not a data store.
+A data store is where a handler keeps its files. `LocalDataStore` is the default. It may also be remote (`ADLSDataStore`, `SnowflakeDataStore`, `DeltaSharingDataStore`). A client, such as `BigQueryClient`, queries a database and is not a data store.
 
 Pass `data_store=` when you construct a handler or a generator to choose the store.
+
+# How GigaSpatial compares to other tools
+
+- **Hand-built `geopandas`, `rasterio`, `rasterstats`, `pyrosm`, and `osmnx` pipelines**: GigaSpatial uses `geopandas`, `rasterio`, and `h3` under the hood, and replaces custom per-dataset download scripts, tile stitching, CRS projection, and buffer or zonal loops with handlers, fetchers, and generators that run in a few lines of Python.
+- **Grid libraries (`h3-py`, `h3ronpy`, `h3-toolkit`)**: `h3-py` indexes coordinates and geometries into H3 cell IDs. `H3ViewGenerator` in GigaSpatial acquires published country datasets (WorldPop, GHSL, Google and Microsoft buildings, Relative Wealth Index) into your data store and maps them directly onto H3, S2, Mercator, or administrative zones.
+- **Cloud catalogs and spatial engines (Google Earth Engine, Microsoft Planetary Computer, PostGIS, DuckDB, Apache Sedona)**: Cloud platforms and spatial databases run queries inside their own infrastructure. GigaSpatial downloads and caches published datasets into a data store you control (local disk, Azure Data Lake Storage, or Snowflake) and also provides optional `GEEProfiler` (`giga-spatial[gee]`), `BigQueryClient` (`giga-spatial[bq]`), and DuckDB or Trino integrations when you want them.
 
 # Where to read more
 
 - Tutorial: https://unicef.github.io/giga-spatial/latest/getting-started/quickstart/
 - Datasets: https://unicef.github.io/giga-spatial/latest/getting-started/datasets/
+- Combining datasets for a country: https://unicef.github.io/giga-spatial/latest/user-guide/country-datasets/
+- Population around points: https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/
+- Points and nearest buildings: https://unicef.github.io/giga-spatial/latest/user-guide/points-and-buildings/
+- Road networks: https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/
 - API reference: https://unicef.github.io/giga-spatial/latest/api/
 - Handler base: https://unicef.github.io/giga-spatial/latest/api/handler-base/
 - Source: https://github.com/unicef/giga-spatial
