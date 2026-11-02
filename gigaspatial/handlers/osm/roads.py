@@ -182,7 +182,7 @@ class OSMRoadsConfig(BaseHandlerConfig):
         lines become their hull, bounding box, or buffers, widened by
         ``buffer`` meters.
         """
-        from gigaspatial.fetchers.osm_roads import query_area
+        from gigaspatial.fetchers.osm.roads import query_area
 
         options = options or OSMRoadsResolveOptions()
         if classify_source(source) is SourceKind.COUNTRY:

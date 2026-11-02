@@ -10,7 +10,7 @@ import pytest
 import requests
 from shapely.geometry import LineString, Point, box
 
-import gigaspatial.fetchers.osm_roads as osm_roads
+import gigaspatial.fetchers.osm.roads as osm_roads
 from gigaspatial import OSMRoadsFetcher, SpatialNetwork
 from gigaspatial.config import config
 
