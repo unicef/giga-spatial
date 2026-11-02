@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+-   **WorldPop catalog errors (`gigaspatial/handlers/worldpop.py`)**
+    -   `WorldPopRestClient.get_datasets` retries connection errors, timeouts, truncated responses, responses that are not JSON, and HTTP 429, 500, 502, 503, and 504. If the catalog request still fails, that error is raised. A failed request is no longer reported as "No WorldPop datasets found".
+
 ## [v0.10.1] - 2026-10-21
 
 ### Changed
