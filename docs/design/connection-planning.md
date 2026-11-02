@@ -93,7 +93,7 @@ The cost is the same as today's Steiner tree: one Dijkstra and two MSTs over a m
 
 ## 5. The rollout order (`method="shortest_path"`)
 
-Takahashi and Matsuyama's heuristic, a 2-approximation, is the planner's model of a phased rollout. Start with the roots as the connected set. Repeatedly connect the unconnected terminal nearest (by weight) to anything connected so far, along its shortest path, and add that path to the connected set. A terminal's `order` is when it was connected, and its `marginal_cost` the weight of its path, which uses only new edges. Ties go to the lower terminal ID, so plans are reproducible. Terminals that the connected set cannot reach are `unreachable`.
+Takahashi and Matsuyama's heuristic, a 2-approximation, is the planner's model of a phased rollout. Start with the roots as the connected set. Repeatedly connect the unconnected terminal nearest (by weight) to anything connected so far, along its shortest path, and add that path to the connected set. A terminal's `order` is when it was connected, and its `marginal_cost` the weight of its path, which uses only new edges. Ties go to the terminal listed first, so plans are reproducible. Terminals that the connected set cannot reach are `unreachable`.
 
 Implemented incrementally:
 
@@ -102,6 +102,20 @@ Implemented incrementally:
 - Terminals are kept in a heap by distance.
 
 Sub-task 3 benchmarks this against the naive version (one full Dijkstra per terminal), and against a version that recomputes only when the nearest terminal's distance changed. A compiled Dijkstra would need a new build dependency and is not planned.
+
+As built (`benchmarks/connection_planning/rollout.py`, results in `benchmarks/connection_planning/results.md`):
+
+- **Ties go to the terminal listed first in `terminals`**, not the lower ID: IDs may mix integers and text, which do not sort, and the order given is as reproducible. Without roots, the rollout starts from the first listed terminal it can connect, with `order` 1 and `marginal_cost` 0. A terminal that is a root has `order` 0; an unreachable one has none.
+- **The update is a pruned Dijkstra in Python, not scipy's limited one.** The limit above is the largest distance of any waiting terminal, which a few remote terminals keep at tens of kilometres, so each update searched about 40,000 nodes. Only nodes nearer to the new path than to anything connected before need updating, and a Dijkstra that stops wherever a distance does not fall searches only those: 6 million node updates in a whole 10,000-terminal rollout on Rwanda, against 455 million nodes searched. scipy's Dijkstra cannot stop that way, but even in Python the pruned update is much faster:
+
+| Terminals, 20 roots, Rwanda | Naive | scipy, limited | Python, pruned |
+|---|---|---|---|
+| 100 | 1.6 s | 0.6 s | 0.4 s |
+| 1,000 | 19.5 s | 5.4 s | 1.1 s |
+| 10,000 | not run | 58 s | 4.4 s |
+
+- **The version that recomputes only when the nearest terminal's distance changed is not valid.** Stale distances are upper bounds, since distances only fall, so the top of a heap of stale distances need not be the nearest terminal. It would need lower bounds, which the problem does not provide.
+- **On Rwanda the rollout was shorter than Mehlhorn's rooted tree:** 1,163 against 1,194 km for 100 terminals, 3,845 against 3,942 km for 1,000, and 10,760 against 10,954 km for 10,000, 1.8 to 2.6% shorter. Both are 2-approximations, and Takahashi and Matsuyama's is known to be the better of the two in practice. `steiner` stays the default for now, since it takes 0.2 s against 1.1 s; sub-tasks 4 and 6 measure both against the optimum before deciding.
 
 ## 6. Bridges
 
