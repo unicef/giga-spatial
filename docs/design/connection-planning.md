@@ -51,7 +51,7 @@ planner = ConnectionPlanner(
     bridge_cost=None,           # weight per metre of a straight-line link; no bridges when None
     bridge_max_distance=5000,   # metres
 )
-plan = planner.plan(method="steiner")        # or "shortest_path", "nearest_root", "all_pairs"
+plan = planner.plan(method="shortest_path")  # or "steiner", "nearest_root", "all_pairs"
 plan = planner.improve(plan, time_limit=None)
 bound = planner.lower_bound(time_limit=60)   # also sets plan.bound and plan.gap when given a plan
 ```
@@ -60,8 +60,8 @@ bound = planner.lower_bound(time_limit=60)   # also sets plan.bound and plan.gap
 
 | `method` | Meaning |
 |---|---|
-| `"steiner"` (default) | Mehlhorn's 2-approximation. With roots, the rooted tree (section 4); without, the unrooted tree joining the terminals |
-| `"shortest_path"` | Takahashi and Matsuyama's heuristic: connect terminals one at a time, cheapest first, to everything connected so far. Gives the rollout order (section 5) |
+| `"steiner"` | Mehlhorn's 2-approximation. With roots, the rooted tree (section 4); without, the unrooted tree joining the terminals |
+| `"shortest_path"` (default since sub-task 6, section 11) | Takahashi and Matsuyama's heuristic: connect terminals one at a time, cheapest first, to everything connected so far. Gives the rollout order (section 5) |
 | `"nearest_root"` | Each terminal's shortest path to its nearest root; the union of those paths. Today's behaviour of `sources=` |
 | `"all_pairs"` | The shortest path between every terminal and every terminal or root, as the old Giga code did; grows with the square of the terminals |
 
@@ -144,7 +144,7 @@ A **key vertex** is a node of the tree that is a terminal, a root, or a Steiner 
 - **Key-path exchange.** Remove one key path; the tree falls into two parts. Find the cheapest path joining the two parts, with a Dijkstra from one part limited to the removed path's weight. If it is cheaper, replace the key path with it.
 - **Key-vertex elimination.** Remove one Steiner key vertex and its key paths; the tree falls into three or more parts. A multi-source Dijkstra labelled by part, as in Mehlhorn's algorithm, gives the cheapest links between parts, and an MST over them reconnects all parts. If the reconnection is cheaper than what was removed, keep it.
 
-Moves are tried cheapest-to-evaluate first (key paths in decreasing weight), and each Dijkstra is limited by the weight it must beat, so most searches stop early. Vertex insertion and elimination are deferred, until real data shows a large remaining gap.
+Moves are tried cheapest-to-evaluate first (key paths in decreasing weight), and each Dijkstra is limited by the weight it must beat, so most searches stop early. Vertex insertion and elimination are deferred, until real data shows a large remaining gap. Sub-task 6 found none on roads: improved plans were within 0.86% of the optimum on Kigali.
 
 As built (`benchmarks/connection_planning/improve.py`):
 
@@ -196,6 +196,14 @@ On Rwanda's simplified network (125,058 nodes, 332,535 edges), with 1,000 termin
 - **Tests.** The rooted tree against networkx's `steiner_tree` on the virtual-root graph; every method on small graphs against brute-force optima; `improve` never worse, and better on constructed cases; the bound never above the brute-force optimum; and every edge case above.
 - **Benchmarks.** `benchmarks/connection_planning/` writes instances in SteinLib's STP format and solves them exactly with SCIP-Jack, which is installed only there, never as a dependency. Instances: Kigali, and Rwanda with 100 and 1,000 terminals, by length and by cost. Reported for each method: its gap to the optimum, with and without `improve`; and the bound's gap. If SCIP-Jack cannot be built, networkx's `steiner_tree` gives another upper bound, and the planner's own bound the lower one.
 
+As built, without SCIP-Jack, whose source code must now be requested from its developers:
+
+- **SteinLib's sets B, C, D, and E** (78 random sparse graphs of 50 to 2,500 nodes, every optimum proven; `steinlib.py`). Improved plans were on average 0.4 to 2.2% above the optimum, at worst 9%; the bound was on average 0.05 to 0.42% below it, at worst 4.4%. The first version of the dual ascent was 7 to 10% below on average, at worst 45%, which led to Wong's rule in sub-task 5.
+- **Exact optima on Kigali's roads** with scipy's `milp` (HiGHS) and the multi-commodity flow model, whose relaxation equals the directed cut relaxation (`exact.py`; 30 and 60 terminals, 3 roots, 5 draws each, 4 to 110 s each). Improved plans were 0.00 to 0.86% above the optimum, `shortest_path` 0.65 to 5.9%, `steiner` 3.0 to 8.8%, and the bound 0.07 to 1.1% below. The single-commodity flow model did not solve such an instance in 600 s.
+- **Rwanda** is too large for HiGHS; there the bound alone gives the gap: 2.1%, 1.4%, and 0.6% for improved plans of 100, 1,000, and 10,000 terminals.
+- **The default method became `shortest_path`.** Without `improve()` it was about twice as close to the optimum as `steiner`, on Kigali and on SteinLib, and it still takes seconds at country scale (4.4 s for 10,000 terminals on Rwanda, against 0.2 s). After `improve()`, both end within about 0.1% of each other.
+- `exact.py` also writes its instances in SteinLib's STP format, with the virtual root as the last node, so an exact solver can take them as they are; `exact.py --rwanda 100 1000 10000` writes Rwanda's instances of `bound.py` without solving them.
+
 ## 12. Sub-tasks
 
 Each sub-task is its own pull request on `feat/connection-planner`, stacked on #21.
@@ -207,7 +215,7 @@ Each sub-task is its own pull request on `feat/connection-planner`, stacked on #
 | 3 | Rollout order | `method="shortest_path"`, incremental; `order` and `marginal_cost`; tests against the naive version; performance targets |
 | 4 | Local search | `improve()` with key-path exchange and key-vertex elimination; tests; performance target |
 | 5 | Lower bound | `lower_bound(time_limit=)` by dual ascent; `bound` and `gap`; tests against brute force; performance target |
-| 6 | Validation and docs | SCIP-Jack benchmarks; new decisions in the design and algorithm decisions document; the concept note's reduction and use-cases pages; changelog |
+| 6 | Validation and docs | Benchmarks against exact optima (SteinLib, and HiGHS on Kigali; SCIP-Jack deferred, section 13); the default method; new decisions in the design and algorithm decisions document; the concept note's reduction and use-cases pages; changelog |
 
 ## 13. Deferred
 
@@ -215,7 +223,8 @@ Each sub-task is its own pull request on `feat/connection-planner`, stacked on #
 - **Capacities** (`demands=` per terminal, `capacities=` per root): the capacitated Steiner tree, with the capacitated shortest-path heuristic (PLOS One, 2022); and Ito, Zhou, and Nishizeki's partitioning of a tree among capacitated roots as a second stage.
 - **Separate root networks**, each terminal assigned to one.
 - **Cost per cable**: fixed-charge network design or buy-at-bulk.
-- **Vertex insertion and elimination** in `improve`.
+- **Vertex insertion and elimination** in `improve`. On SteinLib's dense random graphs the improved plans were up to 9% above the optimum, so these moves would help there; on roads, within 0.86%.
+- **SCIP-Jack as an exact column in the benchmarks**, once its source code arrives from its developers: exact optima for the Rwanda-scale instances that HiGHS cannot solve, from the STP files `exact.py` writes.
 
 ## 14. Why "roots"
 

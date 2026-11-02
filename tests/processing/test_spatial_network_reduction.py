@@ -168,7 +168,7 @@ def chosen(connected):
 
 def test_steiner_matches_networkx(connected, chosen):
     terminals, _ = chosen
-    tree = connected.connecting_subnetwork(terminals)
+    tree = connected.connecting_subnetwork(terminals, method="steiner")
     simple = nx.Graph(connected.to_undirected().to_networkx(directed=False))
     networkx_best = min(
         steiner_tree(simple, terminals, weight="length", method=m).size(weight="length") for m in ("mehlhorn", "kou")

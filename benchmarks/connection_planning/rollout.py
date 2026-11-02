@@ -57,7 +57,7 @@ def main(sizes):
         started = time.perf_counter()
         plan = planner.plan("shortest_path")
         ours = time.perf_counter() - started
-        steiner = planner.plan().cost
+        steiner = planner.plan("steiner").cost
         row = [f"{k:,}", f"{ours:.2f}", f"{plan.cost / 1000:,.0f} km", f"{steiner / 1000:,.0f} km"]
         if k <= NAIVE_UP_TO:
             started = time.perf_counter()

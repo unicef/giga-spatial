@@ -156,7 +156,7 @@ class ReductionMixin:
         self,
         terminals: Any,
         roots: Any = None,
-        method: str = "steiner",
+        method: str = "shortest_path",
         weight: Optional[str] = None,
     ) -> "SpatialNetwork":
         """The part of the network that joins a set of points, contracted to the points and branching nodes.
@@ -172,16 +172,16 @@ class ReductionMixin:
             terminals: Node IDs to join, such as schools.
             roots: Node IDs already connected to each other, such as fibre
                 nodes. Reaching any root is enough.
-            method: ``"steiner"``: a tree with close to the smallest total
-                weight (Mehlhorn's 2-approximation of the Steiner tree); with
-                ``roots``, a forest whose every tree reaches a root, so a
-                terminal may connect through other terminals. ``"shortest_path"``:
-                terminals connected one at a time, nearest first, to everything
-                connected so far (Takahashi and Matsuyama). ``"nearest_root"``:
-                each terminal's shortest path to its nearest root.
-                ``"all_pairs"``: the shortest paths between every terminal and
-                every terminal and root; their number grows with the square of
-                the terminals.
+            method: ``"shortest_path"`` (the default): terminals connected
+                one at a time, nearest first, to everything connected so far
+                (Takahashi and Matsuyama). ``"steiner"``: Mehlhorn's
+                approximation, faster and on roads a few percent longer. Both
+                are Steiner tree approximations: with ``roots``, a forest whose
+                every tree reaches a root, so a terminal may connect through
+                other terminals. ``"nearest_root"``: each terminal's shortest
+                path to its nearest root. ``"all_pairs"``: the shortest paths
+                between every terminal and every terminal and root; their
+                number grows with the square of the terminals.
             weight: Edge column to minimise. The network's weight otherwise.
 
         Returns:

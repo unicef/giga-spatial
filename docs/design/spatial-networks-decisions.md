@@ -1,13 +1,13 @@
 # Spatial networks and OSM roads: design and algorithm decisions
 
-This document explains how I built `SpatialNetwork`, `OSMRoadsFetcher`, and `OSMRoadsHandler`, and why. For each decision it gives the question I faced, the options I considered, what I measured, what I chose, and what that choice costs. It is meant for colleagues who use these classes and want to know how far they can trust them, and for whoever changes them next.
+This document explains how I built `SpatialNetwork`, `OSMRoadsFetcher`, `OSMRoadsHandler`, and `ConnectionPlanner`, and why. For each decision it gives the question I faced, the options I considered, what I measured, what I chose, and what that choice costs. It is meant for colleagues who use these classes and want to know how far they can trust them, and for whoever changes them next.
 
 It does not repeat the implementation specs or the API. For those, read:
 
-- the [spatial network design](spatial-network.md) and the [OSM roads handler design](osm-roads-handler.md), which say what was built;
-- the ADRs under [Design decisions](../adr/index.md), which record single decisions in a few lines: [0004](../adr/0004-columnar-spatial-network.md) (tables), [0005](../adr/0005-spatial-network-storage.md) (storage), [0006](../adr/0006-osm-extract-storage.md) (extract storage), and [0007](../adr/0007-osm-extract-choice.md) (extract choice);
+- the [spatial network design](spatial-network.md), the [OSM roads handler design](osm-roads-handler.md), and the [connection planning design](connection-planning.md), which say what was built;
+- the ADRs under [Design decisions](../adr/index.md), which record single decisions in a few lines: [0004](../adr/0004-columnar-spatial-network.md) (tables), [0005](../adr/0005-spatial-network-storage.md) (storage), [0006](../adr/0006-osm-extract-storage.md) (extract storage), [0007](../adr/0007-osm-extract-choice.md) (extract choice), and [0008](../adr/0008-connection-planning.md) (connection planning);
 - the [spatial networks concept note](../concepts/spatial-networks/index.md), which explains how to use each method;
-- the benchmark scripts in `benchmarks/spatial_network/` and `benchmarks/osm_roads/`, with their last results beside them.
+- the benchmark scripts in `benchmarks/spatial_network/`, `benchmarks/osm_roads/`, and `benchmarks/connection_planning/`, with their last results beside them.
 
 Every number below comes from those scripts. Where a number explains a decision I took earlier, I give the run it came from; everything else is from the run of 29 October 2026 on the code as it is now.
 
@@ -189,7 +189,7 @@ The result is contracted to the terminals, the sources, and the branching nodes,
 
 **Consequences and limits.** The Steiner tree is an approximation, not the optimum. It ignores one-way restrictions, which suits cables laid along roads. Terminals that cannot reach the others stay in the result without edges.
 
-**Later change.** `sources=` became `roots=`, and with roots the default is now the rooted Steiner tree, in which a terminal may connect through another one; each terminal's path to its nearest root is `method="nearest_root"`. See [ADR 0008](../adr/0008-connection-planning.md) and the [connection planning design](connection-planning.md).
+**Later change.** `connecting_subnetwork` became the network of `ConnectionPlanner` (Part 4). `sources=` became `roots=`; with roots, a plan is the rooted Steiner tree, in which a terminal may connect through another one, and each terminal's path to its nearest root is `method="nearest_root"`. The default method became `shortest_path` (decision 25); Mehlhorn's tree is `method="steiner"`.
 
 ### Decision 8: inserting points in one batch
 
@@ -390,6 +390,106 @@ The tests that need osmnx run on Python 3.10, where it is installed, and are ski
 
 The lesson of decision 17 is in the third point: a test that replays my understanding of osmnx can only confirm that understanding. Replaying osmnx's own code, and comparing with the fetcher live, is what catches a wrong understanding.
 
+## Part 4: ConnectionPlanner
+
+The benchmarks of this part are in `benchmarks/connection_planning/`, with their results in `results.md` beside them, and ran on Python 3.14 on 30 October 2026. Rwanda is the simplified network above, with 20 random roots. The design is in the [connection planning design](connection-planning.md), and the reasons for a planner object in [ADR 0008](../adr/0008-connection-planning.md).
+
+### Decision 19: connecting points to an existing network is a rooted Steiner tree
+
+**Question.** A fibre planner's real question is not which roads join the schools to each other, but how to connect every school to the existing fibre at the smallest shared cost, where a school may connect through another school and a trench used by several schools is paid once. Is that a known problem, and how should the library solve it?
+
+**Options.** Each school's shortest path to its nearest fibre node, which `connecting_subnetwork(sources=...)` did; one unrooted Steiner tree over the schools and the fibre nodes; a rooted Steiner tree, with every fibre node joined to one virtual root at cost 0; and an exact solver.
+
+**Evidence.** On the concept note's example, 197 schools and 5 fibre nodes in Kigali: the nearest fibre node for each school took 355 km, one tree over schools and fibre nodes 265 km, and the rooted tree 258 km, in 0.19 s. On Rwanda with 1,000 terminals, the rooted tree took 4,037 km against 5,802 km for the nearest roots, in 0.19 s.
+
+**Decision.** Joining every root to a virtual root makes the problem the Steiner tree problem in graphs, over the terminals and that root. Removing the root leaves a forest whose every tree reaches the existing network. `ConnectionPlanner` holds the problem (network, terminals, roots, weight, bridges) and its solvers, and returns a `ConnectionPlan` with the contracted network, the chosen edges, the cost, and each terminal's status, root, and distance along the plan. `connecting_subnetwork` stays as the planner's network. The existing network's nodes are called roots, since "source" already means the place a dataset is requested for.
+
+**Consequences and limits.** The problem is NP-hard, so the planner returns approximations and a lower bound (decisions 22 and 23). Directions are ignored, and the cost is per edge used, not per cable: a cost that grows with the number of schools behind an edge makes it fixed-charge network design, which is out of scope.
+
+### Decision 20: bridges between parts of the network
+
+**Question.** A clipped network, or one loaded with `retain_all=True`, has parts that no road joins, and schools there cannot be connected. How can a plan cross such gaps, by microwave or a planned road?
+
+**Options.** Join the parts beforehand with `connect_components`, which adds one spanning tree of links whatever they cost; or offer the planner candidate links at a cost per metre, and let it use one only where it is cheaper than the roads.
+
+**Evidence.** On Rwanda cut in two along longitude 30°E (23 parts, the two largest of 70,000 and 55,000 nodes), with all roots in the west, 416 of 1,000 schools could be connected without bridges. With bridges at 10 per metre all 1,000 were, using 2 links of 961 m; at 1,000 per metre, 1 link of 35 m. Finding the 50 candidates took 0.1 s, and the whole plan 0.34 s.
+
+**Decision.** `bridge_cost` offers each part straight-line links to its 5 nearest other parts within `bridge_max_distance`. A part with more than 2,000 nodes, or most of the network, gets its own KD-tree, queried with every node outside it, which gives its closest pair to every other part exactly; smaller parts query a KD-tree of all nodes with their nodes' nearest neighbours, more of them while none lies outside the part. Bridges join the planner's sparse graph as extra entries, not a new network, keep their great-circle length, and count at their cost.
+
+**Consequences and limits.** For two small parts, the search stops at the first outside neighbour, so a small part can miss one of its 5 nearest; the tests check that every part gets its nearest, and the largest its 5 nearest.
+
+### Decision 21: the rollout order by a pruned Dijkstra
+
+**Question.** Takahashi and Matsuyama's heuristic connects the terminal nearest to everything connected so far, one at a time, which is also a model of a phased rollout: each school gets an order and a marginal cost. Run naively, it is one Dijkstra per terminal. How can it run at country scale?
+
+**Options.** The naive version; scipy's Dijkstra from each new path, limited to the largest distance of a waiting terminal; a version that recomputes only when the nearest terminal's distance changed; and a Dijkstra from each new path that stops wherever a distance does not fall, written in Python.
+
+**Evidence.** On Rwanda:
+
+| Terminals | Naive | scipy, limited | Python, pruned |
+|---|---|---|---|
+| 100 | 1.6 s | 0.6 s | 0.4 s |
+| 1,000 | 19.5 s | 5.4 s | 1.1 s |
+| 10,000 | not run | 58 s | 4.4 s |
+
+A few remote terminals keep scipy's limit at tens of kilometres, so each update searched about 40,000 nodes: 455 million in the 10,000-terminal run, against 6.2 million nodes updated by the pruned search.
+
+**Decision.** The pruned search in Python. Ties go to the terminal listed first, since node IDs may mix integers and text. The version that recomputes only when the nearest terminal's distance changed is not valid: stale distances are upper bounds, so the top of a heap of them need not be the nearest terminal.
+
+**Consequences and limits.** It is the slowest method, 5 to 20 times slower than Mehlhorn's, but still seconds at country scale. The tests check it, order for order, against the naive version.
+
+### Decision 22: local search with two moves, the second kept local
+
+**Question.** Both heuristics are 2-approximations, and in practice a few percent above the optimum. How can a plan be shortened, without risk of making it worse?
+
+**Options.** Uchoa and Werneck's moves: key-path exchange (replace a path between key vertices by the cheapest path between the two parts it joins), key-vertex elimination (remove a branching node and reconnect the parts by their cheapest links), and key-vertex insertion; and an exact solver.
+
+**Evidence.** On Rwanda with 1,000 terminals, the first version of key-vertex elimination searched for links from every node left in the plan, 20 ms per vertex, and stopped at a 60 s limit after four passes. Searching only from the parts' nodes within the removed weight of the removed nodes gave plans within 0.01% of it on Kigali, in half the time. With it:
+
+| First method | Plan | Improved | Saved | Longest pass |
+|---|---|---|---|---|
+| steiner | 3,942 km | 3,755 km | 4.7% | 5.8 s |
+| shortest_path | 3,845 km | 3,759 km | 2.2% | 5.8 s |
+| nearest_root | 5,510 km | 3,759 km | 31.8% | 9.4 s |
+
+**Decision.** `improve()` applies key-path exchange and the local key-vertex elimination until neither saves anything or `time_limit` passes; a move must save a billionth of the weight it replaces. Key paths are listed once per pass, and a path whose end an earlier move left only continuing it is extended to the next key vertex first. Key-vertex insertion is deferred.
+
+**Consequences and limits.** All three first methods end within 0.1% of each other, so after `improve()` the first method matters little. On Kigali's roads improved plans were within 0.86% of the optimum (decision 24); on SteinLib's dense random graphs they were up to 9% above it, where insertion would help.
+
+### Decision 23: the lower bound by Wong's dual ascent, following Wong's rule
+
+**Question.** Without the optimum, a plan cannot say how good it is. How can every plan state how far above the optimum it can be at most?
+
+**Options.** The linear relaxation of a Steiner tree model, solved by an LP solver; and Wong's dual ascent on the directed form of the network, which approximates the directed cut relaxation from below with only shortest-path-like searches. For the dual ascent, which terminal grows next decides the bound: one whole turn per terminal until it reaches the root, nearest first, or Wong's rule, one step at a time for the terminal whose region has the fewest entering arcs.
+
+**Evidence.** The first version gave whole turns, nearest the root first at the current reduced costs. It was valid, but against SteinLib's proven optima it was on average 7.0% below the optimum on set B and 9.7% on set C, at worst 45%. Wong's rule was 0.05% and 0.42% below, at worst 3.1%. On Rwanda the improved plans' gaps fell from 5.5%, 10.9%, and 12.0% to 2.1%, 1.4%, and 0.6%, for 100, 1,000, and 10,000 terminals. Recomputing each region every step took 41 s for 100 terminals on Rwanda; keeping them between steps gave the same bounds in 1.7 s, and 40.5 s for 10,000.
+
+**Decision.** `lower_bound()` follows Wong's rule. Each terminal keeps its region and its entering arcs between steps, since reduced costs only fall and regions only grow, and a step checks only those arcs. The planner keeps a complete bound; one stopped by `time_limit` is still valid, only looser.
+
+**Consequences and limits.** A plan's `gap` is an upper limit on its distance from the optimum. On Kigali the bound was 0.07 to 1.1% below the optimum, so most of the gap there is real.
+
+### Decision 24: validation without SCIP-Jack
+
+**Question.** The design planned to validate the planner against SCIP-Jack, an exact Steiner tree solver, whose source code must now be requested from its developers. How else can the heuristics and the bound be checked against exact optima?
+
+**Options.** SteinLib's test sets with their proven optima; an exact model in scipy's `milp` (HiGHS); and the planner's own bound alone.
+
+**Evidence.** SteinLib's sets B, C, D, and E (78 random sparse graphs of 50 to 2,500 nodes): improved plans were on average 0.4 to 2.2% above the optimum, at worst 9%; the bound 0.05 to 0.42% below it, at worst 4.4%. On Kigali's roads with 30 and 60 terminals and 3 roots (10 instances), the multi-commodity flow model solved each instance in 4 to 110 s: improved plans were 0.00 to 0.86% above the optimum, and the bound 0.07 to 1.1% below. The weaker single-commodity flow model did not solve one in 600 s.
+
+**Decision.** `steinlib.py` scores every method and the bound on SteinLib, and `exact.py` on Kigali against HiGHS; both run only in the benchmarks, so neither SteinLib nor an exact model is a dependency. `exact.py` writes its instances, and Rwanda's, in SteinLib's STP format, so SCIP-Jack can be added as a column when its code arrives.
+
+**Consequences and limits.** HiGHS cannot solve Rwanda-scale instances, so there the bound alone gives the gap. SteinLib's graphs are random, not roads.
+
+### Decision 25: the default method
+
+**Question.** Which method should `plan()` and `connecting_subnetwork()` use by default?
+
+**Options.** `steiner`, Mehlhorn's algorithm, the fastest; and `shortest_path`, Takahashi and Matsuyama's.
+
+**Evidence.** Without `improve()`, `shortest_path` was 0.65 to 5.9% above the optimum on Kigali and `steiner` 3.0 to 8.8%; on SteinLib 2.6 to 4.7% and 3.4 to 9.9% on average. On Rwanda, `shortest_path` took 1.1 s for 1,000 terminals and 4.4 s for 10,000, against 0.2 s.
+
+**Decision.** `shortest_path`: about twice as close to the optimum out of the box, still seconds at country scale, and its order and marginal costs come with it. `steiner` stays one argument away for very large inputs, and `improve()` brings either within about 1% of the optimum on roads.
+
 ## Known limits and open questions
 
 Differences from osmnx:
@@ -409,6 +509,8 @@ Open questions:
 
 - Whether the disk-backed node index should be the default for every extract size (decision 16).
 - `walk` is the slowest network type at 24 s for Rwanda, most of it in `simplify`. A larger country will take proportionally longer.
+- How far the planner's plans are from the optimum at country scale: HiGHS solved Kigali-size instances exactly, but on Rwanda only the bound measures the gap (decision 24). SCIP-Jack would give exact optima there.
+- On dense random graphs, improved plans were up to 9% above the optimum (decision 22); key-vertex insertion is the next move to add if real data shows such gaps.
 - `SpatialNetwork.concat` keeps one edge per `(u, v, key)`. That is right for networks that share no ways, but OSM networks from overlapping areas should be combined like extracts are, and `concat` does not yet do that for networks from the fetcher.
 
-Deferred from the designs: isochrone polygons, centrality measures, and travel speeds; one entry point that chooses the fetcher or the handler by the size of the area; and dropping Python 3.10, which reached its end of life this month and is a decision for the whole library.
+Deferred from the designs: isochrone polygons, centrality measures, and travel speeds; prize-collecting and capacitated connection plans, separate root networks, and a cost per cable; one entry point that chooses the fetcher or the handler by the size of the area; and dropping Python 3.10, which reached its end of life this month and is a decision for the whole library.

@@ -42,3 +42,37 @@ The ascent follows Wong's rule: every step, the terminal whose region has the fe
 Wong's rule recomputing each region from scratch every step took 41 s for 100 terminals on Rwanda, where few far-apart terminals grow large regions. Regions only grow, since reduced costs only fall, so each terminal keeps its region and entering arcs, and a step checks only those arcs: the same bounds on every B and C instance, in 1.5 s.
 
 A single-commodity flow model of one Kigali instance in scipy's `milp` (HiGHS) did not finish in 600 s: its best plan was 29,413 m against the planner's improved 28,079 m, and its proven lower bound 20,997 m against the first version's dual ascent at 26,092 m.
+
+### Sub-task 6: SteinLib test sets against their proven optima (`steinlib.py B C D E`)
+
+| set | instances | nodes | steiner | + improve | shortest_path | + improve | worst improved | bound below optimum | worst bound | slowest s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B | 18 | 50-100 | 3.44% (5) | 0.60% (14) | 2.57% (4) | 0.41% (14) | 3.94% | 0.05% (17) | 0.82% | 0.0 |
+| C | 20 | 500-500 | 6.23% (1) | 1.87% (7) | 3.32% (4) | 1.85% (6) | 9.09% | 0.42% (13) | 3.12% | 0.4 |
+| D | 20 | 1,000-1,000 | 7.90% (1) | 1.97% (6) | 3.87% (3) | 1.37% (8) | 8.97% | 0.38% (14) | 4.35% | 1.9 |
+| E | 20 | 2,500-2,500 | 9.85% (0) | 2.20% (3) | 4.69% (1) | 1.39% (4) | 8.82% | 0.30% (8) | 2.48% | 17.9 |
+
+Plans: mean percentage above the optimum, and (in brackets) the instances solved optimally. Bound: mean percentage below the optimum, and the instances where it equals it. Slowest: the longest steiner plan, improve, and bound of one instance.
+
+Every optimum in these sets is proven. Instance by instance in `steinlib.md`. The worst improved plan is 9% above its optimum (on C and D), so on these dense random graphs the deferred moves, vertex insertion and elimination, would still help; on Kigali's roads below the improved plans' worst is 0.86%.
+
+### Sub-task 6: exact optima on Kigali (`exact.py 30 60 --seeds 5`)
+
+Kigali's largest component (1,195 nodes), 3 random roots, solved exactly by scipy's `milp` (HiGHS) with the multi-commodity flow model.
+
+| terminals | seed | optimum | HiGHS s | steiner | + improve | shortest_path | + improve | bound below optimum |
+|---|---|---|---|---|---|---|---|---|
+| 30 | 0 | 20,299 m | 5.4 | 7.08% | 0.38% | 5.73% | 0.38% | 0.64% |
+| 30 | 1 | 18,091 m | 23.9 | 3.49% | 0.00% | 0.65% | 0.00% | 0.58% |
+| 30 | 2 | 22,771 m | 71.3 | 8.77% | 0.04% | 5.90% | 0.04% | 1.10% |
+| 30 | 3 | 21,564 m | 9.9 | 3.24% | 0.49% | 1.21% | 0.49% | 0.89% |
+| 30 | 4 | 22,424 m | 3.7 | 3.00% | 0.32% | 0.86% | 0.32% | 0.52% |
+| 60 | 0 | 27,988 m | 13.5 | 3.77% | 0.32% | 0.65% | 0.32% | 0.20% |
+| 60 | 1 | 28,210 m | 21.7 | 5.34% | 0.04% | 1.36% | 0.03% | 0.07% |
+| 60 | 2 | 31,027 m | 11.5 | 4.66% | 0.02% | 2.18% | 0.02% | 0.82% |
+| 60 | 3 | 28,000 m | 110.5 | 4.01% | 0.69% | 1.09% | 0.86% | 0.77% |
+| 60 | 4 | 29,046 m | 87.2 | 4.70% | 0.15% | 1.84% | 0.70% | 0.16% |
+
+Plans: percentage above the optimum. Bound: percentage below it. The instances are also written in SteinLib's STP format to `$GS_BENCH_DIR/stp`, with the virtual root as the last node, for an exact Steiner tree solver such as SCIP-Jack. `exact.py --rwanda 100 1000 10000` writes Rwanda's instances of `bound.py` the same way. The weaker single-commodity flow model of sub-task 5 did not solve one of these in 600 s.
+
+**The default method.** Without `improve()`, `shortest_path` was 0.65 to 5.9% above the optimum on Kigali and `steiner` 3.0 to 8.8%; on SteinLib 2.6 to 4.7% and 3.4 to 9.9% on average. After `improve()`, both end within about 0.1% of each other. `shortest_path` is the default of `plan()` and `connecting_subnetwork()`; on Rwanda it takes 1.1 s for 1,000 terminals and 4.4 s for 10,000, against 0.2 s for `steiner`.

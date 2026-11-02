@@ -4,7 +4,7 @@ This page puts the methods together for two applications, fibre planning and acc
 
 ## Fibre backbone planning
 
-**The question.** Which roads would carry fibre from the existing fibre nodes to the schools, how long would the cable be, and what would it cost?
+**The question.** Which roads would carry fibre from the existing fibre nodes to the schools, how long would the cable be, what would it cost, and in which order should the schools be connected?
 
 **1. Price the network.** The costs per metre from [Editing](editing.md#attributes-and-weights) are applied now, after the points are inserted, so that every split piece and connection gets its own cost:
 
@@ -21,34 +21,71 @@ split          184149.0  2.374447e+06
 connection      29550.0  7.387490e+05
 ```
 
-**2. Compare plans.** Three plans answer slightly different questions. Each school can take its shortest route to the nearest fibre node, or its cheapest route to the cheapest one to reach. Or one tree can join all the schools and fibre nodes, sharing as much cable as possible:
+**2. Compare plans.** Each school can take its own shortest route to the nearest fibre node, or its own cheapest route. Or the schools can share one plan, connecting through each other where that saves cable, made by `ConnectionPlanner` with the fibre nodes as roots, by length or by cost, and improved:
 
 ```python
+from gigaspatial import ConnectionPlanner
+
+by_length = ConnectionPlanner(planned, school_ids, roots=fibre_ids)
+by_cost = ConnectionPlanner(planned, school_ids, roots=fibre_ids, weight="cost")
+shortest = by_length.improve(by_length.plan())
+cheapest = by_cost.improve(by_cost.plan())
 plans = {
-    "shortest routes to the nearest fibre node": planned.connecting_subnetwork(school_ids, roots=fibre_ids, method="nearest_root"),
-    "cheapest routes to a fibre node": planned.connecting_subnetwork(school_ids, roots=fibre_ids, method="nearest_root", weight="cost"),
-    "one tree joining schools and fibre nodes": planned.connecting_subnetwork(school_ids + fibre_ids),
+    "each school's shortest route to the nearest fibre node": by_length.plan("nearest_root").network,
+    "each school's cheapest route to a fibre node": by_cost.plan("nearest_root").network,
+    "one shared plan, shortest": shortest.network,
+    "one shared plan, cheapest": cheapest.network,
 }
 for label, plan in plans.items():
     cost = (plan.edges["rate"] * plan.edges["length"]).sum()
     print(f"{label}: {plan.total_length() / 1000:.1f} km, cost {cost / 1e6:.2f} million")
+by_cost.lower_bound(cheapest)
+print(f"The cheapest shared plan costs at most {cheapest.gap:.1%} more than the best possible one.")
 ```
 
 ```text
-shortest routes to the nearest fibre node: 355.2 km, cost 5.52 million
-cheapest routes to a fibre node: 365.3 km, cost 4.46 million
-one tree joining schools and fibre nodes: 264.6 km, cost 3.92 million
+each school's shortest route to the nearest fibre node: 355.2 km, cost 5.52 million
+each school's cheapest route to a fibre node: 365.3 km, cost 4.46 million
+one shared plan, shortest: 244.1 km, cost 3.64 million
+one shared plan, cheapest: 257.7 km, cost 3.19 million
+The cheapest shared plan costs at most 1.3% more than the best possible one.
 ```
 
 The plan's cost is the rate times the length of each of its edges. The plans are contracted networks, whose edges join many road segments, and a joined edge's rate is the length-weighted mean of its parts, so this total is exact (see [Editing](editing.md#attributes-and-weights)).
 
-The cheapest routes avoid main roads where a residential street does the job, at some extra length. The tree is much shorter than either, because schools share cable instead of each running its own to a fibre node; whether that is acceptable depends on how much a failure of one shared segment would matter.
+Sharing cuts the length by almost a third (244 against 355 km), and the cost by more than a quarter (3.19 against 4.46 million for each school's own cheapest route), because schools near each other share one trench instead of each running its own to a fibre node. Pricing by cost avoids main roads where a residential street does the job, at some extra length. Whether a shared plan is acceptable depends on how much a failure of one shared segment would matter. Joining the schools and the fibre nodes in one tree, without roots, would also be shorter than separate routes, but it pays to connect fibre nodes that the backbone already connects.
 
-![The cheapest plan: each school's route to a fibre node, coloured by the cost per metre](../../assets/spatial-network/fibre-plan.png)
+![The cheapest shared plan, coloured by the cost per metre](../../assets/spatial-network/fibre-plan.png)
 
-[Open the interactive version of this map](../../assets/spatial-network/fibre-plan.html){target="_blank"} to check which roads each route takes.
+[Open the interactive version of this map](../../assets/spatial-network/fibre-plan.html){target="_blank"} to check which roads the plan takes.
 
-**3. Last-mile distances.** The road distance from each school to its nearest fibre node decides which schools are worth connecting first. Weighting by students turns it into a statement about pupils:
+**3. A phased rollout.** A plan by `shortest_path`, the default, connects the schools one at a time, cheapest connection first, to everything connected so far. Each school's `order` and `marginal_cost` turn the plan into phases:
+
+```python
+rollout = by_cost.plan()
+phases = rollout.terminals.dropna(subset=["order"]).sort_values("order")
+phases["students"] = planned.nodes.loc[phases.index, "students"].to_numpy()
+phases["phase"] = pd.qcut(phases["order"].astype(int), 4, labels=["first", "second", "third", "fourth"])
+summary = phases.groupby("phase", observed=True).agg(
+    schools=("order", "size"), students=("students", "sum"), cost=("marginal_cost", "sum")
+)
+summary["cost per pupil"] = summary["cost"] / summary["students"]
+summary["cost"] = summary["cost"] / 1e6
+print(summary.round(2))
+```
+
+```text
+        schools  students  cost  cost per pupil
+phase                                          
+first        50   34373.0  0.62           18.14
+second       49   34771.0  0.63           18.08
+third        49   28388.0  0.81           28.47
+fourth       49   30391.0  1.18           38.87
+```
+
+The first phases reach the schools nearest the fibre and those that connect through them, at about 18 per pupil; the last reaches the remote schools, at about 39. A school's marginal cost depends on what was connected before it: it is what this order adds, not what the school would cost alone.
+
+**4. Last-mile distances.** The road distance from each school to its nearest fibre node decides which schools are worth connecting first. Weighting by students turns it into a statement about pupils:
 
 ```python
 last_mile = planned.nearest_by_network(school_ids, fibre_ids)
@@ -66,7 +103,7 @@ under 2 km       10    7001.0
 over 10 km       30   17938.0
 ```
 
-**What to check before trusting a plan.** Schools that were skipped because they lie far from any road (see [Inserting points](inserting-points.md#the-options)) are missing from every plan. Roads missing from OpenStreetMap make routes longer than they are; `connect_components` and a look at the schools with the longest detours find most of them. And a plan along roads assumes the cable follows roads, which is the usual case but not the only one.
+**What to check before trusting a plan.** Schools that were skipped because they lie far from any road (see [Inserting points](inserting-points.md#the-options)) are missing from every plan, and schools with `status` `unreachable` are in no part of the network with fibre; `bridge_cost=` lets the plan cross such gaps by straight-line links. Roads missing from OpenStreetMap make routes longer than they are; `connect_components` and a look at the schools with the longest detours find most of them. A plan's `gap` says how far above the best possible plan it can be at most. And a plan along roads assumes the cable follows roads, which is the usual case but not the only one.
 
 ## Accessibility
 
