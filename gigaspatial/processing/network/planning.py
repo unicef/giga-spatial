@@ -61,6 +61,10 @@ class ConnectionPlan:
         metadata: The method, the weight, ``bridge_cost``, the numbers of
             terminals and roots, terminals by status, bridges offered and used,
             and the seconds each step took.
+        bound: A lower bound on the cost of any plan connecting the same
+            terminals, set by :meth:`ConnectionPlanner.lower_bound`.
+        gap: ``cost / bound - 1``: the plan costs at most ``1 + gap`` times
+            the optimum.
     """
 
     network: "SpatialNetwork"
@@ -68,11 +72,14 @@ class ConnectionPlan:
     terminals: pd.DataFrame
     cost: float
     metadata: Dict[str, Any] = field(default_factory=dict)
+    bound: Optional[float] = None
+    gap: Optional[float] = None
 
     def __repr__(self) -> str:
         reached = int(self.terminals["status"].isin(["connected", "root"]).sum())
+        gap = "" if self.gap is None else f", gap={self.gap:.1%}"
         return (
-            f"ConnectionPlan(method={self.metadata.get('method')!r}, cost={self.cost:,.1f}, "
+            f"ConnectionPlan(method={self.metadata.get('method')!r}, cost={self.cost:,.1f}{gap}, "
             f"terminals={reached:,} of {len(self.terminals):,} connected, edges={len(self.edges):,})"
         )
 
@@ -276,6 +283,50 @@ class ConnectionPlanner:
         improved = self._assemble(method, a, b, planned, None, {"improve": time.perf_counter() - started})
         improved.metadata["improved"] = {"cost_before": before, "moves": moves, "pass_seconds": passes}
         return improved
+
+    def lower_bound(self, plan: Optional[ConnectionPlan] = None, time_limit: Optional[float] = 60.0) -> float:
+        """A lower bound on the cost of any plan connecting the reachable terminals, by Wong's dual ascent.
+
+        The network becomes directed, with both directions of every edge,
+        rooted at the virtual root, or without roots at the first terminal
+        that can be connected. Each terminal's region is the set of nodes
+        that reach it along arcs of reduced cost 0. Repeatedly, the terminal
+        whose region has the fewest entering arcs raises the bound by their
+        smallest reduced cost and lowers theirs by as much, until every
+        region holds the root. The sum of the raises is a lower bound on the
+        optimum. Unreachable terminals are left out.
+
+        A bound reached when ``time_limit`` stops the ascent is still valid,
+        only looser. A complete bound is kept, so later calls return it at once.
+
+        Args:
+            plan: A plan of this planner, whose ``bound`` and ``gap`` are set.
+            time_limit: Seconds to stop after. No limit when ``None``.
+
+        Returns:
+            The bound, in the units of the weight.
+        """
+        cached = self.__dict__.get("_bound")
+        if cached is None or not cached["complete"]:
+            started = time.perf_counter()
+            deadline = np.inf if time_limit is None else started + float(time_limit)
+            terminal = np.unique(self._terminal)
+            planned = self._planned_in_given_order(terminal[self._reachable(terminal)])
+            graph = self._graph
+            if len(self._root):
+                graph, root, targets = _with_virtual_root(graph, self._root), self._graph.n, planned
+            elif len(planned):
+                root, targets = int(planned[0]), planned[1:]
+            else:
+                root, targets = None, planned[:0]
+            value, complete = _dual_ascent(graph, root, targets, deadline) if root is not None else (0.0, True)
+            cached = {"bound": value, "complete": complete, "seconds": time.perf_counter() - started}
+            self.__dict__["_bound"] = cached
+        if plan is not None:
+            plan.bound = cached["bound"]
+            plan.gap = plan.cost / cached["bound"] - 1 if cached["bound"] > 0 else (0.0 if plan.cost == 0 else np.inf)
+            plan.metadata["bound"] = dict(cached)
+        return cached["bound"]
 
     def _assemble(
         self,
@@ -532,6 +583,88 @@ def _with_bridges(graph: Graph, bridges: _Bridges, bridge_cost: Optional[float],
     order = np.argsort(keys, kind="stable")
     matrix = csr_matrix((w[order], (a[order], b[order])), shape=(n, n))
     return Graph(matrix, keys[order], rows[order], w[order], n)
+
+
+# ----- lower bound
+
+
+def _dual_ascent(graph: Graph, root: int, terminals: np.ndarray, deadline: float) -> Tuple[float, bool]:
+    """Wong's dual ascent; the bound, and whether every terminal reached the root before the deadline.
+
+    Each terminal has a region, the nodes that reach it along arcs of reduced
+    cost 0, and the arcs entering it. A step takes the active terminal whose
+    region has the fewest entering arcs, raises the bound by their smallest
+    reduced cost, and lowers all of theirs by as much. Terminals whose region
+    holds the root are done.
+
+    Reduced costs only fall, so a region only grows: each terminal keeps its
+    region and entering arcs between steps, and a step only checks the
+    entering arcs for any that reached 0 and grows the region from their
+    tails. Terminals wait in a heap keyed by the size of their cut when last
+    seen; a terminal whose cut has grown past the next one goes back.
+    """
+    n = graph.n
+    indptr, indices = graph.matrix.indptr.tolist(), graph.matrix.indices.tolist()
+    a, b = graph.entry_keys // n, graph.entry_keys % n
+    reverse = np.searchsorted(graph.entry_keys, b * n + a).tolist()
+    cost = graph.entry_weights.tolist()
+    region: Dict[int, set] = {}
+    entering: Dict[int, list] = {}
+    heap = [(0, int(t)) for t in terminals]
+    heapq.heapify(heap)
+    bound = 0.0
+
+    def grow(members: set, frontier: list, found: list) -> bool:
+        rooted = False
+        while frontier:
+            x = frontier.pop()
+            if x == root:
+                rooted = True
+            for e in range(indptr[x], indptr[x + 1]):
+                y = indices[e]
+                if y in members:
+                    continue
+                arc = reverse[e]
+                if cost[arc] <= 0.0:
+                    members.add(y)
+                    frontier.append(y)
+                else:
+                    found.append((arc, y))
+        return rooted
+
+    while heap:
+        if time.perf_counter() >= deadline:
+            return bound, False
+        _, terminal = heapq.heappop(heap)
+        found: list = []
+        if terminal not in region:
+            members = region[terminal] = {terminal}
+            rooted = grow(members, [terminal], found)
+        else:
+            members, frontier = region[terminal], []
+            for arc, y in entering[terminal]:
+                if y in members:
+                    continue
+                if cost[arc] <= 0.0:
+                    members.add(y)
+                    frontier.append(y)
+                else:
+                    found.append((arc, y))
+            rooted = grow(members, frontier, found)
+        if rooted or root in members:
+            del region[terminal]
+            entering.pop(terminal, None)
+            continue
+        cut = entering[terminal] = [(arc, y) for arc, y in found if y not in members]
+        if heap and len(cut) > heap[0][0]:
+            heapq.heappush(heap, (len(cut), terminal))
+            continue
+        delta = min(cost[arc] for arc, _ in cut)
+        for arc, _ in cut:
+            cost[arc] -= delta
+        bound += delta
+        heapq.heappush(heap, (len(cut), terminal))
+    return bound, True
 
 
 # ----- local search

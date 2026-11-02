@@ -139,6 +139,8 @@ print(plan.cost, plan.terminals["status"].value_counts())
 
 `planner.improve(plan)` shortens any plan by local search, and never makes it worse; `time_limit=` stops it after that many seconds. On Rwanda's roads it shortens the Steiner tree for 1,000 schools by about 5%.
 
+`planner.lower_bound(plan)` computes a cost no plan can go below, and sets `plan.bound` and `plan.gap`: the plan costs at most `1 + gap` times the best possible one.
+
 Schools on roads that do not join the rest, such as an island or a clipped corner, are unreachable. `bridge_cost` lets the plan use straight-line links between such parts, such as microwave links, at a weight per metre and up to `bridge_max_distance` metres (5,000 by default). A link is used only where it is cheaper than the roads:
 
 ```python
