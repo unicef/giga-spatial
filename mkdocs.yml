@@ -68,11 +68,22 @@ nav:
       - user-guide/index.md
       - Points and nearest buildings: user-guide/points-and-buildings.md
       - Population around points: user-guide/population-accessibility.md
-      - OSM places: user-guide/osm-places.md
+      - OSM points of interest: user-guide/osm-places.md
       - Road networks: user-guide/road-networks.md
       - Processing: user-guide/processing.md
       - Settlement: user-guide/settlement-characterization.md
       - Infrastructure files: user-guide/infrastructure-normalization.md
+  - Concepts:
+      - "Spatial networks": concepts/spatial-networks/index.md
+      - Getting a network: concepts/spatial-networks/getting-a-network.md
+      - The data model: concepts/spatial-networks/data-model.md
+      - Editing: concepts/spatial-networks/editing.md
+      - Inserting points: concepts/spatial-networks/inserting-points.md
+      - Reduction: concepts/spatial-networks/reduction.md
+      - Algorithms: concepts/spatial-networks/algorithms.md
+      - Storage and interoperability: concepts/spatial-networks/storage.md
+      - Worked use cases: concepts/spatial-networks/use-cases.md
+      - Performance and pitfalls: concepts/spatial-networks/performance.md
   - API Reference:
       - api/index.md
       - Handlers: api/handlers.md
@@ -97,11 +108,15 @@ nav:
       - Changelog: changelog.md
       - Design decisions:
           - adr/index.md
+          - "Spatial networks and OSM roads: design and algorithms": design/spatial-networks-decisions.md
           - Search key and search geometry: adr/0001-search-key-and-search-geometry.md
           - Handler base in the API reference: adr/0002-handler-base-in-the-api-reference.md
           - Public import paths: adr/0003-public-import-paths.md
           - Columnar spatial network: adr/0004-columnar-spatial-network.md
           - Spatial network storage: adr/0005-spatial-network-storage.md
+          - OSM extract storage: adr/0006-osm-extract-storage.md
+          - OSM extract choice: adr/0007-osm-extract-choice.md
+          - Connection planning: adr/0008-connection-planning.md
       - License: license.md
 
 markdown_extensions:
@@ -188,5 +203,9 @@ extra:
 
 extra_css:
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 copyright: '&copy; Copyright 2025 - , UNICEF Digital Inclusion and Giga, Applied Science Devs'

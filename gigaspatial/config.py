@@ -157,6 +157,7 @@ class Config(BaseSettings):
             "cell": "cell",  # deprecated
             "mobile_coverage": "mobile_coverage",
             "wri": "wri",
+            "osm": "osm",
         },
         description="Mapping of data types to directory names",
     )

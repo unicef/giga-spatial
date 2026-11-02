@@ -60,3 +60,23 @@ The methods below are in this order: building, saving, and converting; reading t
         - minimum_spanning_tree
         - simplify
         - connecting_subnetwork
+
+## Connection planning
+
+`ConnectionPlanner` plans how to connect terminals, such as schools, to roots, such as fibre nodes, along a network at the smallest shared cost, and returns a `ConnectionPlan`. Why it is a rooted Steiner tree and a separate object is in [ADR 0008](../adr/0008-connection-planning.md).
+
+```python
+from gigaspatial import ConnectionPlanner
+
+plan = ConnectionPlanner(network, school_ids, roots=fibre_ids, weight="cost").plan()
+```
+
+::: gigaspatial.processing.network.planning.ConnectionPlanner
+    options:
+      show_source: false
+      members:
+        - plan
+
+::: gigaspatial.processing.network.planning.ConnectionPlan
+    options:
+      show_source: false

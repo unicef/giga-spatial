@@ -35,9 +35,10 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.rwi": ["RWIHandler"],
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
+        "gigaspatial.handlers.osm.roads": ["OSMRoadsHandler"],
         # fetchers
-        "gigaspatial.fetchers.osm": ["OSMLocationFetcher"],
-        "gigaspatial.fetchers.osm_roads": ["OSMRoadsFetcher"],
+        "gigaspatial.fetchers.osm.pois": ["OSMLocationFetcher"],
+        "gigaspatial.fetchers.osm.roads": ["OSMRoadsFetcher"],
         "gigaspatial.fetchers.overture": ["OvertureAmenityFetcher"],
         "gigaspatial.fetchers.healthsites": ["HealthSitesFetcher"],
         "gigaspatial.fetchers.giga.school_locations": ["GigaSchoolLocationFetcher"],
@@ -65,7 +66,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.grid.s2": ["S2Cells"],
         # processing
         "gigaspatial.processing.tif_processor": ["TifProcessor"],
-        "gigaspatial.processing.network": ["SpatialNetwork"],
+        "gigaspatial.processing.network": ["SpatialNetwork", "ConnectionPlanner"],
         "gigaspatial.processing.geo": [
             "convert_to_geodataframe",
             "buffer_geodataframe",
@@ -112,8 +113,9 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.rwi import RWIHandler
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
-    from gigaspatial.fetchers.osm import OSMLocationFetcher
-    from gigaspatial.fetchers.osm_roads import OSMRoadsFetcher
+    from gigaspatial.handlers.osm.roads import OSMRoadsHandler
+    from gigaspatial.fetchers.osm.pois import OSMLocationFetcher
+    from gigaspatial.fetchers.osm.roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
     from gigaspatial.fetchers.healthsites import HealthSitesFetcher
     from gigaspatial.fetchers.giga.school_locations import GigaSchoolLocationFetcher
@@ -137,7 +139,7 @@ if TYPE_CHECKING:
     from gigaspatial.grid.h3 import H3Hexagons
     from gigaspatial.grid.s2 import S2Cells
     from gigaspatial.processing.tif_processor import TifProcessor
-    from gigaspatial.processing.network import SpatialNetwork
+    from gigaspatial.processing.network import SpatialNetwork, ConnectionPlanner
     from gigaspatial.processing.geo import (
         convert_to_geodataframe,
         buffer_geodataframe,

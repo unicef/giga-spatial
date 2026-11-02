@@ -9,7 +9,7 @@ Read first:
 - [ADR 0004](../adr/0004-columnar-spatial-network.md): a spatial network is held as tables; networkx and pandana are exports; edits return a new network.
 - [ADR 0005](../adr/0005-spatial-network-storage.md): a saved network is a folder of Parquet files.
 
-This page is not in the docs site navigation. The user-facing description is the [road networks guide](../user-guide/road-networks.md) and the [spatial networks API page](../api/network.md).
+This page is not in the docs site navigation. The user-facing description is the [road networks guide](../user-guide/road-networks.md) and the [spatial networks API page](../api/network.md). Why each part was built the way it was, with the benchmarks behind it, is in [design and algorithm decisions](spatial-networks-decisions.md).
 
 ## 1. Responsibilities
 
@@ -23,7 +23,7 @@ This page is not in the docs site navigation. The user-facing description is the
 | Item | Location |
 |---|---|
 | `SpatialNetwork` | `gigaspatial/processing/network.py`, possibly split into a `gigaspatial/processing/network/` package if it grows past one module |
-| `OSMRoadsFetcher` | `gigaspatial/fetchers/osm_roads.py` |
+| `OSMRoadsFetcher` | `gigaspatial/fetchers/osm/roads.py` |
 | Public names | `from gigaspatial import SpatialNetwork, OSMRoadsFetcher`; `gigaspatial.processing.SpatialNetwork`; `gigaspatial.fetchers.OSMRoadsFetcher` |
 | Lazy registration | Add both to the `attach` dictionaries and the `TYPE_CHECKING` blocks, per ADR 0003. `tests/test_public_api.py` checks the two lists match and that every exported name resolves. `SpatialNetwork` is registered in sub-task 1; `OSMRoadsFetcher` is registered in sub-task 8, when it exists. |
 
@@ -58,7 +58,7 @@ The edges table is a pandas DataFrame with a default RangeIndex. An edge is iden
 | `u`, `v` | node ID type | endpoints, which must exist in the nodes table |
 | `key` | int16 | distinguishes parallel edges, as in osmnx |
 | `length` | float64 | meters (see section 4) |
-| `kind` | categorical | `road`, `split`, `connection`, `point_link`, `component_link`, or `added` |
+| `kind` | categorical | `road`, `split`, `connection`, `point_link`, `component_link`, `added`, or `bridge` (from a connection plan) |
 | `geometry` | shapely LineString or missing | optional; missing means a straight line between the endpoints |
 | other | any | OSM attributes after normalisation (section 8), or user attributes |
 
@@ -201,6 +201,8 @@ Problems in the old `merge_points_to_graph` that must not come back:
 
 ### `connecting_subnetwork(terminals, sources=None, method="steiner", weight=None)`
 
+Superseded by the [connection planning design](connection-planning.md): `sources=` is now `roots=`, and with roots the default is the rooted Steiner tree. The record below is the design as first built.
+
 This works on the undirected form of the network. The result is contracted to the terminals, the sources, and the branching nodes (degree 3 or more), with lengths added up and geometries joined.
 
 - `method="steiner"` (the default) uses Mehlhorn's 2-approximation of the Steiner tree. One multi-source Dijkstra run from the terminals (scipy `dijkstra(min_only=True, return_predecessors=True)`) finds each node's nearest terminal. Edges between different terminals' regions give candidate links. Then come an MST over the terminals, expansion of the links into paths, a second MST, and removal of leaves that are not terminals.
@@ -215,7 +217,7 @@ Every algorithm uses scipy by default. `backend="pandana"` is available where no
 - The adjacency matrix is cached per weight and direction, together with the edge row behind each entry, so routes can be drawn along edge geometries. Its transpose (for searches towards targets) and pandana networks are cached the same way.
 - Dijkstra runs in blocks of sources of at most `CHUNK_BYTES` (256 MiB) of distances, and `shortest_path_lengths` refuses result matrices over `MAX_MATRIX_BYTES` (1 GiB). Both are module constants.
 - Weights must be present and non-negative on every edge; zero weights are allowed. scipy's minimum spanning tree drops zero-weight entries, so they are replaced by the smallest positive float for that call only.
-- pandana reports unreachable pairs as 4294967.295; the library returns `inf`. pandana stores weights with limited precision (differences of about 0.02 m on the Kigali fixture). `to_pandana` refuses node IDs that mix integers and text.
+- pandana reports unreachable pairs as 4294967.295; the library returns `inf`. pandana stores weights with limited precision (differences of about 0.02 m on the Kigali fixture). `to_pandana` refuses node IDs that mix integers and text; `backend="pandana"` indexes pandana's network by node position instead, so it works on any network.
 - `connect_components` uses Borůvka's method: each round, every component finds its nearest node outside it (a KD-tree on all nodes with a growing k for small components, a KD-tree on the component's own nodes for large ones). When the network's weight is not `length`, the links get that weight equal to their length.
 
 | Method | Result |
@@ -329,7 +331,7 @@ Each sub-task is its own chat and pull request, with tests, in this order. The f
 
 ## 12. Deferred
 
-- A Geofabrik handler for country-scale road networks from `.osm.pbf` extracts, returning the same `SpatialNetwork`. This comes next, decided on 28 October 2026:
+- A Geofabrik handler for country-scale road networks from `.osm.pbf` extracts, returning the same `SpatialNetwork`. Its design is now in [`osm-roads-handler.md`](osm-roads-handler.md), with ADRs 0006 and 0007; the notes below are the starting point it was designed from. This comes next, decided on 28 October 2026:
   - Users need both small areas and whole countries or provinces. Overpass suits the small ones; a country-scale Overpass fetch can take hours, exceed fair-use limits, and needs osmnx's networkx graph in memory (about 2.3 GB for unsimplified Rwanda).
   - It is a separate handler, not an option on `OSMRoadsFetcher`: an extract is a file kept in a data store and reused, which the glossary calls a handler.
   - It reads extracts with pyosmium (`osmium`), added to `giga-spatial[roads]`; pyosmium has wheels for Python 3.10 to 3.14 on macOS, Linux, and Windows (pyrosm needs 3.11 or newer). It builds the node and edge tables directly, without osmnx or networkx, and uses `simplify`. The benchmark's route through OSM XML and osmnx took 300 s for Rwanda, most of it in osmnx; pyosmium filtered the extract in 22.5 s, and `simplify` takes 9 s.

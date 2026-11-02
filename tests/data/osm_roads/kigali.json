@@ -1,0 +1,11 @@
+{
+  "source": "rwanda.osm.pbf",
+  "replication_timestamp": "2026-10-26T21:24:46Z",
+  "bbox": [
+    30.045,
+    -1.965,
+    30.085,
+    -1.935
+  ],
+  "highway_ways": 1557
+}

@@ -24,6 +24,7 @@ LAZY_PACKAGES = [
     "gigaspatial",
     "gigaspatial.handlers",
     "gigaspatial.fetchers",
+    "gigaspatial.fetchers.osm",
     "gigaspatial.processing.elevation",
 ]
 
@@ -60,6 +61,17 @@ def test_removed_aliases_are_gone(alias):
         importlib.import_module(alias)
 
 
+def test_the_old_osm_fetcher_path_still_works_without_loading_roads():
+    code = (
+        "import sys; from gigaspatial.fetchers.osm import OSMLocationFetcher; "
+        "import gigaspatial.fetchers.osm.pois as pois; "
+        "assert OSMLocationFetcher is pois.OSMLocationFetcher; "
+        "print('gigaspatial.fetchers.osm.roads' in sys.modules)"
+    )
+    result = subprocess.run([sys.executable, "-W", "ignore", "-c", code], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "False"
+
+
 def test_bare_import_does_not_load_optional_or_heavy_dependencies():
     # Snapshot sys.modules first. snowflake-connector-python ships a .pth that
     # imports the snowflake namespace at interpreter startup, before any user
@@ -69,7 +81,7 @@ def test_bare_import_does_not_load_optional_or_heavy_dependencies():
         "import sys; before = set(sys.modules); import gigaspatial; "
         "heavy = ['ee', 'geemap', 'snowflake', 'snowflake.connector', "
         "'google.cloud.bigquery', 'azure.storage.blob', 'duckdb', "
-        "'geopandas', 'rasterio', 'osmnx', 'pandana']; "
+        "'geopandas', 'rasterio', 'osmnx', 'osmium', 'pandana']; "
         "print(','.join(m for m in heavy if m in sys.modules and m not in before))"
     )
     result = subprocess.run(

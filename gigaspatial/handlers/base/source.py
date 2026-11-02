@@ -34,6 +34,7 @@ DATA_FILE_SUFFIXES = frozenset(
         ".kml",
         ".nc",
         ".parquet",
+        ".pbf",
         ".pmtiles",
         ".shp",
         ".tif",

@@ -16,7 +16,7 @@ from gigaspatial.processing.geo import (
     calculate_bbox_pixel_size,
 )
 from gigaspatial.processing.tif_processor import TifProcessor
-from gigaspatial.processing.network import SpatialNetwork
+from gigaspatial.processing.network import SpatialNetwork, ConnectionPlanner, ConnectionPlan
 
 __all__ = [
     "estimate_utm_crs_with_fallback",
@@ -36,4 +36,6 @@ __all__ = [
     "calculate_bbox_pixel_size",
     "TifProcessor",
     "SpatialNetwork",
+    "ConnectionPlanner",
+    "ConnectionPlan",
 ]
