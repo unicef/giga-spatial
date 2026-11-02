@@ -64,7 +64,7 @@ def test_bare_import_does_not_load_optional_or_heavy_dependencies():
     code = (
         "import sys, gigaspatial; "
         "heavy = ['ee', 'geemap', 'snowflake', 'google.cloud.bigquery', "
-        "'azure.storage.blob', 'duckdb', 'geopandas', 'rasterio']; "
+        "'azure.storage.blob', 'duckdb', 'geopandas', 'rasterio', 'osmnx', 'pandana']; "
         "print(','.join(m for m in heavy if m in sys.modules))"
     )
     result = subprocess.run(
