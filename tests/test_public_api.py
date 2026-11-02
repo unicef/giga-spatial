@@ -69,7 +69,7 @@ def test_bare_import_does_not_load_optional_or_heavy_dependencies():
         "import sys; before = set(sys.modules); import gigaspatial; "
         "heavy = ['ee', 'geemap', 'snowflake', 'snowflake.connector', "
         "'google.cloud.bigquery', 'azure.storage.blob', 'duckdb', "
-        "'geopandas', 'rasterio']; "
+        "'geopandas', 'rasterio', 'osmnx', 'pandana']; "
         "print(','.join(m for m in heavy if m in sys.modules and m not in before))"
     )
     result = subprocess.run(

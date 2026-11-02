@@ -32,6 +32,12 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, and Ookl
 | `GOOGLE_CLOUD_PROJECT`, `GOOGLE_SERVICE_ACCOUNT`, `GOOGLE_SERVICE_ACCOUNT_KEY_PATH` | Google Earth Engine |
 | `ADLS_CONNECTION_STRING`, `ADLS_CONTAINER_NAME` | Azure Data Lake |
 
+## Services
+
+| Variable | Default | Used by |
+| --- | --- | --- |
+| `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | OpenStreetMap road networks. Set a mirror when the main server is down. |
+
 ## Data stores
 
 `LocalDataStore` is the default. `ADLSDataStore`, `SnowflakeDataStore`, and `DeltaSharingDataStore` are the remote stores. Pass one as `data_store=` to a handler or a generator. They are documented in the [API reference](../api/data-stores.md).

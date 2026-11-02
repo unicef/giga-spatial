@@ -16,6 +16,7 @@ The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a
 - [Points and nearest buildings](https://unicef.github.io/giga-spatial/latest/user-guide/points-and-buildings/)
 - [Population around points](https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/)
 - [OSM places](https://unicef.github.io/giga-spatial/latest/user-guide/osm-places/)
+- [Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/): OSM roads, inserting schools, shortest paths, connecting subnetworks
 - [Processing a raster or a table](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)
 - [Settlement](https://unicef.github.io/giga-spatial/latest/user-guide/settlement-characterization/)
 - [Infrastructure files](https://unicef.github.io/giga-spatial/latest/user-guide/infrastructure-normalization/)

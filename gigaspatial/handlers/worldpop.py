@@ -18,6 +18,7 @@ from pydantic import (
 )
 from pathlib import Path
 import os
+import time
 from typing import Optional, Union, Literal, List, Dict, Any, Tuple
 import pandas as pd
 import geopandas as gpd
@@ -41,12 +42,19 @@ from gigaspatial.handlers.base.options import split_kwargs
 from gigaspatial.config import config as global_config
 
 
+_TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
 class WorldPopRestClient:
     """
     REST API client for WorldPop data access.
 
     This class provides direct access to the WorldPop REST API without any
     configuration dependencies, allowing flexible integration patterns.
+
+    Dataset lookups retry connection failures, timeouts, truncated responses,
+    responses that are not JSON, and HTTP 429, 500, 502, 503, and 504. If the
+    request still fails, the request error is raised.
     """
 
     def __init__(
@@ -56,6 +64,8 @@ class WorldPopRestClient:
         api_key: Optional[str] = None,
         timeout: int = 600,
         logger: Optional[logging.Logger] = None,
+        max_attempts: int = 3,
+        retry_backoff: float = 1.0,
     ):
         """
         Initialize the WorldPop REST API client.
@@ -66,12 +76,25 @@ class WorldPopRestClient:
             api_key: Optional API key for authentication and higher rate limits.
             timeout: Request timeout duration in seconds.
             logger: Component logger instance.
+            max_attempts: Total attempts for a dataset lookup, including the
+                first. Transient failures are retried until this many attempts
+                have been made.
+            retry_backoff: Seconds to wait after the first transient failure.
+                Each later wait doubles it. An HTTP 429 with ``Retry-After``
+                waits that long instead.
+
+        Raises:
+            ValueError: If ``max_attempts`` is less than 1.
         """
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
         self.base_url = base_url.rstrip("/")
         self.stats_url = stats_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.logger = logger or logging.getLogger(self.__class__.__name__)
+        self.max_attempts = max_attempts
+        self.retry_backoff = retry_backoff
 
         # Setup session with default headers
         self.session = requests.Session()
@@ -145,9 +168,17 @@ class WorldPopRestClient:
             )
             return []
 
-    def get_datasets(self, dataset_type: str, category: str, params: dict):
+    def get_datasets(
+        self, dataset_type: str, category: str, params: dict
+    ) -> List[Dict[str, Any]]:
         """
         Retrieve datasets matching specific query parameters.
+
+        Connection errors, timeouts, truncated responses, responses that are
+        not JSON, and HTTP 429, 500, 502, 503, and 504 are retried. Any other
+        HTTP error is raised on the first attempt. A successful response with
+        no ``data`` entries returns an empty list; that is the only empty
+        result, and it means the catalog has no matching dataset.
 
         Args:
             dataset_type: Dataset type alias.
@@ -156,16 +187,81 @@ class WorldPopRestClient:
 
         Returns:
             A list of dataset metadata dictionaries.
+
+        Raises:
+            requests.RequestException: If the catalog request fails, including
+                after the retries of a transient failure are exhausted.
+            ValueError: If the response JSON is not an object.
         """
-        try:
-            url = f"{self.base_url}/{dataset_type}/{category}"
-            response = self.session.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("data", [])
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to fetch datasets for {params}: {e}")
-            return []
+        url = f"{self.base_url}/{dataset_type}/{category}"
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                response = self.session.get(
+                    url, params=params, timeout=self.timeout
+                )
+                response.raise_for_status()
+                data = response.json()
+            except requests.HTTPError as error:
+                if (
+                    not self._is_transient_http_error(error)
+                    or attempt == self.max_attempts
+                ):
+                    self._log_dataset_failure(params, error)
+                    raise
+                self._wait_before_retry(error.response, attempt, error)
+            except (
+                requests.ConnectionError,
+                requests.Timeout,
+                requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.JSONDecodeError,
+            ) as error:
+                if attempt == self.max_attempts:
+                    self._log_dataset_failure(params, error)
+                    raise
+                self._wait_before_retry(None, attempt, error)
+            except requests.RequestException as error:
+                self._log_dataset_failure(params, error)
+                raise
+            else:
+                if not isinstance(data, dict):
+                    raise ValueError(
+                        "WorldPop dataset response was not a JSON object "
+                        f"for {params}."
+                    )
+                return data.get("data", [])
+
+    def _is_transient_http_error(self, error: requests.HTTPError) -> bool:
+        """A status WorldPop uses for a blip, not a rejected query."""
+        response = error.response
+        return (
+            response is not None
+            and response.status_code in _TRANSIENT_STATUS_CODES
+        )
+
+    def _retry_delay(self, response, attempt: int) -> float:
+        """Seconds to wait before the next dataset attempt."""
+        if response is not None and response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after is not None:
+                try:
+                    return max(0.0, float(retry_after))
+                except (TypeError, ValueError):
+                    pass
+        return self.retry_backoff * (2 ** (attempt - 1))
+
+    def _wait_before_retry(self, response, attempt: int, error: Exception) -> None:
+        """Log a transient dataset failure and pause before the next attempt."""
+        delay = self._retry_delay(response, attempt)
+        self.logger.warning(
+            f"WorldPop dataset request failed ({error}); "
+            f"retrying in {delay:.1f}s (attempt {attempt}/{self.max_attempts})"
+        )
+        if delay > 0:
+            time.sleep(delay)
+
+    def _log_dataset_failure(self, params: dict, error: Exception) -> None:
+        """Record a dataset request that will not be retried."""
+        self.logger.error(f"Failed to fetch datasets for {params}: {error}")
 
     def get_datasets_by_country(
         self, dataset_type: str, category: str, iso3: str

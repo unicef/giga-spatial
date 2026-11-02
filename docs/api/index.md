@@ -17,6 +17,7 @@ The [handler base](handler-base.md) is last. It is for adding a dataset to this 
 - [Boundaries](boundaries.md)
 - [Earth Engine](earth-engine.md)
 - [Processing](processing.md)
+- [Spatial networks](network.md)
 - [Image downloaders](image-downloaders.md)
 
 ## Adding a dataset
