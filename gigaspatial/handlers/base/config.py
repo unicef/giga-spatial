@@ -19,6 +19,69 @@ from gigaspatial.handlers.base.resolution import UnitCache, UnitResolution
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 
+def source_geometry(source, crs: Any = "EPSG:4326", options: Optional[ResolveOptions] = None) -> BaseGeometry:
+    """
+    Build the geometry of a source, in ``crs``.
+
+    The input coordinates are read in the GeoDataFrame's own CRS, else in the
+    ``crs`` option, else in EPSG:4326. Country sources use the country's admin
+    boundary. Handlers call this through ``extract_search_geometry``; fetchers
+    that take the same sources call it directly.
+
+    Args:
+        source: Country code or name, GeoDataFrame, shapely geometry,
+            DataFrame with coordinate columns, or iterable of ``(lat, lon)``
+            pairs or ``Point`` objects.
+        crs: CRS of the returned geometry.
+        options: ``crs`` is the CRS of a source that carries none, and country
+            sources read their boundary from ``country_geom_path`` /
+            ``country_data_store`` when given.
+
+    Raises:
+        ValueError: If the source has no geometry (e.g. a path or a filter
+            dict).
+    """
+    options = options or ResolveOptions()
+    boundary_kwargs = {
+        key: value
+        for key, value in (
+            ("path", options.country_geom_path),
+            ("data_store", options.country_data_store),
+        )
+        if value is not None
+    }
+    source_crs = options.crs or "EPSG:4326"
+    kind = classify_source(source)
+
+    if kind is SourceKind.COUNTRY:
+        from gigaspatial.handlers.boundaries import AdminBoundaries
+
+        geometry = AdminBoundaries.create(
+            country_code=source, **boundary_kwargs
+        ).to_geoms()[0]
+        source_crs = "EPSG:4326"
+    elif kind is SourceKind.GEODATAFRAME:
+        if source.crs is not None:
+            source_crs = source.crs
+        geometry = source.geometry.union_all()
+    elif kind is SourceKind.GEOMETRY:
+        geometry = source
+    elif kind is SourceKind.DATAFRAME:
+        from gigaspatial.processing.geo import convert_to_geodataframe
+
+        geometry = convert_to_geodataframe(source, crs=source_crs).geometry.union_all()
+    elif kind is SourceKind.POINTS:
+        geometry = MultiPoint(
+            [p if isinstance(p, Point) else Point(p[1], p[0]) for p in source]
+        )
+    else:
+        raise ValueError(f"Unsupported source type: {type(source)}")
+
+    if CRS.from_user_input(source_crs) != CRS.from_user_input(crs):
+        geometry = gpd.GeoSeries([geometry], crs=source_crs).to_crs(crs).iloc[0]
+    return geometry
+
+
 @dataclass
 class BaseHandlerConfig(ABC):
     """
@@ -281,47 +344,7 @@ class BaseHandlerConfig(ABC):
             ValueError: If the source has no geometry (e.g. a path or a filter
                 dict).
         """
-        options = options or ResolveOptions()
-        boundary_kwargs = {
-            key: value
-            for key, value in (
-                ("path", options.country_geom_path),
-                ("data_store", options.country_data_store),
-            )
-            if value is not None
-        }
-        source_crs = options.crs or "EPSG:4326"
-        kind = classify_source(source)
-
-        if kind is SourceKind.COUNTRY:
-            from gigaspatial.handlers.boundaries import AdminBoundaries
-
-            geometry = AdminBoundaries.create(
-                country_code=source, **boundary_kwargs
-            ).to_geoms()[0]
-            source_crs = "EPSG:4326"
-        elif kind is SourceKind.GEODATAFRAME:
-            if source.crs is not None:
-                source_crs = source.crs
-            geometry = source.geometry.union_all()
-        elif kind is SourceKind.GEOMETRY:
-            geometry = source
-        elif kind is SourceKind.DATAFRAME:
-            from gigaspatial.processing.geo import convert_to_geodataframe
-
-            geometry = convert_to_geodataframe(source, crs=source_crs).geometry.union_all()
-        elif kind is SourceKind.POINTS:
-            geometry = MultiPoint(
-                [p if isinstance(p, Point) else Point(p[1], p[0]) for p in source]
-            )
-        else:
-            raise ValueError(f"Unsupported source type: {type(source)}")
-
-        if CRS.from_user_input(source_crs) != CRS.from_user_input(self.crs):
-            geometry = (
-                gpd.GeoSeries([geometry], crs=source_crs).to_crs(self.crs).iloc[0]
-            )
-        return geometry
+        return source_geometry(source, self.crs, options)
 
     def get_search_geometry(self, source, **kwargs) -> BaseGeometry:
         """

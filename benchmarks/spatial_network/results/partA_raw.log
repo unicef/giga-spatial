@@ -1,0 +1,35 @@
+
+### Part A — G_large_raw (2,224,948 nodes, 4,526,967 edges), read = mean of 1
+
+- input prep: ox.graph_to_gdfs 82.42 s (not included in GeoParquet write times)
+- input prep: lean table extraction (4 variants) 122.51 s (not included in lean write times)
+    ['GraphML', 'nx graph', '186.629', 'graphml: 436.858', '1389.08', '3254', '2967']
+    ['pickle p5', 'nx graph', '14.506', 'pickle: 25.298', '532.49', '2968', '2342']
+    ['Lean pq zstd f32, osmid int64, WKB', 'lean tbl', '1.247', 'lean_pandas: 0.184<br>lean_arrow: 0.049<br>lean_geo: 0.283', '73.16', '681', '685']
+    ['Lean pq zstd f32, no geometry', 'lean tbl', '0.768', 'lean_pandas: 0.122<br>lean_arrow: 0.050', '73.16', '614', '618']
+    ['Feather/IPC zstd lean f32 WKB', 'lean tbl', '0.171', 'feather_pandas: 0.108<br>feather_arrow: 0.073', '63.87', '539', '543']
+    ['Feather/IPC uncompressed lean f32 WKB', 'lean tbl', '0.148', 'feather_pandas: 0.076<br>feather_arrow: 0.040', '249.77', '536', '540']
+    ['CSR npz_compressed (topology only)', 'lean tbl', '7.044', 'csr: 0.358', '52.78', '100', '104']
+Columns: write s (from the stated input), read s per reader (mean), on-disk MB, peak RSS increase during first read in a fresh process (MB, ru_maxrss), RSS retained after read (MB).
+
+Readers: graphml=ox.load_graphml; gpkg=gpd.read_file x2 (pyogrio), gpkg_arrow=same with use_arrow=True; geoparquet=gpd.read_parquet x2; geoparquet_nx=+ox.graph_from_gdfs; lean_arrow=pq.read_table x2; lean_pandas=+to_pandas (WKB left as bytes); lean_geo=+GeoSeries.from_wkb; lean_gpq=pq nodes + gpd.read_parquet edges; zip_bytes/dir_bytes=open(...,'rb') -> BytesIO -> pq.read_table -> pandas.
+
+| format | input | write s | read s | MB | peak MB | retained MB |
+|---|---|---|---|---|---|---|
+| GraphML | nx graph | 186.629 | graphml: 436.858 | 1389.08 | 3254 | 2967 |
+| pickle p5 | nx graph | 14.506 | pickle: 25.298 | 532.49 | 2968 | 2342 |
+| Lean pq zstd f32, osmid int64, WKB | lean tbl | 1.247 | lean_pandas: 0.184<br>lean_arrow: 0.049<br>lean_geo: 0.283 | 73.16 | 681 | 685 |
+| Lean pq zstd f32, no geometry | lean tbl | 0.768 | lean_pandas: 0.122<br>lean_arrow: 0.050 | 73.16 | 614 | 618 |
+| Feather/IPC zstd lean f32 WKB | lean tbl | 0.171 | feather_pandas: 0.108<br>feather_arrow: 0.073 | 63.87 | 539 | 543 |
+| Feather/IPC uncompressed lean f32 WKB | lean tbl | 0.148 | feather_pandas: 0.076<br>feather_arrow: 0.040 | 249.77 | 536 | 540 |
+| CSR npz_compressed (topology only) | lean tbl | 7.044 | csr: 0.358 | 52.78 | 100 | 104 |
+
+
+#### List-valued attribute round trip (G_large_raw)
+
+| format | osmid | highway | name | lanes | maxspeed | reversed | ref |
+|---|---|---|---|---|---|---|---|
+| GraphML | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type |
+| pickle p5 | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type |
+| Lean pq zstd f32, osmid int64, WKB | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: same type | n/a; scalars: missing | n/a; scalars: missing | n/a; scalars: missing | n/a; scalars: missing |
+

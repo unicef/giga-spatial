@@ -52,3 +52,8 @@ GLOSSARY.md
 
 # tests
 *.ipynb
+!tests/data/**/*.parquet
+!tests/data/**/*.json
+
+# benchmark data, when GS_BENCH_DIR points inside the repo
+benchmarks/**/data/

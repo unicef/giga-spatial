@@ -6,6 +6,7 @@ __getattr__, __dir__, __all__ = attach(
     __name__,
     {
         "gigaspatial.fetchers.osm": ["OSMLocationFetcher"],
+        "gigaspatial.fetchers.osm_roads": ["OSMRoadsFetcher"],
         "gigaspatial.fetchers.overture": ["OvertureAmenityFetcher"],
         "gigaspatial.fetchers.healthsites": ["HealthSitesFetcher"],
         "gigaspatial.fetchers.giga.school_locations": ["GigaSchoolLocationFetcher"],
@@ -25,6 +26,7 @@ __getattr__, __dir__, __all__ = attach(
 
 if TYPE_CHECKING:
     from gigaspatial.fetchers.osm import OSMLocationFetcher
+    from gigaspatial.fetchers.osm_roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
     from gigaspatial.fetchers.healthsites import HealthSitesFetcher
     from gigaspatial.fetchers.giga.school_locations import GigaSchoolLocationFetcher

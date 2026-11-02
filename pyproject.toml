@@ -113,6 +113,12 @@ maxar = [
 hdx = [
     "hdx-python-api>=6.3.8"
 ]
+roads = [
+    "osmnx>=2.0"
+]
+pandana = [
+    "pandana>=0.8"
+]
 
 # Meta target using PEP 508 self-references to bundle everything seamlessly
 all = [
@@ -126,7 +132,9 @@ all = [
     "giga-spatial[unicef]",
     "giga-spatial[elevation]",
     "giga-spatial[maxar]",
-    "giga-spatial[hdx]"
+    "giga-spatial[hdx]",
+    "giga-spatial[roads]",
+    "giga-spatial[pandana]"
 ]
 
 [tool.setuptools.dynamic]
