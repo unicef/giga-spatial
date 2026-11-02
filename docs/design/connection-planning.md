@@ -112,6 +112,13 @@ With `bridge_cost=c`, the planner may use straight-line links between the networ
 - Only links between components are offered. Within a component, the roads already connect.
 - The Steiner tree uses a bridge only when it is cheaper than the alternatives. A terminal unreachable even with bridges is `unreachable`.
 
+As built:
+
+- A component with more than 2,000 nodes, or most of the network, gets its own KD-tree, queried once with every node outside it, as `connect_components` does. That gives its closest pair to every other component exactly. Smaller components query the KD-tree of all nodes with their nodes' 16 nearest neighbours, doubled while none lies outside the component and the farthest is within `bridge_max_distance`. The closest pair per pair of components is kept, and each component keeps its 5 nearest. On Rwanda's roads cut in two along a meridian (23 components, two of 70,000 and 55,000 nodes), finding the candidates takes 0.1 s.
+- Bridges join the planner's graph as extra entries, not as a new `SpatialNetwork`, so offering them costs no copy of the tables. A bridge's `length` stays its great-circle length; its weight is `bridge_cost` times that, stored in the weight column unless the weight is `length`. `cost` and `distance` always count bridges at their weight.
+- Bridge ends are kept as nodes when the plan is contracted, so a bridge stays one edge of kind `bridge` in `plan.network`.
+- `bridged` is whether a terminal's path to its root along the plan crosses a bridge. Without roots, it is whether the terminal lies outside the road component that holds the most planned terminals.
+
 A network loaded through `OSMRoadsHandler` keeps only its largest connected part by default, so bridges matter for networks loaded with `retain_all=True`, combined with `concat`, or clipped.
 
 ## 7. Local search (`improve`)
