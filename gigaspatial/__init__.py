@@ -36,6 +36,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
         # fetchers
         "gigaspatial.fetchers.osm": ["OSMLocationFetcher"],
+        "gigaspatial.fetchers.osm_roads": ["OSMRoadsFetcher"],
         "gigaspatial.fetchers.overture": ["OvertureAmenityFetcher"],
         "gigaspatial.fetchers.healthsites": ["HealthSitesFetcher"],
         "gigaspatial.fetchers.giga.school_locations": ["GigaSchoolLocationFetcher"],
@@ -63,6 +64,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.grid.s2": ["S2Cells"],
         # processing
         "gigaspatial.processing.tif_processor": ["TifProcessor"],
+        "gigaspatial.processing.network": ["SpatialNetwork"],
         "gigaspatial.processing.geo": [
             "convert_to_geodataframe",
             "buffer_geodataframe",
@@ -109,6 +111,7 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
     from gigaspatial.fetchers.osm import OSMLocationFetcher
+    from gigaspatial.fetchers.osm_roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
     from gigaspatial.fetchers.healthsites import HealthSitesFetcher
     from gigaspatial.fetchers.giga.school_locations import GigaSchoolLocationFetcher
@@ -132,6 +135,7 @@ if TYPE_CHECKING:
     from gigaspatial.grid.h3 import H3Hexagons
     from gigaspatial.grid.s2 import S2Cells
     from gigaspatial.processing.tif_processor import TifProcessor
+    from gigaspatial.processing.network import SpatialNetwork
     from gigaspatial.processing.geo import (
         convert_to_geodataframe,
         buffer_geodataframe,
