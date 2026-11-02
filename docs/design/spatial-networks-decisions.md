@@ -189,6 +189,8 @@ The result is contracted to the terminals, the sources, and the branching nodes,
 
 **Consequences and limits.** The Steiner tree is an approximation, not the optimum. It ignores one-way restrictions, which suits cables laid along roads. Terminals that cannot reach the others stay in the result without edges.
 
+**Later change.** `sources=` became `roots=`, and with roots the default is now the rooted Steiner tree, in which a terminal may connect through another one; each terminal's path to its nearest root is `method="nearest_root"`. See [ADR 0008](../adr/0008-connection-planning.md) and the [connection planning design](connection-planning.md).
+
 ### Decision 8: inserting points in one batch
 
 **Question.** The old `merge_points_to_graph` joined schools to roads one at a time. How should insertion work at country scale?

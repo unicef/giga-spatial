@@ -1,3 +1,18 @@
+## Run of 30 October 2026: connecting_subnetwork through ConnectionPlanner
+
+Apple M1 Pro, 8 CPUs, 16 GiB, macOS 15.7; Python 3.14.6, numpy 2.5.2, pandas 3.0.3, scipy 1.18.0, shapely 2.1.2, networkx 3.6.1. `sources=` is now `roots=`, and with roots the default method is the rooted Steiner tree; the old behaviour is `method="nearest_root"`.
+
+### connecting_subnetwork, G_large (125,058 nodes, 332,535 edges), mean of 3
+
+| operation | s |
+|---|---|
+| steiner, 100 terminals (156 edges, 1,537 km) | 0.078 |
+| steiner, 1,000 terminals (1,489 edges, 4,070 km) | 0.140 |
+| rooted steiner, 1,000 terminals, 20 roots (4,037 km) | 0.193 |
+| nearest root, 1,000 terminals, 20 roots (5,802 km) | 0.168 |
+| all_pairs, 50 terminals, 20 roots (6,453 km) | 0.948 |
+| simplify of the already simplified network | 0.871 |
+
 ## Run of 29 October 2026
 
 Apple M1 Pro, 8 CPUs, 16 GiB, macOS 15.7; Python 3.10.11, numpy 2.2.6, pandas 2.3.0, scipy 1.15.2, shapely 2.1.2, osmnx 2.0.2, networkx 3.3, pandana 0.7.

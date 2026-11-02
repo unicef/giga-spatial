@@ -131,9 +131,11 @@ def subnetwork_results(ns):
     network, school_ids, fibre_ids = ns["network"], ns["school_ids"], ns["fibre_ids"]
     return {
         "Steiner tree joining the schools": network.connecting_subnetwork(school_ids),
-        "Each school to its nearest fibre node": network.connecting_subnetwork(school_ids, sources=fibre_ids),
+        "Each school to its nearest fibre node": network.connecting_subnetwork(
+            school_ids, roots=fibre_ids, method="nearest_root"
+        ),
         "All pairs, 30 schools and the fibre nodes": network.connecting_subnetwork(
-            school_ids[:30], sources=fibre_ids, method="all_pairs"
+            school_ids[:30], roots=fibre_ids, method="all_pairs"
         ),
     }
 

@@ -183,20 +183,20 @@ def test_steiner_matches_networkx(connected, chosen):
     assert line_lengths(tree.edges_gdf.geometry) == pytest.approx(tree.edges["length"].to_numpy(), rel=1e-9)
 
 
-def test_nearest_source_paths(connected, chosen):
-    terminals, sources = chosen
-    sub = connected.connecting_subnetwork(terminals, sources=sources)
-    nearest = connected.nearest_by_network(terminals, sources, directed=False)
-    inside = sub.nearest_by_network(terminals, sources)
+def test_nearest_root_paths(connected, chosen):
+    terminals, roots = chosen
+    sub = connected.connecting_subnetwork(terminals, roots=roots, method="nearest_root")
+    nearest = connected.nearest_by_network(terminals, roots, directed=False)
+    inside = sub.nearest_by_network(terminals, roots)
     assert inside["distance"].to_numpy() == pytest.approx(nearest["distance"].to_numpy())
-    assert set(sources) & set(sub.node_index)
+    assert set(roots) <= set(sub.node_index)
 
 
 def test_all_pairs_keeps_every_shortest_path(connected, chosen):
-    terminals, sources = chosen
+    terminals, roots = chosen
     terminals = terminals[:8]
-    sub = connected.connecting_subnetwork(terminals, sources=sources, method="all_pairs")
-    targets = terminals + sources
+    sub = connected.connecting_subnetwork(terminals, roots=roots, method="all_pairs")
+    targets = terminals + roots
     expected = connected.shortest_path_lengths(terminals, targets, directed=False)
     assert sub.shortest_path_lengths(terminals, targets).to_numpy() == pytest.approx(expected.to_numpy())
 
