@@ -14,7 +14,7 @@
 
 GigaSpatial acquires published geospatial datasets into a data store you control, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones, and the result is a view: those places with attributes from the datasets attached. It started in UNICEF's [Giga](https://giga.global/) initiative.
 
-Use it to map population and building footprints onto H3 hexagons, estimate how many people live near each school or clinic in a country, combine WorldPop, building footprints, and OpenStreetMap into one country dataset in a few lines of Python, and route or connect places along OpenStreetMap road networks.
+Use it for humanitarian, development, connectivity, and climate analysis: map population, building footprints, wealth, and flood hazard onto grids (H3 hexagons, S2 cells, Mercator tiles), administrative boundaries, or custom geometries; estimate population and nearest buildings around points of interest (such as schools, clinics, or cell sites); combine WorldPop, building footprints, and OpenStreetMap into one country dataset in a few lines of Python; and route or connect places along OpenStreetMap road networks.
 
 ## What it covers
 
@@ -27,7 +27,7 @@ Use it to map population and building footprints onto H3 hexagons, estimate how 
   - **Terrain and flood hazard**: NASA SRTM elevation (`NasaSRTMHandler`), Copernicus GloFAS river flood hazard (`GlofasHandler`), and WRI Aqueduct flood hazard (`AqueductFloodHandler`)
   - **Administrative boundaries**: `AdminBoundaries`
 - **[Fetchers](https://unicef.github.io/giga-spatial/latest/api/fetchers/)** query datasets served by an API or database: OpenStreetMap places (`OSMLocationFetcher`) and road networks (`OSMRoadsFetcher`), Giga schools (`GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher`), Healthsites.io (`HealthSitesFetcher`), Overture Maps amenities (`OvertureAmenityFetcher`), UNICEF SDG indicators (`UnicefDataFetcher`), M-Lab speed tests in BigQuery (`MLabFetcher`), and Google Earth Engine (`GEEProfiler`).
-- **[Generators](https://unicef.github.io/giga-spatial/latest/api/generators/)** map datasets onto points of interest (`PoiViewGenerator`) or zones (`H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`) and return a view.
+- **[Generators](https://unicef.github.io/giga-spatial/latest/api/generators/)** map datasets onto points of interest (`PoiViewGenerator`) or zones (`H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, `GeometryBasedZonalViewGenerator`) and return a view.
 - **[Processing](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)** provides raster (`TifProcessor`) and vector tools for the stored files.
 - **[Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/)**: `OSMRoadsFetcher` fetches OpenStreetMap roads for a source, `OSMRoadsHandler` builds them for whole countries from Geofabrik's extracts, and `SpatialNetwork` and `ConnectionPlanner` join schools or other points to them, find shortest paths, and plan the roads that connect a set of points.
 
@@ -89,7 +89,7 @@ See [Combining datasets for a country](https://unicef.github.io/giga-spatial/lat
 ## How GigaSpatial compares to other tools
 
 - **Hand-built `geopandas`, `rasterio`, `rasterstats`, `pyrosm`, and `osmnx` pipelines**: GigaSpatial uses `geopandas`, `rasterio`, and `h3` under the hood, and replaces custom per-dataset download scripts, tile stitching, CRS projection, and buffer or zonal loops with handlers, fetchers, and generators that run in a few lines of Python.
-- **Grid libraries (`h3-py`, `h3ronpy`, `h3-toolkit`)**: `h3-py` indexes coordinates and geometries into H3 cell IDs. `H3ViewGenerator` in GigaSpatial acquires published country datasets (WorldPop, GHSL, Google and Microsoft buildings, Relative Wealth Index) into your data store and maps them directly onto H3, S2, Mercator, or administrative zones.
+- **Grid libraries (`h3-py`, `h3ronpy`, `h3-toolkit`)**: `h3-py` indexes coordinates and geometries into H3 cell IDs. `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, and `GeometryBasedZonalViewGenerator` in GigaSpatial acquire published country datasets (WorldPop, GHSL, Google and Microsoft buildings, Relative Wealth Index) into your data store and map them directly onto H3 hexagons, S2 cells, Mercator tiles, administrative boundaries, or custom polygons.
 - **Cloud catalogs and spatial engines (Google Earth Engine, Microsoft Planetary Computer, PostGIS, DuckDB, Apache Sedona)**: Cloud platforms and spatial databases run queries inside their own infrastructure. GigaSpatial downloads and caches published datasets into a data store you control (local disk, Azure Data Lake Storage, or Snowflake) and also provides optional `GEEProfiler` (`giga-spatial[gee]`), `BigQueryClient` (`giga-spatial[bq]`), and DuckDB or Trino integrations when you want them.
 
 ## Documentation

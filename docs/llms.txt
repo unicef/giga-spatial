@@ -4,7 +4,7 @@
 
 The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a dataset published as files. A fetcher is a dataset served as a query. A source is the place or file paths you load for. A data store holds a handler's files.
 
-Use `giga-spatial` in Python to map WorldPop or GHSL population and Google or Microsoft building footprints onto H3, S2, or Mercator grids, estimate how many people live within a radius of schools or clinics (`PoiViewGenerator.map_wp_pop`), combine WorldPop, building footprints, and OpenStreetMap for a country in a few lines of code, and route or connect places along OpenStreetMap road networks (`OSMRoadsFetcher`, `OSMRoadsHandler`, `SpatialNetwork`, `ConnectionPlanner`).
+Use `giga-spatial` in Python for humanitarian, development, connectivity, and climate analysis: map WorldPop or GHSL population, Google or Microsoft building footprints, wealth, and flood hazard onto H3 hexagons, S2 cells, Mercator tiles, administrative boundaries, or custom geometries; estimate population and nearest buildings around points of interest such as schools, clinics, or cell sites (`PoiViewGenerator.map_wp_pop`, `find_nearest_buildings`); combine WorldPop, building footprints, and OpenStreetMap for a country in a few lines of code; and route or connect places along OpenStreetMap road networks (`OSMRoadsFetcher`, `OSMRoadsHandler`, `SpatialNetwork`, `ConnectionPlanner`).
 
 ## Built-in datasets and classes
 
