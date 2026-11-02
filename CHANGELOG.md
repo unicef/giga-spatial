@@ -29,6 +29,11 @@ All notable changes to this project will be documented in this file.
 -   **Source geometry shared by handlers and fetchers (`gigaspatial/handlers/base/config.py`)**
     -   The body of `BaseHandlerConfig.extract_search_geometry` moved into the function `source_geometry`, which the method calls. Handler behaviour is unchanged.
 
+### Fixed
+
+-   **WorldPop catalog errors (`gigaspatial/handlers/worldpop.py`)**
+    -   `WorldPopRestClient.get_datasets` retries connection errors, timeouts, truncated responses, responses that are not JSON, and HTTP 429, 500, 502, 503, and 504. If the catalog request still fails, that error is raised. A failed request is no longer reported as "No WorldPop datasets found".
+
 ### Documentation
 
 -   A road networks guide, an API page for spatial networks, `OSMRoadsFetcher` on the fetchers page, and the list of optional extras on the installation page.
