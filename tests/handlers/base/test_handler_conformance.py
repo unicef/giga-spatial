@@ -34,6 +34,7 @@ HANDLER_MODULES = [
     "gigaspatial.handlers.rwi",
     "gigaspatial.handlers.nasa.srtm",
     "gigaspatial.handlers.wri.aqueduct_flood",
+    "gigaspatial.handlers.osm.roads",
 ]
 
 

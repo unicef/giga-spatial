@@ -100,31 +100,7 @@ class OSMRoadsFetcher:
 
     def query_area(self, source: Any) -> Union[shapely.Polygon, shapely.MultiPolygon]:
         """The area queried for a source, in EPSG:4326."""
-        kind = classify_source(source)
-        if kind in (SourceKind.PATHS, SourceKind.OTHER):
-            raise ValueError(f"Cannot fetch roads for a source of type {type(source).__name__}")
-        geometry = source_geometry(source, "EPSG:4326")
-        if not geometry.is_valid:
-            geometry = shapely.make_valid(geometry)
-        if geometry.geom_type in ("Polygon", "MultiPolygon"):
-            return geometry
-        polygons = [g for g in getattr(geometry, "geoms", [geometry]) if g.geom_type in ("Polygon", "MultiPolygon")]
-        if polygons and len(polygons) == len(getattr(geometry, "geoms", [geometry])):
-            return shapely.union_all(polygons)
-        if self.area == "hull":
-            shape = geometry.convex_hull
-        elif self.area == "bbox":
-            shape = shapely.box(*geometry.bounds)
-        else:
-            shape = geometry
-        if self.buffer == 0 and shape.geom_type not in ("Polygon", "MultiPolygon"):
-            raise ValueError("Points and lines need a buffer greater than 0 to make an area")
-        return self._buffered(shape)
-
-    def _buffered(self, shape: shapely.Geometry) -> Union[shapely.Polygon, shapely.MultiPolygon]:
-        series = gpd.GeoSeries([shape], crs="EPSG:4326")
-        utm = estimate_utm_crs_with_fallback(gpd.GeoDataFrame(geometry=series), logger=self.logger)
-        return series.to_crs(utm).buffer(self.buffer).to_crs("EPSG:4326").iloc[0]
+        return query_area(source, buffer=self.buffer, area=self.area, logger=self.logger)
 
     def _download(self, area: Any):
         try:
@@ -199,6 +175,44 @@ class OSMRoadsFetcher:
             metadata=metadata,
             positions=network._edge_positions,
         )
+
+
+def query_area(
+    source: Any, buffer: float = 2000.0, area: str = "hull", logger: Any = None
+) -> Union[shapely.Polygon, shapely.MultiPolygon]:
+    """The road area of a source in EPSG:4326, shared by ``OSMRoadsFetcher`` and ``OSMRoadsHandler``.
+
+    A country is its boundary, a geometry is used as given, and a frame of
+    polygons is their union. Points and lines become their convex hull
+    (``area="hull"``), bounding box (``"bbox"``), or union of buffers
+    (``"buffers"``), widened by ``buffer`` meters through UTM.
+
+    Raises:
+        ValueError: If the source has no area, or points or lines have no buffer.
+    """
+    kind = classify_source(source)
+    if kind in (SourceKind.PATHS, SourceKind.OTHER):
+        raise ValueError(f"Cannot fetch roads for a source of type {type(source).__name__}")
+    geometry = source_geometry(source, "EPSG:4326")
+    if not geometry.is_valid:
+        geometry = shapely.make_valid(geometry)
+    if geometry.geom_type in ("Polygon", "MultiPolygon"):
+        return geometry
+    parts = getattr(geometry, "geoms", [geometry])
+    polygons = [g for g in parts if g.geom_type in ("Polygon", "MultiPolygon")]
+    if polygons and len(polygons) == len(parts):
+        return shapely.union_all(polygons)
+    if area == "hull":
+        shape = geometry.convex_hull
+    elif area == "bbox":
+        shape = shapely.box(*geometry.bounds)
+    else:
+        shape = geometry
+    if buffer == 0 and shape.geom_type not in ("Polygon", "MultiPolygon"):
+        raise ValueError("Points and lines need a buffer greater than 0 to make an area")
+    series = gpd.GeoSeries([shape], crs="EPSG:4326")
+    utm = estimate_utm_crs_with_fallback(gpd.GeoDataFrame(geometry=series), logger=logger)
+    return series.to_crs(utm).buffer(buffer).to_crs("EPSG:4326").iloc[0]
 
 
 @contextmanager

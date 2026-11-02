@@ -11,6 +11,12 @@ All notable changes to this project will be documented in this file.
     -   Failed requests are retried with growing pauses, and the last error suggests an Overpass mirror. Areas above 50,000 km² log a warning.
     -   New setting `OVERPASS_URL` chooses the Overpass endpoint.
 
+-   **Country-scale road networks from Geofabrik's extracts (`gigaspatial/handlers/osm/`)**
+    -   `OSMRoadsHandler` downloads Geofabrik's OpenStreetMap extracts and builds the same `SpatialNetwork` that `OSMRoadsFetcher` returns for the same area, tested against osmnx for every network type. It reads an extract once with pyosmium, without osmnx or networkx: Rwanda's network builds in 15 s, where the route through osmnx took 300 s. Once stored, the whole country loads in under a second.
+    -   A country uses its own extract whole, or its regional extracts with `regions=True`; a country that shares an extract, such as Singapore, is cut from it along its boundary. Any other source uses the smallest extracts that cover its area and is cropped to it as the fetcher would, joining extracts as if they were one file. `extracts=` names extracts directly; continents are used only when named.
+    -   Extracts are stored by date in Geofabrik's own folders, checked against Geofabrik's checksums, with each network type's network saved beside its extract. The newest stored extract is used offline; `refresh`, `max_age_days`, and `date` choose another. A network's metadata records its extract's ID, date, URL, and replication timestamp.
+    -   `crop_to_source` defaults to `True` for this handler.
+
 -   **Spatial networks (`gigaspatial/processing/network/`)**
     -   `SpatialNetwork` holds nodes and edges as two tables, not as a networkx graph, with lengths in meters computed as osmnx does. Every edit returns a new network. Build one from a networkx or osmnx graph, from points joined to their nearest neighbours, or from tables.
     -   `insert_points` joins points such as schools to their nearest road in one batch, splitting each road once at all of its points. On Rwanda's roads it inserts 10,000 points in 1.8 s.
@@ -18,17 +24,23 @@ All notable changes to this project will be documented in this file.
     -   `simplify` removes nodes that only continue a road, with the same result as osmnx and 22 times faster on unsimplified Rwanda. `connecting_subnetwork` keeps only the roads that join a set of points: a Steiner tree, each point's path to its nearest source, or the paths between every pair.
     -   `save` and `load` store a network as a folder of Parquet files that GIS tools, DuckDB, and pandas read directly. `to_networkx` and `to_pandana` convert it for other libraries.
 
--   **Optional extras.** `giga-spatial[roads]` installs osmnx for `OSMRoadsFetcher`. `giga-spatial[pandana]` installs pandana for `SpatialNetwork.to_pandana` and `backend="pandana"`. Both are part of `giga-spatial[all]`.
+-   **Optional extras.** `giga-spatial[roads]` installs osmnx for `OSMRoadsFetcher` and pyosmium for `OSMRoadsHandler`. `giga-spatial[pandana]` installs pandana for `SpatialNetwork.to_pandana` and `backend="pandana"`. Both are part of `giga-spatial[all]`.
 
 ### Changed
 
 -   **Source geometry shared by handlers and fetchers (`gigaspatial/handlers/base/config.py`)**
     -   The body of `BaseHandlerConfig.extract_search_geometry` moved into the function `source_geometry`, which the method calls. Handler behaviour is unchanged.
 
+-   **Download checksums (`gigaspatial/handlers/base/fetch.py`)**
+    -   `stream_to_store` takes `md5=`, checked while the file streams; on a mismatch the file is removed and `ValueError` raised.
+
+-   **`.pbf` paths (`gigaspatial/handlers/base/source.py`)**
+    -   A string ending in `.pbf`, such as `"rwanda-latest.osm.pbf"`, is now a path source; before, it was taken for a country name.
+
 ### Documentation
 
--   A road networks guide, an API page for spatial networks, `OSMRoadsFetcher` on the fetchers page, and the list of optional extras on the installation page.
--   Two design decisions: ADR 0004, why a spatial network is held as tables, and ADR 0005, how a saved network is laid out.
+-   A road networks guide, with a section on whole countries, an API page for spatial networks, `OSMRoadsFetcher` on the fetchers page, `OSMRoadsHandler` on the handlers page, and the list of optional extras on the installation page.
+-   Four design decisions: ADR 0004, why a spatial network is held as tables; ADR 0005, how a saved network is laid out; ADR 0006, how OSM extracts and their networks are stored; and ADR 0007, how extracts are chosen for a source.
 
 ## [v0.10.1] - 2026-10-21
 

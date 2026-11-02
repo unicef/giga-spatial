@@ -102,6 +102,8 @@ nav:
           - Public import paths: adr/0003-public-import-paths.md
           - Columnar spatial network: adr/0004-columnar-spatial-network.md
           - Spatial network storage: adr/0005-spatial-network-storage.md
+          - OSM extract storage: adr/0006-osm-extract-storage.md
+          - OSM extract choice: adr/0007-osm-extract-choice.md
       - License: license.md
 
 markdown_extensions:

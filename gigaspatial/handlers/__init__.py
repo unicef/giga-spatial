@@ -74,6 +74,12 @@ __getattr__, __dir__, __all__ = attach(
             "AqueductFloodReader",
             "AqueductFloodHandler",
         ],
+        "gigaspatial.handlers.osm.roads": [
+            "OSMRoadsConfig",
+            "OSMRoadsDownloader",
+            "OSMRoadsReader",
+            "OSMRoadsHandler",
+        ],
     },
 )
 
@@ -136,4 +142,10 @@ if TYPE_CHECKING:
         AqueductFloodDownloader,
         AqueductFloodReader,
         AqueductFloodHandler,
+    )
+    from gigaspatial.handlers.osm.roads import (
+        OSMRoadsConfig,
+        OSMRoadsDownloader,
+        OSMRoadsReader,
+        OSMRoadsHandler,
     )

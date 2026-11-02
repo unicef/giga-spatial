@@ -20,7 +20,7 @@ GigaSpatial acquires published geospatial datasets into a data store you control
 - **[Fetchers](https://unicef.github.io/giga-spatial/latest/api/fetchers/)** query datasets served by an API, such as OpenStreetMap and Giga school data.
 - **[Generators](https://unicef.github.io/giga-spatial/latest/api/generators/)** map datasets onto points of interest or zones and return a view.
 - **[Processing](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)** provides raster and vector tools for the stored files.
-- **[Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/)**: `OSMRoadsFetcher` fetches OpenStreetMap roads for a source, and `SpatialNetwork` joins schools or other points to them, finds shortest paths, and keeps the roads that connect a set of points.
+- **[Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/)**: `OSMRoadsFetcher` fetches OpenStreetMap roads for a source, `OSMRoadsHandler` builds them for whole countries from Geofabrik's extracts, and `SpatialNetwork` joins schools or other points to them, finds shortest paths, and keeps the roads that connect a set of points.
 
 Files live in a [data store](https://unicef.github.io/giga-spatial/latest/api/data-stores/): local disk, Azure Data Lake Storage, or Snowflake. Handlers only depend on the abstract `DataStore`, so other stores can be added by implementing it.
 

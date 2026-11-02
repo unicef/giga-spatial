@@ -1,0 +1,15 @@
+{
+  "format": "gigaspatial.spatial_network",
+  "format_version": 1,
+  "directed": true,
+  "crs": "EPSG:4326",
+  "weight": "length",
+  "node_ids": "native",
+  "metadata": {
+    "created_date": "2026-10-29 12:03:00",
+    "created_with": "OSMnx 2.0.2",
+    "simplified": true
+  },
+  "library_version": "0.10.1",
+  "created": "2026-10-29T11:03:01+00:00"
+}
