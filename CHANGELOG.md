@@ -30,6 +30,10 @@ All notable changes to this project will be documented in this file.
     -   Validated against exact optima: on Kigali's roads, solved exactly with scipy's `milp`, improved plans were within 0.86% of the optimum and the bound within 1.1%; on SteinLib's test sets B to E, within 2.2% and 0.42% on average. `benchmarks/connection_planning/` holds the benchmarks.
     -   `save` and `load` store a network as a folder of Parquet files that GIS tools, DuckDB, and pandas read directly. `to_networkx` and `to_pandana` convert it for other libraries.
 
+-   **GloFAS flood hazard handler (`gigaspatial/handlers/glofas.py`)**
+    -   `GlofasHandler` loads Copernicus EMS flood maps for a country or a geometry. One load fetches one layer (`depth`, `depth_reclass`, `permanent_water`, or `spurious_depth`) and, for the depth layers, one return period (default 100).
+    -   Tiles come from the published `tile_extents.geojson`. Stored paths include the layer and, for depth layers, the return period. Mask layers reject an explicit `return_period`.
+
 -   **Optional extras.** `giga-spatial[roads]` installs osmnx for `OSMRoadsFetcher` and pyosmium for `OSMRoadsHandler`. `giga-spatial[pandana]` installs pandana for `SpatialNetwork.to_pandana` and `backend="pandana"`. Both are part of `giga-spatial[all]`.
 
 ### Changed
@@ -45,6 +49,11 @@ All notable changes to this project will be documented in this file.
 
 -   **`.pbf` paths (`gigaspatial/handlers/base/source.py`)**
     -   A string ending in `.pbf`, such as `"rwanda-latest.osm.pbf"`, is now a path source; before, it was taken for a country name.
+
+### Fixed
+
+-   **WorldPop catalog errors (`gigaspatial/handlers/worldpop.py`)**
+    -   `WorldPopRestClient.get_datasets` retries connection errors, timeouts, truncated responses, responses that are not JSON, and HTTP 429, 500, 502, 503, and 504. If the catalog request still fails, that error is raised. A failed request is no longer reported as "No WorldPop datasets found".
 
 ### Documentation
 
