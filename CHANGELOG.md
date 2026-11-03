@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [v0.11.0] - 2026-11-03
 
 ### Added
 
@@ -58,7 +58,9 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 -   A road networks guide, with a section on whole countries, an API page for spatial networks, `OSMRoadsFetcher` on the fetchers page, `OSMRoadsHandler` on the handlers page, and the list of optional extras on the installation page.
--   Four design decisions: ADR 0004, why a spatial network is held as tables; ADR 0005, how a saved network is laid out; ADR 0006, how OSM extracts and their networks are stored; and ADR 0007, how extracts are chosen for a source.
+-   A spatial networks concept note, and a design and algorithm decisions document for the network, the OSM roads handler, and connection planning.
+-   Five design decisions: ADR 0004, why a spatial network is held as tables; ADR 0005, how a saved network is laid out; ADR 0006, how OSM extracts and their networks are stored; ADR 0007, how extracts are chosen for a source; and ADR 0008, why connecting points to an existing network is a rooted Steiner tree.
+-   Docs and package descriptions now cover the datasets and zone types the library ships, including road networks and GloFAS, and the docs template carries a Google Search Console verification tag.
 
 ## [v0.10.1] - 2026-10-21
 
