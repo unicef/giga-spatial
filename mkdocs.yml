@@ -60,12 +60,14 @@ edit_uri: edit/main/docs/
 nav:
   - Home: index.md
   - Getting Started:
+      - getting-started/index.md
       - Installation: getting-started/installation.md
       - Tutorial: getting-started/quickstart.md
       - Datasets: getting-started/datasets.md
       - Configuration: getting-started/configuration.md
   - User Guide:
       - user-guide/index.md
+      - Combining datasets for a country: user-guide/country-datasets.md
       - Points and nearest buildings: user-guide/points-and-buildings.md
       - Population around points: user-guide/population-accessibility.md
       - OSM points of interest: user-guide/osm-places.md

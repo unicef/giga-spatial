@@ -6,8 +6,6 @@ This page says what the project is aiming at. It has no dates. A line here is no
 
 Publish more datasets through the library, including climate data. A dataset published as files becomes a handler. A dataset served as a query becomes a fetcher.
 
-OSM roads are fetched from Overpass today. Next is a handler for country-scale road networks from Geofabrik's OpenStreetMap extracts, returning the same `SpatialNetwork`.
-
 ## Documentation
 
 Finish the documentation site: the tutorial, the user guide, and the API reference.
