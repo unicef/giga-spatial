@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://unicef.github.io/giga-spatial/sitemap.xml
