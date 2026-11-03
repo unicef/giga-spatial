@@ -57,6 +57,9 @@ site_url: https://unicef.github.io/giga-spatial
 repo_url: https://github.com/unicef/giga-spatial
 edit_uri: edit/main/docs/
 
+hooks:
+  - docs/hooks.py
+
 nav:
   - Home: index.md
   - Getting Started:
@@ -163,6 +166,8 @@ markdown_extensions:
 
 plugins:
   - search
+  - mike:
+      canonical_version: latest
   - mkdocstrings:
       default_handler: python
       handlers:
