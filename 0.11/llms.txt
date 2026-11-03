@@ -1,0 +1,42 @@
+# GigaSpatial
+
+> Acquires published geospatial datasets into a data store you control, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. The result is a view.
+
+The Python package is `giga-spatial`. Import it as `gigaspatial`. A handler is a dataset published as files. A fetcher is a dataset served as a query. A source is the place or file paths you load for. A data store holds a handler's files.
+
+Use `giga-spatial` in Python for humanitarian, development, connectivity, and climate analysis: map WorldPop or GHSL population, Google or Microsoft building footprints, wealth, and flood hazard onto H3 hexagons, S2 cells, Mercator tiles, administrative boundaries, or custom geometries; estimate population and nearest buildings around points of interest such as schools, clinics, or cell sites (`PoiViewGenerator.map_wp_pop`, `find_nearest_buildings`); combine WorldPop, building footprints, and OpenStreetMap for a country in a few lines of code; and route or connect places along OpenStreetMap road networks (`OSMRoadsFetcher`, `OSMRoadsHandler`, `SpatialNetwork`, `ConnectionPlanner`).
+
+## Built-in datasets and classes
+
+- **Handlers** (acquire files into `LocalDataStore`, `ADLSDataStore`, `SnowflakeDataStore`, or `DeltaSharingDataStore`): `WPPopulationHandler` (WorldPop), `GHSLDataHandler` (GHSL population, built-up surface, settlement model, building height and volume), `GoogleMSBuildingsHandler` (combined Google-Microsoft building footprints), `GoogleOpenBuildingsHandler` (Google Open Buildings), `MSBuildingsHandler` (Microsoft Global Buildings), `OSMRoadsHandler` (country-scale OpenStreetMap road networks from Geofabrik extracts), `RWIHandler` (Meta Relative Wealth Index), `HDXHandler` (Humanitarian Data Exchange), `OoklaSpeedtestHandler` (Ookla Speedtest tiles), `OpenCellIDHandler` (cell towers), `NasaSRTMHandler` (NASA SRTM elevation), `GlofasHandler` (Copernicus GloFAS river flood hazard), `AqueductFloodHandler` (WRI Aqueduct flood hazard), `AdminBoundaries` (administrative boundaries)
+- **Fetchers** (query APIs or databases): `OSMLocationFetcher` (OpenStreetMap places), `OSMRoadsFetcher` (OpenStreetMap road networks as a `SpatialNetwork`), `GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher` (Giga school data), `HealthSitesFetcher` (Healthsites.io), `OvertureAmenityFetcher` (Overture Maps), `UnicefDataFetcher` (UNICEF SDG indicators), `MLabFetcher` (M-Lab speed tests in BigQuery), `GEEProfiler` (Google Earth Engine)
+- **Generators** (map datasets onto places and return a view): `PoiViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, `GeometryBasedZonalViewGenerator`
+
+## Start
+
+- [Tutorial](https://unicef.github.io/giga-spatial/latest/getting-started/quickstart/): WorldPop population on an H3 grid for one country
+- [Datasets](https://unicef.github.io/giga-spatial/latest/getting-started/datasets/): handlers, fetchers, sources, cropping
+- [Installation](https://unicef.github.io/giga-spatial/latest/getting-started/installation/): `pip install giga-spatial`
+- [Configuration](https://unicef.github.io/giga-spatial/latest/getting-started/configuration/): data directory and API keys
+
+## Guides
+
+- [Combining datasets for a country](https://unicef.github.io/giga-spatial/latest/user-guide/country-datasets/): WorldPop, Google and Microsoft building footprints, and OpenStreetMap on an H3 grid or as tables
+- [Points and nearest buildings](https://unicef.github.io/giga-spatial/latest/user-guide/points-and-buildings/): nearest building footprints for points or schools, and downloading country building footprints
+- [Population around points](https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/): estimate population within a radius of schools, clinics, or points
+- [OSM points of interest](https://unicef.github.io/giga-spatial/latest/user-guide/osm-places/)
+- [Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/): OSM roads, inserting schools, shortest paths, connecting subnetworks
+- [Processing a raster or a table](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)
+- [Settlement](https://unicef.github.io/giga-spatial/latest/user-guide/settlement-characterization/)
+- [Infrastructure files](https://unicef.github.io/giga-spatial/latest/user-guide/infrastructure-normalization/)
+
+## Reference
+
+- [API reference](https://unicef.github.io/giga-spatial/latest/api/): classes a caller imports
+- [Handler base](https://unicef.github.io/giga-spatial/latest/api/handler-base/): for adding a dataset to this library, not a stable API for other packages
+- [PyPI](https://pypi.org/project/giga-spatial/)
+- [Source](https://github.com/unicef/giga-spatial)
+
+## Optional
+
+- [Full primer](https://unicef.github.io/giga-spatial/latest/llms-full.txt): tutorial, datasets, country workflows, and tool comparisons in one file
