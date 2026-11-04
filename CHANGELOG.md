@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+-   **Geofabrik downloads (`gigaspatial/handlers/osm/roads.py`)**
+    -   `OSMRoadsHandler` waits up to 3 minutes for an extract to start sending, and retries twice if the connection stalls. A stall used to fail the download after 60 seconds, while the same link succeeded in a browser.
+
 ## [v0.11.0] - 2026-11-03
 
 ### Added
