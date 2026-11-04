@@ -43,7 +43,7 @@ from gigaspatial.handlers.base import (
     ReadOptions,
     ResolveOptions,
 )
-from gigaspatial.handlers.base.fetch import TIMEOUT, stream_to_store
+from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.handlers.base.options import sort_options
 from gigaspatial.handlers.base.source import SourceKind, classify_source, is_path_source
 from gigaspatial.handlers.osm.geofabrik import (
@@ -64,6 +64,11 @@ from gigaspatial.handlers.osm.pbf import (
     with_metadata,
 )
 from gigaspatial.processing.network import SpatialNetwork
+
+# Geofabrik often accepts the connection and then waits before the first byte.
+# A single 60s read timeout fails the extract; a browser keeps waiting.
+_DOWNLOAD_ATTEMPTS = 3
+_DOWNLOAD_TIMEOUT = (10, 180)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -415,26 +420,34 @@ class OSMRoadsDownloader(BaseHandlerDownloader):
         """
         path = self.config.get_data_unit_path(unit)
         url = unit["url"]
-        try:
-            checksum = requests.get(f"{url}.md5", timeout=TIMEOUT)
-            checksum.raise_for_status()
-            self.logger.info(f"Downloading {unit['id']} of {unit['date']} from {url}")
-            stream_to_store(
-                url,
-                path,
-                self.data_store,
-                show_progress=options.show_progress,
-                desc=f"{unit['id']} {unit['date']}",
-                md5=checksum.text.split()[0],
-            )
-        except requests.HTTPError as error:
-            if error.response is not None and error.response.status_code == 404:
-                raise FileNotFoundError(
-                    f"Geofabrik no longer keeps {unit['id']} of {unit['date']} ({url}). Daily files are "
-                    "kept for about a week, then those of the 1st of each month and of January 1st."
-                ) from error
-            raise
-        return path
+        for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+            try:
+                checksum = requests.get(f"{url}.md5", timeout=_DOWNLOAD_TIMEOUT)
+                checksum.raise_for_status()
+                self.logger.info(f"Downloading {unit['id']} of {unit['date']} from {url}")
+                stream_to_store(
+                    url,
+                    path,
+                    self.data_store,
+                    show_progress=options.show_progress,
+                    desc=f"{unit['id']} {unit['date']}",
+                    md5=checksum.text.split()[0],
+                    timeout=_DOWNLOAD_TIMEOUT,
+                )
+                return path
+            except requests.HTTPError as error:
+                if error.response is not None and error.response.status_code == 404:
+                    raise FileNotFoundError(
+                        f"Geofabrik no longer keeps {unit['id']} of {unit['date']} ({url}). Daily files are "
+                        "kept for about a week, then those of the 1st of each month and of January 1st."
+                    ) from error
+                raise
+            except (requests.Timeout, requests.ConnectionError) as error:
+                if attempt == _DOWNLOAD_ATTEMPTS:
+                    raise
+                self.logger.info(
+                    f"Download of {unit['id']} stalled ({type(error).__name__}); retrying, attempt {attempt + 1} of {_DOWNLOAD_ATTEMPTS}"
+                )
 
 
 class OSMRoadsReader(BaseHandlerReader):
