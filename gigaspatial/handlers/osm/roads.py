@@ -679,14 +679,19 @@ class OSMRoadsReader(BaseHandlerReader):
         combine_raw: bool,
         counted_edges: Optional[pd.DataFrame] = None,
     ) -> SpatialNetwork:
-        """Combine raw networks and simplify them, then keep the largest connected part unless ``retain_all``."""
+        """Combine raw networks, keep the largest connected part unless ``retain_all``, and simplify."""
         network = parts[0] if len(parts) == 1 else combine_road_networks(parts, counted_edges)
         if len(network.nodes) == 0:
             raise ValueError(f"No {options.tags or options.network_type} roads in the area")
+        if not options.retain_all:
+            anchor = network.metadata.get("build", {}).get("largest_component_node")
+            if anchor is not None and anchor in network.node_index:
+                components = network.connected_components()
+                network = network.filter_nodes(mask=components == components.loc[anchor])
+            else:
+                network = network.largest_component()
         if combine_raw and options.simplify:
             network = simplify_road_network(network)
-        if not options.retain_all:
-            network = network.largest_component()
         return with_metadata(network, load={"retain_all": options.retain_all, "truncate_by_edge": options.truncate_by_edge})
 
 
