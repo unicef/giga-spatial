@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 -   **Geofabrik downloads (`gigaspatial/handlers/osm/roads.py`)**
     -   `OSMRoadsHandler` waits up to 3 minutes for an extract to start sending, and retries twice if the connection stalls. A stall used to fail the download after 60 seconds, while the same link succeeded in a browser.
+-   **OSM road component selection (`gigaspatial/handlers/osm/roads.py`, `gigaspatial/handlers/osm/pbf.py`)**
+    -   `OSMRoadsHandler` now selects the largest connected component before simplifying (and preserves the raw largest component when loading cached simplified extracts), matching `osmnx` so a long road chain with many intermediate nodes is not discarded in favor of a smaller junction network.
 
 ## [v0.11.0] - 2026-11-03
 
