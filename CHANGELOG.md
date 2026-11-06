@@ -4,8 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+-   **HDX configuration and authentication (`gigaspatial/config.py`, `gigaspatial/handlers/hdx.py`)**
+    -   Added `HDX_KEY` and `HDX_USER_AGENT` to `Config`, loaded automatically from `.env` or system environment variables.
+    -   `HDXConfig` (and `RWIConfig`) supports `hdx_key` and custom `user_agent` parameters. When an `hdx_key` is provided, requests are authenticated (`hdx_read_only=False`), bypassing anonymous rate limiting and WAF challenges. The key is masked in `__repr__`.
+    -   Added `HDX_KEY` and `HDX_USER_AGENT` to `.env_sample` and configuration docs.
+
 ### Fixed
 
+-   **HDX downloads and WAF challenge detection (`gigaspatial/handlers/hdx.py`)**
+    -   `HDXDownloader` verifies downloaded files have non-zero size before committing them to the data store, preventing 0-byte files from being cached when HDX returns an AWS WAF anti-bot challenge (HTTP 202).
+    -   Failed downloads retry up to 3 times with exponential backoff (`time.sleep(2 ** attempt)`).
+    -   If a download returns no data, `HDXDownloader` probes the download URL and raises a clear `RuntimeError` detailing the HTTP status, byte count, WAF challenge action, and suggested resolution (setting `hdx_key`, custom `user_agent`, or manual download to the target path).
+    -   `HDXConfig.is_unit_available` requires stored files to have non-zero content before treating them as available.
 -   **Geofabrik downloads (`gigaspatial/handlers/osm/roads.py`)**
     -   `OSMRoadsHandler` waits up to 3 minutes for an extract to start sending, and retries twice if the connection stalls. A stall used to fail the download after 60 seconds, while the same link succeeded in a browser.
 -   **OSM road component selection (`gigaspatial/handlers/osm/roads.py`, `gigaspatial/handlers/osm/pbf.py`)**

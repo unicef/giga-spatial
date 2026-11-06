@@ -77,6 +77,13 @@ class Config(BaseSettings):
     # Used for accessing Healthsites global health facility data
     HEALTHSITES_API_KEY: str = Field(default="", alias="HEALTHSITES_API_KEY")
 
+    # Humanitarian Data Exchange (HDX) configuration
+    # Used for accessing HDX datasets and humanitarian indicators
+    HDX_KEY: str = Field(default="", alias="HDX_KEY")
+    HDX_USER_AGENT: str = Field(
+        default="giga-spatial/1.0", alias="HDX_USER_AGENT"
+    )
+
     # Overpass API configuration
     # Used for fetching OpenStreetMap road networks; set a mirror when the main server is down
     OVERPASS_URL: str = Field(

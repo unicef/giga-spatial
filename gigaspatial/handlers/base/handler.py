@@ -346,11 +346,13 @@ class BaseHandler(ABC):
 
         Raises:
             TypeError: If a keyword is not an option of any component.
+            RuntimeError: If a download fails and the data is still missing.
         """
         resolve, download, _ = sort_options(
             kwargs, self.config, self.downloader, self.reader, entry="download_and_load"
         )
-        self._ensure_available(source, force_download, resolve, download)
+        if not self._ensure_available(source, force_download, resolve, download):
+            raise RuntimeError("Could not ensure data availability for loading")
         return self._read(source, crop_to_source, kwargs)
 
     def get_available_data_info(
