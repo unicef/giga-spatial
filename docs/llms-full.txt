@@ -106,7 +106,7 @@ frame = population.load_into_dataframe("RWA", crop_to_source=True)
 - `OoklaSpeedtestHandler`: Ookla fixed and mobile network performance tiles
 - `OpenCellIDHandler`: OpenCellID cell tower locations by country
 - `NasaSRTMHandler`: NASA SRTM 30 m digital elevation model tiles
-- `GlofasHandler`: Copernicus GloFAS global river flood hazard depth and water masks by return period
+- `CEMSFloodHazardHandler`: Copernicus CEMS global river flood hazard depth and water masks by return period (domain alias: `JRCFloodHazardHandler`)
 - `AqueductFloodHandler`: WRI Aqueduct coastal and riverine flood hazard rasters
 - `AdminBoundaries`: country and subnational administrative boundary polygons
 
