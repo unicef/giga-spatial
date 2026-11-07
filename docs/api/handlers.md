@@ -139,9 +139,9 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
         - ensure_data_available
         - get_available_data_info
 
-## GloFAS flood hazard
+## CEMS river flood hazard
 
-::: gigaspatial.handlers.glofas.GlofasHandler
+::: gigaspatial.handlers.cems.flood_hazard.CEMSFloodHazardHandler
     options:
       show_source: false
       inherited_members: true

@@ -40,7 +40,7 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | Ookla Speedtest | `OoklaSpeedtestHandler` | Fixed and mobile network performance tiles |
 | OpenCellID | `OpenCellIDHandler` | Crowd-sourced cell tower locations by country |
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |
-| Copernicus GloFAS | `GlofasHandler` | Global river flood hazard depth and water masks by return period |
+| Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 

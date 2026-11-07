@@ -24,7 +24,7 @@ Use it for humanitarian, development, connectivity, and climate analysis: map po
   - **OpenStreetMap road networks**: country-scale road networks from Geofabrik extracts (`OSMRoadsHandler`)
   - **Socioeconomic and humanitarian**: Meta Relative Wealth Index (`RWIHandler`) and Humanitarian Data Exchange (`HDXHandler`)
   - **Connectivity and infrastructure**: Ookla Speedtest tiles (`OoklaSpeedtestHandler`) and OpenCellID cell towers (`OpenCellIDHandler`)
-  - **Terrain and flood hazard**: NASA SRTM elevation (`NasaSRTMHandler`), Copernicus GloFAS river flood hazard (`GlofasHandler`), and WRI Aqueduct flood hazard (`AqueductFloodHandler`)
+  - **Terrain and flood hazard**: NASA SRTM elevation (`NasaSRTMHandler`), Copernicus CEMS river flood hazard (`CEMSFloodHazardHandler`), and WRI Aqueduct flood hazard (`AqueductFloodHandler`)
   - **Administrative boundaries**: `AdminBoundaries`
 - **[Fetchers](https://unicef.github.io/giga-spatial/latest/api/fetchers/)** query datasets served by an API or database: OpenStreetMap places (`OSMLocationFetcher`) and road networks (`OSMRoadsFetcher`), Giga schools (`GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher`), Healthsites.io (`HealthSitesFetcher`), Overture Maps amenities (`OvertureAmenityFetcher`), UNICEF SDG indicators (`UnicefDataFetcher`), M-Lab speed tests in BigQuery (`MLabFetcher`), and Google Earth Engine (`GEEProfiler`).
 - **[Generators](https://unicef.github.io/giga-spatial/latest/api/generators/)** map datasets onto points of interest (`PoiViewGenerator`) or zones (`H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, `GeometryBasedZonalViewGenerator`) and return a view.
