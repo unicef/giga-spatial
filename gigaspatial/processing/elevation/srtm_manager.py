@@ -8,7 +8,8 @@ import tempfile
 import threading
 
 from gigaspatial.processing.elevation.srtm_parser import SRTMParser
-from gigaspatial.handlers.nasa.srtm import NasaSRTMDownloader
+from gigaspatial.handlers.nasa.srtm import NasaSRTMDownloader, NasaSRTMConfig
+from gigaspatial.handlers.base import DownloadOptions
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.config import config
@@ -59,7 +60,13 @@ class SRTMManager:
         else:
             self.data_store = LocalDataStore()
 
-        self.downloader = downloader or NasaSRTMDownloader(data_store=self.data_store)
+        if downloader is not None:
+            self.downloader = downloader
+        else:
+            self.downloader = NasaSRTMDownloader(
+                config=NasaSRTMConfig(base_path=self.srtm_directory),
+                data_store=self.data_store,
+            )
 
         # Concurrency locks
         self._global_lock = threading.Lock()
@@ -177,7 +184,12 @@ class SRTMManager:
                     }
 
                     # Use download_data_unit for direct download
-                    self.downloader.download_data_unit(tile_info)
+                    options = (
+                        self.downloader.options_type(show_progress=False)
+                        if hasattr(self.downloader, "options_type")
+                        else DownloadOptions(show_progress=False)
+                    )
+                    self.downloader.download_data_unit(tile_info, options=options)
 
                     # Rebuild index to find new tile
                     self.tile_index = self._build_tile_index()
