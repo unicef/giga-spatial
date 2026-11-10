@@ -167,7 +167,9 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
             return False
 
     def download_data_unit(
-        self, tile_info: Union[pd.Series, dict], options: DownloadOptions
+        self,
+        tile_info: Union[pd.Series, dict],
+        options: Optional[DownloadOptions] = None,
     ) -> Path:
         """
         Download data file for a single SRTM tile.
@@ -178,6 +180,8 @@ class NasaSRTMDownloader(BaseHandlerDownloader):
         Raises:
             requests.RequestException: If the download fails.
         """
+        if options is None:
+            options = self.options_type()
 
         tile_url = tile_info.get("tile_url") or tile_info.get("tile_uri")
         public = self.config.s3_bucket == "lp-prod-public"
