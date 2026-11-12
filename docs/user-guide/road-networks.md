@@ -96,7 +96,7 @@ network = network.insert_points(fiber, id_column="fiber_id", max_distance=1000)
 
 Each point becomes a node, joined to its nearest road at the foot of the perpendicular. The road is split there at a new node of kind `split`, and a `connection` edge joins the point to it. A point within `snap_to_node` meters (5 by default) of a road's end connects to that end instead. The split pieces add up exactly to the road's length. Points farther than `max_distance` from any road are skipped, with a warning; `return_skipped=True` also returns them.
 
-`chain=True` joins a point to an already inserted point when that point is closer than any road, nearest the road first. The frame's other columns become node attributes. Every edit returns a new network; the original does not change.
+`chain=True` joins a point to an already inserted point when that point is closer than any road, nearest the road first. To join points directly to existing nodes without splitting edges (for example, on a network built with `from_points`), use `connect_points(points, connect="knn", k=1, max_distance=...)`. The frame's other columns become node attributes. Every edit returns a new network; the original does not change.
 
 ## Shortest paths
 

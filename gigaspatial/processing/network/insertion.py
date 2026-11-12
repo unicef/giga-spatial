@@ -1,4 +1,4 @@
-"""Insertion: adding points of interest to a spatial network, joined to their nearest road."""
+"""Insertion: adding points of interest to a spatial network, joined to their nearest road or nodes."""
 
 from functools import cached_property
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
@@ -13,7 +13,14 @@ from scipy.spatial import cKDTree
 from gigaspatial.processing.geo import estimate_utm_crs_with_fallback
 from gigaspatial.processing.network._arrays import next_keys
 from gigaspatial.processing.network.editing import LOGGER, _concat_tables, _with_columns
-from gigaspatial.processing.network.geodesy import WGS84, chord_to_meters, haversine, line_lengths, unit_vectors
+from gigaspatial.processing.network.geodesy import (
+    WGS84,
+    chord_to_meters,
+    haversine,
+    line_lengths,
+    meters_to_chord,
+    unit_vectors,
+)
 from gigaspatial.processing.network.points import points_table
 
 # Edges points are never joined to: the connections of earlier insertions.
@@ -118,12 +125,140 @@ class InsertionMixin:
             LOGGER.warning(f"{len(skipped)} points are farther than {max_distance} m from any road and were skipped")
 
         network = self._with_points(table, inserted, connected_by_road, foot, target_node, link_to, road_distance, link_distance)
-        if not return_skipped:
-            return network
-        if isinstance(points, pd.DataFrame):
-            return network, points.iloc[skipped]
-        items = list(points)
-        return network, [items[i] for i in skipped]
+        return _with_skipped(network, points, skipped, return_skipped)
+
+    def connect_points(
+        self,
+        points: Any,
+        id_column: Optional[str] = None,
+        connect: str = "knn",
+        k: int = 1,
+        max_distance: Optional[float] = None,
+        nodes: Optional[Any] = None,
+        return_skipped: bool = False,
+    ) -> Any:
+        """Add points of interest as nodes, each joined directly to existing nodes.
+
+        Each point becomes a node of kind ``point``, joined by straight-line
+        edges to its ``k`` nearest nodes (``connect="knn"``) or to every node
+        within ``max_distance`` meters (``connect="distance"``). Edges to nodes
+        of kind ``point`` get kind ``point_link``; edges to other nodes get
+        kind ``connection``. No existing edge is split. In a directed network,
+        new edges run both ways.
+
+        Args:
+            points: A GeoDataFrame of points, a DataFrame with latitude and
+                longitude columns, or a list of ``(lat, lon)`` tuples. Their
+                other columns become node attributes.
+            id_column: Column holding the point IDs. The frame's index otherwise.
+            connect: ``"knn"`` joins each point to its ``k`` nearest candidate
+                nodes; ``"distance"`` joins each point to every candidate node
+                within ``max_distance`` meters.
+            k: Number of neighbours for ``"knn"``.
+            max_distance: Meters. Required for ``"distance"``; with ``"knn"``
+                it drops longer links. Points with no candidate node within this
+                distance are skipped, with a warning.
+            nodes: Candidate target nodes: node IDs, a boolean mask in node
+                order, or a boolean Series indexed by node ID. All existing
+                nodes otherwise.
+            return_skipped: Also return the points that were skipped.
+
+        Returns:
+            The new network, or ``(network, skipped_points)``. When the
+            network's weight is not ``length``, new edges get that weight equal
+            to their length.
+
+        Raises:
+            ValueError: If point IDs repeat or are already node IDs, a point
+                column is named ``x``, ``y``, or ``kind``, the network has no
+                candidate nodes, or ``connect`` or ``k`` is invalid.
+            KeyError: If ``nodes`` names a node ID not in the network.
+        """
+        if connect == "knn":
+            if int(k) < 1:
+                raise ValueError(f"k must be at least 1, got {k}")
+        elif connect == "distance":
+            if max_distance is None:
+                raise ValueError('connect="distance" needs max_distance')
+        else:
+            raise ValueError(f'connect must be "knn" or "distance", got {connect!r}')
+
+        table = points_table(points, id_column)
+        clash = table.index.intersection(self._nodes.index)
+        if len(clash):
+            raise ValueError(f"{len(clash)} point IDs are already node IDs, for example {list(clash[:5])}")
+        candidates, tree = self._candidate_nodes(nodes)
+
+        x, y = table["x"].to_numpy(), table["y"].to_numpy()
+        node_x, node_y = self._nodes["x"].to_numpy(), self._nodes["y"].to_numpy()
+        point_row, target_pos, length = _node_links(
+            tree, candidates, x, y, node_x, node_y, connect, int(k), max_distance
+        )
+        if max_distance is None:
+            inserted = np.ones(len(x), dtype=bool)
+        else:
+            inserted = np.zeros(len(x), dtype=bool)
+            inserted[point_row] = True
+        skipped = np.flatnonzero(~inserted)
+        if len(skipped):
+            LOGGER.warning(f"{len(skipped)} points have no node within {max_distance} m and were skipped")
+
+        network = self._with_connected_points(table, inserted, point_row, target_pos, length)
+        return _with_skipped(network, points, skipped, return_skipped)
+
+    def _candidate_nodes(self, nodes: Optional[Any]) -> Tuple[np.ndarray, cKDTree]:
+        """Positions of the candidate target nodes and a unit-sphere KD-tree over them."""
+        if nodes is None:
+            if len(self._nodes) == 0:
+                raise ValueError("The network has no nodes to connect points to")
+            return np.arange(len(self._nodes), dtype=np.int64), self._node_tree
+        if isinstance(nodes, pd.Series) and pd.api.types.is_bool_dtype(nodes.dtype):
+            selected = self._node_selection(None, nodes, None, "intersects")
+        elif not isinstance(nodes, pd.Series) and pd.api.types.is_bool_dtype(np.asarray(nodes).dtype):
+            selected = self._node_selection(None, nodes, None, "intersects")
+        else:
+            selected = self._node_selection(nodes, None, None, "intersects")
+        candidates = np.flatnonzero(selected)
+        if len(candidates) == 0:
+            raise ValueError("The network has no nodes to connect points to")
+        if len(candidates) == len(self._nodes):
+            return candidates, self._node_tree
+        xyz = unit_vectors(self._nodes["y"].to_numpy()[candidates], self._nodes["x"].to_numpy()[candidates])
+        return candidates, cKDTree(xyz)
+
+    def _with_connected_points(
+        self,
+        table: pd.DataFrame,
+        inserted: np.ndarray,
+        point_row: np.ndarray,
+        target_pos: np.ndarray,
+        length: np.ndarray,
+    ) -> "SpatialNetwork":
+        point_nodes = table[inserted].copy(deep=False)
+        point_nodes.insert(2, "kind", "point")
+        nodes = _concat_tables([self._nodes, point_nodes])
+
+        ids = self._nodes.index
+        point_ids = table.index
+        target_is_point = self._nodes["kind"].to_numpy()[target_pos] == "point"
+        kinds = np.where(target_is_point, "point_link", "connection")
+        connections = pd.DataFrame(
+            {
+                "u": point_ids.take(point_row),
+                "v": ids.take(target_pos),
+                "key": np.zeros(len(point_row), dtype=np.int16),
+                "length": length,
+                "kind": kinds,
+            }
+        )
+        if self._directed:
+            connections = pd.concat(
+                [connections, connections.rename(columns={"u": "v", "v": "u"})[connections.columns]], ignore_index=True
+            )
+        if self._weight != "length":
+            connections[self._weight] = connections["length"]
+        edges = _concat_tables([self._edges, connections], ignore_index=True)
+        return type(self)(nodes, edges, directed=self._directed, weight=self._weight, metadata=self._metadata)
 
     def _snapped_targets(self, foot: "Foot", snap_to_node: float) -> Tuple[np.ndarray, np.ndarray]:
         """For each point, the end node it snaps to (or -1 to split its road), and no point links yet."""
@@ -412,3 +547,52 @@ def _lowest_negative_id(ids: pd.Index) -> int:
         return min(0, int(ids.min())) if len(ids) else 0
     integers = [int(i) for i in ids if isinstance(i, (int, np.integer)) and not isinstance(i, bool) and i < 0]
     return min([0, *integers])
+
+
+def _node_links(
+    tree: cKDTree,
+    candidates: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    node_x: np.ndarray,
+    node_y: np.ndarray,
+    connect: str,
+    k: int,
+    max_distance: Optional[float],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Point rows, candidate target node positions, and great-circle lengths in meters."""
+    n = len(x)
+    if n == 0:
+        empty = np.empty(0, dtype=np.int64)
+        return empty, empty, np.empty(0, dtype=np.float64)
+    xyz = unit_vectors(y, x)
+    if connect == "knn":
+        k_eff = min(k, len(candidates))
+        _, j = tree.query(xyz, k=k_eff)
+        j = np.asarray(j, dtype=np.int64).reshape(n, k_eff)
+        point_row = np.repeat(np.arange(n, dtype=np.int64), k_eff)
+        target_pos = candidates[j.ravel()]
+    else:
+        radius = float(meters_to_chord(max_distance)) * (1.0 + 1e-12) + 1e-15
+        neighbours = tree.query_ball_point(xyz, radius)
+        counts = np.array([len(nb) for nb in neighbours], dtype=np.int64)
+        point_row = np.repeat(np.arange(n, dtype=np.int64), counts)
+        picked = np.concatenate(neighbours).astype(np.int64) if counts.sum() else np.empty(0, dtype=np.int64)
+        target_pos = candidates[picked]
+    length = haversine(y[point_row], x[point_row], node_y[target_pos], node_x[target_pos])
+    if max_distance is not None:
+        keep = length <= max_distance
+        point_row, target_pos, length = point_row[keep], target_pos[keep], length[keep]
+    if connect == "distance" and len(point_row):
+        order = np.lexsort((target_pos, length, point_row))
+        point_row, target_pos, length = point_row[order], target_pos[order], length[order]
+    return point_row, target_pos, length
+
+
+def _with_skipped(network: Any, points: Any, skipped: np.ndarray, return_skipped: bool) -> Any:
+    if not return_skipped:
+        return network
+    if isinstance(points, pd.DataFrame):
+        return network, points.iloc[skipped]
+    items = list(points)
+    return network, [items[i] for i in skipped]
