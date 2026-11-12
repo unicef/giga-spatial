@@ -188,6 +188,22 @@ Problems in the old `merge_points_to_graph` that must not come back:
 - the bare `except` that falls back to scanning every edge when two points share an edge;
 - projecting and copying the whole graph twice.
 
+### `connect_points`
+
+```
+connect_points(points, id_column=None, connect="knn", k=1, max_distance=None,
+               nodes=None, return_skipped=False) -> SpatialNetwork | tuple
+```
+
+Also in `gigaspatial/processing/network/insertion.py`:
+
+- Adds points as nodes of kind `point` and joins each directly to existing nodes by straight-line edges, without splitting any existing edge.
+- `connect="knn"` (with `k=1` by default) joins each point to its `k` nearest candidate nodes (`min(k, n_candidates)`); `connect="distance"` joins each point to every candidate node within `max_distance` meters.
+- Candidate searches use a 3D unit-sphere `cKDTree` (reusing `_node_tree` when `nodes=None`), and lengths and `max_distance` thresholds are computed with haversine. Planar crossings with existing edges are not checked.
+- `nodes` optionally restricts candidate target nodes by node IDs, a boolean mask in node order, or a boolean Series indexed by node ID.
+- Points with no candidate node within `max_distance` are skipped, with a warning, and returned when `return_skipped=True`.
+- New edges get `kind="point_link"` when the target node has `kind == "point"`, and `kind="connection"` otherwise (such as `"road"` or `"split"`). In a directed network, edges are added in both directions; when `weight != "length"`, the weight column is set equal to `length`.
+
 ### `simplify(keep=None, sum_columns=("length",))`
 
 - Removes nodes that only continue a road: nodes with two neighbours in an undirected network, or the osmnx rule for directed networks.
