@@ -84,6 +84,14 @@ class Config(BaseSettings):
         default="giga-spatial/1.0", alias="HDX_USER_AGENT"
     )
 
+    # CEMS Early Warning Data Store
+    # Used for GloFAS historical reanalysis. Accept the dataset licence on the
+    # EWDS dataset page before the first download.
+    EWDS_API_KEY: str = Field(default="", alias="EWDS_API_KEY")
+    EWDS_API_URL: str = Field(
+        default="https://ewds.climate.copernicus.eu/api", alias="EWDS_API_URL"
+    )
+
     # Overpass API configuration
     # Used for fetching OpenStreetMap road networks; set a mirror when the main server is down
     OVERPASS_URL: str = Field(

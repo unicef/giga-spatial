@@ -36,6 +36,7 @@ __getattr__, __dir__, _exports = attach(
             "JRCFloodHazardHandler",
             "GlofasFloodHazardHandler",
         ],
+        "gigaspatial.handlers.cems.glofas_historical": ["GlofasHistoricalHandler"],
         "gigaspatial.handlers.rwi": ["RWIHandler"],
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
@@ -118,6 +119,7 @@ if TYPE_CHECKING:
         JRCFloodHazardHandler,
         GlofasFloodHazardHandler,
     )
+    from gigaspatial.handlers.cems.glofas_historical import GlofasHistoricalHandler
     from gigaspatial.handlers.rwi import RWIHandler
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler

@@ -27,6 +27,7 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, and Ookl
 | `HEALTHSITES_API_KEY` | Healthsites.io |
 | `GEOREPO_API_KEY`, `GEOREPO_USER_EMAIL` | UNICEF GeoRepo boundaries |
 | `HDX_KEY` | Humanitarian Data Exchange (HDX) and Meta Relative Wealth Index (RWI) |
+| `EWDS_API_KEY` | GloFAS historical on the CEMS Early Warning Data Store. Accept the dataset licence before downloading. |
 | `GIGA_SCHOOL_LOCATION_API_KEY` | Giga school locations |
 | `GIGA_SCHOOL_PROFILE_API_KEY` | Giga school profiles |
 | `GIGA_SCHOOL_MEASUREMENTS_API_KEY` | Giga school connectivity measurements |
@@ -38,6 +39,7 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, and Ookl
 | Variable | Default | Used by |
 | --- | --- | --- |
 | `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | OpenStreetMap road networks. Set a mirror when the main server is down. |
+| `EWDS_API_URL` | `https://ewds.climate.copernicus.eu/api` | CEMS Early Warning Data Store API used by `GlofasHistoricalHandler`. |
 | `HDX_USER_AGENT` | `giga-spatial/1.0` | Humanitarian Data Exchange (HDX) API requests. |
 
 ## Data stores

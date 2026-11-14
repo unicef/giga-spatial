@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **GloFAS historical reanalysis by country (`gigaspatial/handlers/cems/glofas_historical.py`)**
+    -   `GlofasHistoricalHandler` downloads `cems-glofas-historical` from the CEMS Early Warning Data Store for one country. The country's administrative boundary, including islands and other parts, selects the native grid cells. Values are not resampled.
+    -   The four EWDS variables are average river discharge (`average_river_discharge_in_the_last_24_hours`), runoff water equivalent, snow depth water equivalent, and soil wetness index. The operational default is `version_4_0`. Each run reads the catalogue constraints, keeps days already stored, and requests only missing days. Intermediate days are requested again when the catalogue update time changes. A country that is current is not downloaded again.
+    -   Metadata records the country, variable, units, resolution, the UTC time of the last successful download, and the latest observation date in the source. Set `EWDS_API_KEY` and accept the CEMS-FLOODS licence before downloading. `include_auxiliary=True` also stores the version 4.0 upstream-area and elevation maps.
+
 -   **HDX configuration and authentication (`gigaspatial/config.py`, `gigaspatial/handlers/hdx.py`)**
     -   Added `HDX_KEY` and `HDX_USER_AGENT` to `Config`, loaded automatically from `.env` or system environment variables.
     -   `HDXConfig` (and `RWIConfig`) supports `hdx_key` and custom `user_agent` parameters. When an `hdx_key` is provided, requests are authenticated (`hdx_read_only=False`), bypassing anonymous rate limiting and WAF challenges. The key is masked in `__repr__`.

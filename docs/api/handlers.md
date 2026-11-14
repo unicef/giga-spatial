@@ -151,6 +151,20 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
         - ensure_data_available
         - get_available_data_info
 
+## GloFAS historical
+
+`GlofasHistoricalHandler` downloads the EWDS dataset `cems-glofas-historical` for a country. Set `EWDS_API_KEY` and accept the CEMS-FLOODS licence on the dataset page first. The operational system version is `version_4_0`. Omit `variable` to load all four daily variables, or pass one EWDS variable name. `include_auxiliary=True` also stores upstream area and elevation for version 4.0.
+
+::: gigaspatial.handlers.cems.glofas_historical.GlofasHistoricalHandler
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - load_data
+        - download_and_load
+        - ensure_data_available
+        - get_available_data_info
+
 ## OpenStreetMap roads
 
 `OSMRoadsHandler` returns a [`SpatialNetwork`](network.md) built from Geofabrik's extracts, the same network [`OSMRoadsFetcher`](fetchers.md) returns for the same area. It needs `pip install "giga-spatial[roads]"`; the [road networks guide](../user-guide/road-networks.md#whole-countries) explains which extracts a source uses and how they are stored.

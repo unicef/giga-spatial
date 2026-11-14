@@ -65,6 +65,13 @@ __getattr__, __dir__, __all__ = attach(
             "JRCFloodHazardHandler",
             "GlofasFloodHazardHandler",
         ],
+        "gigaspatial.handlers.cems.glofas_historical": [
+            "GlofasHistoricalConfig",
+            "GlofasHistoricalDownloader",
+            "GlofasHistoricalReader",
+            "GlofasHistoricalHandler",
+            "GlofasHistoricalResolveOptions",
+        ],
         "gigaspatial.handlers.rwi": [
             "RWIConfig",
             "RWIDownloader",
@@ -147,6 +154,13 @@ if TYPE_CHECKING:
         CEMSFloodHazardResolveOptions,
         JRCFloodHazardHandler,
         GlofasFloodHazardHandler,
+    )
+    from gigaspatial.handlers.cems.glofas_historical import (
+        GlofasHistoricalConfig,
+        GlofasHistoricalDownloader,
+        GlofasHistoricalReader,
+        GlofasHistoricalHandler,
+        GlofasHistoricalResolveOptions,
     )
     from gigaspatial.handlers.rwi import RWIConfig, RWIDownloader, RWIReader, RWIHandler
     from gigaspatial.handlers.nasa.srtm import (
