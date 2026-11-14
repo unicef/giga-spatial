@@ -37,6 +37,7 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | OpenStreetMap roads | `OSMRoadsHandler` | Country-scale road networks built from Geofabrik OpenStreetMap extracts, returned as a `SpatialNetwork` |
 | Meta Relative Wealth Index (RWI) | `RWIHandler` | Relative wealth index tiles per country from HDX |
 | Humanitarian Data Exchange (HDX) | `HDXHandler` | Datasets and resources published on HDX |
+| UNOSAT | `UnosatHandler` | Historical disaster products and assessments for a country, across every activation type |
 | Ookla Speedtest | `OoklaSpeedtestHandler` | Fixed and mobile network performance tiles |
 | OpenCellID | `OpenCellIDHandler` | Crowd-sourced cell tower locations by country |
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |

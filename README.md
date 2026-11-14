@@ -22,7 +22,7 @@ Use it for humanitarian, development, connectivity, and climate analysis: map po
   - **Population and settlement**: WorldPop (`WPPopulationHandler`) and GHSL (`GHSLDataHandler` for `GHS_POP`, `GHS_BUILT_S`, `GHS_SMOD`, building height, and volume)
   - **Building footprints**: Google-Microsoft combined buildings (`GoogleMSBuildingsHandler`), Google Open Buildings (`GoogleOpenBuildingsHandler`), and Microsoft Global Buildings (`MSBuildingsHandler`)
   - **OpenStreetMap road networks**: country-scale road networks from Geofabrik extracts (`OSMRoadsHandler`)
-  - **Socioeconomic and humanitarian**: Meta Relative Wealth Index (`RWIHandler`) and Humanitarian Data Exchange (`HDXHandler`)
+  - **Socioeconomic and humanitarian**: Meta Relative Wealth Index (`RWIHandler`), Humanitarian Data Exchange (`HDXHandler`), and UNOSAT disaster products (`UnosatHandler`)
   - **Connectivity and infrastructure**: Ookla Speedtest tiles (`OoklaSpeedtestHandler`) and OpenCellID cell towers (`OpenCellIDHandler`)
   - **Terrain and flood hazard**: NASA SRTM elevation (`NasaSRTMHandler`), Copernicus GloFAS river flood hazard (`GlofasHandler`), and WRI Aqueduct flood hazard (`AqueductFloodHandler`)
   - **Administrative boundaries**: `AdminBoundaries`

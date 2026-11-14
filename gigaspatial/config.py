@@ -147,6 +147,7 @@ class Config(BaseSettings):
             "glofas": "glofas",
             "opencellid": "opencellid",
             "hdx": "hdx",
+            "unosat": "unosat",
             "poi": "poi",
             "zonal": "zonal",
             "nasa_srtm": "nasa_srtm",
