@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+-   **UNOSAT historical disaster products (`gigaspatial/handlers/unosat.py`)**
+    -   `UnosatHandler` builds a country catalogue from the public UNOSAT products service and downloads the original files for every activation type the catalogue publishes.
+    -   Event dates come from GLIDE numbers. `created_at` stays the publication date. Satellite acquisition dates and "as of" observation dates are stored separately, and a missing date stays null.
+    -   A later run requests the catalogue again, downloads only new or changed files, and keeps a replaced file beside the new one.
+
 ## [v0.11.0] - 2026-11-03
 
 ### Added
