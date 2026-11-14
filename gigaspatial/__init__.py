@@ -31,6 +31,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.ookla_speedtest": ["OoklaSpeedtestHandler"],
         "gigaspatial.handlers.opencellid": ["OpenCellIDHandler"],
         "gigaspatial.handlers.hdx": ["HDXHandler"],
+        "gigaspatial.handlers.unosat": ["UnosatHandler"],
         "gigaspatial.handlers.glofas": ["GlofasHandler"],
         "gigaspatial.handlers.rwi": ["RWIHandler"],
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
@@ -109,6 +110,7 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.ookla_speedtest import OoklaSpeedtestHandler
     from gigaspatial.handlers.opencellid import OpenCellIDHandler
     from gigaspatial.handlers.hdx import HDXHandler
+    from gigaspatial.handlers.unosat import UnosatHandler
     from gigaspatial.handlers.glofas import GlofasHandler
     from gigaspatial.handlers.rwi import RWIHandler
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler

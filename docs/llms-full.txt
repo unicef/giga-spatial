@@ -107,6 +107,7 @@ frame = population.load_into_dataframe("RWA", crop_to_source=True)
 - `OpenCellIDHandler`: OpenCellID cell tower locations by country
 - `NasaSRTMHandler`: NASA SRTM 30 m digital elevation model tiles
 - `GlofasHandler`: Copernicus GloFAS global river flood hazard depth and water masks by return period
+- `UnosatHandler`: UNOSAT historical disaster products and assessments for a country
 - `AqueductFloodHandler`: WRI Aqueduct coastal and riverine flood hazard rasters
 - `AdminBoundaries`: country and subnational administrative boundary polygons
 
