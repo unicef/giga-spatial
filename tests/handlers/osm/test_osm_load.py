@@ -133,6 +133,29 @@ def test_an_area_without_roads(handler):
         handler.reader.load(box(29.5, -2.5, 29.51, -2.49))
 
 
+def test_largest_component_is_chosen_before_simplification(store, geofabrik, tmp_path):
+    """A long road chain with more raw nodes beats a smaller junction network that keeps more simplified nodes."""
+    target = tmp_path / RWANDA
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with osmium.SimpleWriter(str(target)) as writer:
+        # Component 1: a 6-node chain (simplifies to 2 endpoint nodes: 1 and 6).
+        for i in range(1, 7):
+            writer.add_node(osmium.osm.mutable.Node(id=i, location=(30.06 + 0.0005 * i, -1.95)))
+        writer.add_way(osmium.osm.mutable.Way(id=100, nodes=[1, 2, 3, 4, 5, 6], tags={"highway": "primary"}))
+        # Component 2: a 5-node star/H junction network (all 5 nodes have degree != 2, so all 5 survive simplify).
+        for i, (dx, dy) in enumerate([(0, 0), (1, 0), (-1, 1), (-1, -1), (2, 1)], start=10):
+            writer.add_node(osmium.osm.mutable.Node(id=i, location=(30.07 + 0.0005 * dx, -1.95 + 0.0005 * dy)))
+        for way_id, pair in enumerate([(10, 11), (10, 12), (10, 13), (11, 14)], start=200):
+            writer.add_way(osmium.osm.mutable.Way(id=way_id, nodes=list(pair), tags={"highway": "residential"}))
+    handler = OSMRoadsHandler(data_store=store, base_path=Path("osm/geofabrik"))
+    cropped = handler.reader.load(AREA)
+    assert set(cropped.node_index) == {1, 6}
+    whole = handler.reader.load("RWA")
+    assert set(whole.node_index) == {1, 6}
+    from_path = handler.reader.load(RWANDA)
+    assert set(from_path.node_index) == {1, 6}
+
+
 def test_crop_to_geometry_takes_the_area_crs(handler):
     network = handler.reader.stored_network(RWANDA, OSMRoadsReadOptions(), simplified=False)
     from pyproj import Transformer

@@ -320,8 +320,15 @@ def count_streets(network: SpatialNetwork) -> pd.Series:
 
 
 def simplify_road_network(network: SpatialNetwork) -> SpatialNetwork:
-    """``network.simplify()``, with ``metadata["build"]["simplified"]`` set."""
-    return with_metadata(network.simplify(), build={**network.metadata.get("build", {}), "simplified": True})
+    """``network.simplify()``, with ``metadata["build"]["simplified"]`` and ``largest_component_node`` set."""
+    raw_largest = network.nodes.index[network._component_labels() == 0] if len(network.nodes) else network.nodes.index
+    simplified = network.simplify()
+    kept = simplified.nodes.index.intersection(raw_largest)
+    node = int(kept[0]) if len(kept) else None
+    return with_metadata(
+        simplified,
+        build={**network.metadata.get("build", {}), "simplified": True, "largest_component_node": node},
+    )
 
 
 def with_metadata(network: SpatialNetwork, **changes: Any) -> SpatialNetwork:

@@ -137,6 +137,40 @@ def test_a_checksum_mismatch_stores_nothing(handler, geofabrik, tmp_path):
         handler.downloader.download_data_unit(unit, handler.downloader.options_type())
 
 
+def test_a_stalled_download_is_retried(handler, geofabrik, monkeypatch, tmp_path):
+    dated = geofabrik.serve("africa/rwanda", LATEST_DATE)
+    real = geofabrik.get
+    stalls = {"left": 1}
+
+    def get(url, **kwargs):
+        if url == dated and stalls["left"]:
+            stalls["left"] -= 1
+            raise requests.ReadTimeout("timed out")
+        return real(url, **kwargs)
+
+    monkeypatch.setattr(requests, "get", get)
+    assert handler.ensure_data_available("RWA")
+    assert stalls["left"] == 0
+    assert (tmp_path / "osm/geofabrik" / LATEST_DATE / "africa/rwanda.osm.pbf").exists()
+
+
+def test_a_download_that_keeps_stalling_still_fails(handler, geofabrik, monkeypatch, tmp_path):
+    dated = geofabrik.serve("africa/rwanda", LATEST_DATE)
+    real = geofabrik.get
+    calls = {"n": 0}
+
+    def get(url, **kwargs):
+        if url == dated:
+            calls["n"] += 1
+            raise requests.ConnectionError("reset")
+        return real(url, **kwargs)
+
+    monkeypatch.setattr(requests, "get", get)
+    assert not handler.ensure_data_available("RWA")
+    assert calls["n"] == 3
+    assert not (tmp_path / "osm/geofabrik" / LATEST_DATE / "africa/rwanda.osm.pbf").exists()
+
+
 def test_an_expired_date_says_so(handler, geofabrik):
     assert not handler.ensure_data_available("RWA", date="2026-10-10")
     (unit,) = handler.config.get_relevant_data_units("RWA", date="2026-10-10")
