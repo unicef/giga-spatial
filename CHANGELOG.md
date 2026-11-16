@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **SRTM tile auto-download in LOS analysis (`gigaspatial/processing/elevation/srtm_manager.py`, `gigaspatial/handlers/nasa/srtm.py`)**
+    -   Fixed `TypeError: NasaSRTMDownloader.download_data_unit() missing 1 required positional argument: 'options'` when `LOSAnalyzer.analyze()` encounters missing SRTM tiles. `SRTMManager` now forwards typed `DownloadOptions(show_progress=False)` to `download_data_unit`.
+    -   `NasaSRTMDownloader.download_data_unit` now treats `options` as optional (`options: Optional[DownloadOptions] = None`), defaulting to `self.options_type()`, so direct single-argument calls succeed without raising.
+    -   `SRTMManager` now configures the downloader with `NasaSRTMConfig(base_path=self.srtm_directory)` when no explicit downloader is supplied, ensuring missing tiles are downloaded into the manager's configured directory.
 -   **HDX downloads and WAF challenge detection (`gigaspatial/handlers/hdx.py`)**
     -   `HDXDownloader` verifies downloaded files have non-zero size before committing them to the data store, preventing 0-byte files from being cached when HDX returns an AWS WAF anti-bot challenge (HTTP 202).
     -   Failed downloads retry up to 3 times with exponential backoff (`time.sleep(2 ** attempt)`).
