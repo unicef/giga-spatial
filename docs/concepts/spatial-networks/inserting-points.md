@@ -121,3 +121,13 @@ Only step 4 loops in Python, and it loops over affected edges, not points. `chai
 - Points join roads only. Connections and links from earlier insertions are never split, so inserting fibre nodes after schools does not connect a fibre node to a school's connection.
 - A point is joined to the nearest road edge, whatever it is: a service road, a track if the network type includes tracks, or a one-way street. Choose the `network_type` with that in mind; `"drive_service"`, the default, includes the service roads that often lead to schools.
 - `simplify` never removes nodes of kind `point` or `split`, so a network with inserted points can be simplified without losing them (see [Reduction](reduction.md)).
+
+## Connecting points directly to nodes: `connect_points`
+
+When a network has no road edges (such as a network built with [`from_points`](getting-a-network.md#points-joined-to-their-neighbours-from_points) or `add_nodes`), or when you want to join points directly to existing nodes without splitting road edges, use `connect_points`.
+
+Each point becomes a node of kind `point`, joined by straight-line edges to its `k` nearest nodes (`connect="knn"`, `k=1` by default) or to every node within `max_distance` metres (`connect="distance"`), using the spherical KD-tree on the network's nodes. Edges to nodes of kind `point` get kind `point_link`; edges to other nodes (such as `road` or `split`) get kind `connection`. No existing edge is split.
+
+- **`connect` and `k`.** `connect="knn"` (the default, with `k=1`) joins each point to its `k` nearest candidate nodes. `connect="distance"` joins each point to every candidate node within `max_distance` metres.
+- **`max_distance` and `return_skipped`.** With `connect="knn"`, links longer than `max_distance` are dropped; with `connect="distance"`, `max_distance` is required. Points with no candidate node within `max_distance` are skipped, with a warning, and `return_skipped=True` returns `(network, skipped_points)`.
+- **`nodes`.** Restrict which existing nodes points may connect to by passing node IDs, a boolean mask in node order, or a boolean Series indexed by node ID (for example `nodes=network.nodes["kind"] == "road"`). All existing nodes are candidates by default.
