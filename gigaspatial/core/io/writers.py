@@ -3,6 +3,7 @@ Module for writing datasets (DataFrames, GeoDataFrames, JSON) to a DataStore.
 Provides high-level utilities for serializing geospatial and tabular data.
 """
 
+import importlib
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
@@ -30,6 +31,18 @@ def write_json(data, data_store: DataStore = None, path=None, **kwargs):
         json.dump(data, f, **kwargs)
 
 
+def _write_excel(df: pd.DataFrame, buf, engine: str = "openpyxl", **kwargs):
+    """Write a DataFrame to Excel and raise an install hint if the engine is missing."""
+    try:
+        importlib.import_module(engine)
+        return df.to_excel(buf, engine=engine, **kwargs)
+    except ImportError as err:
+        raise ImportError(
+            f"Writing Excel files requires '{engine}'. "
+            "Install it with: pip install 'giga-spatial[excel]'"
+        ) from err
+
+
 def write_dataset(data, data_store: DataStore = None, path=None, **kwargs):
     """
     Write DataFrame, GeoDataFrame, or a generic object to various file formats.
@@ -55,7 +68,7 @@ def write_dataset(data, data_store: DataStore = None, path=None, **kwargs):
 
     PANDAS_WRITERS = {
         ".csv": lambda df, buf, **kw: df.to_csv(buf, **kw),
-        ".xlsx": lambda df, buf, **kw: df.to_excel(buf, engine="openpyxl", **kw),
+        ".xlsx": lambda df, buf, **kw: _write_excel(df, buf, engine="openpyxl", **kw),
         ".json": lambda df, buf, **kw: df.to_json(buf, **kw),
         ".parquet": lambda df, buf, **kw: df.to_parquet(buf, **kw),
     }
@@ -126,11 +139,13 @@ def write_dataset(data, data_store: DataStore = None, path=None, **kwargs):
             try:
                 with data_store.open(path, mode) as f:
                     PANDAS_WRITERS[suffix](data, f, **kwargs)
+            except ImportError:
+                raise
             except Exception as e:
                 raise ValueError(f"Error writing DataFrame: {str(e)}")
 
     except Exception as e:
-        if isinstance(e, (TypeError, ValueError)):
+        if isinstance(e, (TypeError, ValueError, ImportError)):
             raise
         raise RuntimeError(f"Unexpected error writing dataset: {str(e)}")
 
