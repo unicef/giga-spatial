@@ -56,11 +56,14 @@ __getattr__, __dir__, __all__ = attach(
             "HDXReader",
             "HDXHandler",
         ],
-        "gigaspatial.handlers.glofas": [
-            "GlofasConfig",
-            "GlofasDownloader",
-            "GlofasReader",
-            "GlofasHandler",
+        "gigaspatial.handlers.cems.flood_hazard": [
+            "CEMSFloodHazardConfig",
+            "CEMSFloodHazardDownloader",
+            "CEMSFloodHazardReader",
+            "CEMSFloodHazardHandler",
+            "CEMSFloodHazardResolveOptions",
+            "JRCFloodHazardHandler",
+            "GlofasFloodHazardHandler",
         ],
         "gigaspatial.handlers.rwi": [
             "RWIConfig",
@@ -136,11 +139,14 @@ if TYPE_CHECKING:
         OpenCellIDHandler,
     )
     from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
-    from gigaspatial.handlers.glofas import (
-        GlofasConfig,
-        GlofasDownloader,
-        GlofasReader,
-        GlofasHandler,
+    from gigaspatial.handlers.cems.flood_hazard import (
+        CEMSFloodHazardConfig,
+        CEMSFloodHazardDownloader,
+        CEMSFloodHazardReader,
+        CEMSFloodHazardHandler,
+        CEMSFloodHazardResolveOptions,
+        JRCFloodHazardHandler,
+        GlofasFloodHazardHandler,
     )
     from gigaspatial.handlers.rwi import RWIConfig, RWIDownloader, RWIReader, RWIHandler
     from gigaspatial.handlers.nasa.srtm import (

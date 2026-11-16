@@ -23,6 +23,14 @@ All notable changes to this project will be documented in this file.
 -   **OSM road component selection (`gigaspatial/handlers/osm/roads.py`, `gigaspatial/handlers/osm/pbf.py`)**
     -   `OSMRoadsHandler` now selects the largest connected component before simplifying (and preserves the raw largest component when loading cached simplified extracts), matching `osmnx` so a long road chain with many intermediate nodes is not discarded in favor of a smaller junction network.
 
+### Changed
+
+-   **Refactored flood hazard handler to CEMS (`gigaspatial/handlers/cems/`)**
+    -   Replaced `GlofasHandler` with `CEMSFloodHazardHandler` in `gigaspatial/handlers/cems/flood_hazard.py` to accurately reflect that the dataset provides static Copernicus Emergency Management Service / JRC global river flood hazard maps (return periods 10–500 years), rather than real-time GloFAS river discharge forecasts.
+    -   Added domain aliases `JRCFloodHazardHandler` and `GlofasFloodHazardHandler`.
+    -   Removed `GlofasHandler` and `gigaspatial/handlers/glofas.py`.
+    -   Base storage path updated to `bronze/cems/flood_hazard`.
+
 ## [v0.11.0] - 2026-11-03
 
 ### Added

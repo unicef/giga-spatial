@@ -1,13 +1,13 @@
 """
-Tests for the GloFAS flood hazard handler.
+Tests for the CEMS global river flood hazard handler.
 
 Offline tests use an explicit geometry and a two-tile stand-in for the
 published grid. The live test resolves that geometry against the real tile
 index and checks the depth map exists.
 
 Run with:
-    pytest tests/handlers/glofas/test_glofas.py -v
-    pytest tests/handlers/glofas/test_glofas.py -m live -v
+    pytest tests/handlers/cems/test_flood_hazard.py -v
+    pytest tests/handlers/cems/test_flood_hazard.py -m live -v
 """
 
 from __future__ import annotations
@@ -22,8 +22,15 @@ import requests
 from rasterio.transform import from_bounds
 from shapely.geometry import box
 
-from gigaspatial.handlers.glofas import GlofasHandler
-import gigaspatial.handlers.glofas as module
+from gigaspatial.handlers.cems.flood_hazard import (
+    CEMSFloodHazardHandler,
+    CEMSFloodHazardConfig,
+    CEMSFloodHazardDownloader,
+    CEMSFloodHazardReader,
+    JRCFloodHazardHandler,
+    GlofasFloodHazardHandler,
+)
+import gigaspatial.handlers.cems.flood_hazard as module
 
 
 # Inside published tile ID11 (N80_W140): lon -140..-130, lat 70..80.
@@ -46,7 +53,7 @@ def install_tiles(handler):
 
 @pytest.fixture
 def handler(tmp_path):
-    built = GlofasHandler(base_path=tmp_path / "glofas", n_workers=1)
+    built = CEMSFloodHazardHandler(base_path=tmp_path / "cems" / "flood_hazard", n_workers=1)
     install_tiles(built)
     return built
 
@@ -163,13 +170,18 @@ def test_unknown_keyword_raises(handler):
 
 
 def test_downloader_and_reader_declare_config_type():
-    assert module.GlofasDownloader.config_type is module.GlofasConfig
-    assert module.GlofasReader.config_type is module.GlofasConfig
+    assert CEMSFloodHazardDownloader.config_type is CEMSFloodHazardConfig
+    assert CEMSFloodHazardReader.config_type is CEMSFloodHazardConfig
+
+
+def test_domain_aliases():
+    assert JRCFloodHazardHandler is CEMSFloodHazardHandler
+    assert GlofasFloodHazardHandler is CEMSFloodHazardHandler
 
 
 @pytest.mark.live
 def test_resolved_units_exist_remotely(tmp_path):
-    handler = GlofasHandler(base_path=tmp_path / "glofas", n_workers=1)
+    handler = CEMSFloodHazardHandler(base_path=tmp_path / "cems" / "flood_hazard", n_workers=1)
     units = handler.config.get_relevant_data_units(SMALL_SOURCE, return_period=10)
 
     assert units
