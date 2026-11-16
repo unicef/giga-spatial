@@ -579,7 +579,7 @@ class PoiViewGenerator:
 
             # Create buffers around POIs
             buffer_gdf = buffer_geodataframe(
-                self.points_gdf,
+                self.points_gdf[["poi_id", "geometry"]],
                 buffer_distance_meters=map_radius_meters,
                 cap_style="round",
             )

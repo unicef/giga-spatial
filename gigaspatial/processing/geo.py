@@ -667,7 +667,7 @@ def aggregate_points_to_zones(
     agg_method_for_output_col: Dict[str, str] = {}
 
     if isinstance(aggregation, str):
-        if aggregation == "count":
+        if aggregation == "count" and not value_columns:
             agg_funcs["__count"] = "count"
         elif value_columns is not None:
             agg_funcs = {col: aggregation for col in value_columns}
@@ -700,7 +700,10 @@ def aggregate_points_to_zones(
 
     # --- Spatial join ---
     result = zones.copy()
-    joined = gpd.sjoin(points_gdf, zones, how="inner", predicate=point_zone_predicate)
+    minimal_zones = zones[[zone_id_column, "geometry"]]
+    joined = gpd.sjoin(
+        points_gdf, minimal_zones, how="inner", predicate=point_zone_predicate
+    )
 
     # --- Aggregation ---
     if "__count" in agg_funcs:
