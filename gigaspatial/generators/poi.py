@@ -615,14 +615,8 @@ class PoiViewGenerator:
                 )
 
                 output_col_from_agg = (
-                    f"{value_column}_{actual_stat}" if value_column else "point_count"
+                    value_column if value_column is not None else "point_count"
                 )
-                results_df = aggregation_result_gdf[["poi_id", output_col_from_agg]]
-
-                if output_column != "zonal_stat":
-                    results_df = results_df.rename(
-                        columns={output_col_from_agg: output_column}
-                    )
 
             else:
                 if value_column is None:
