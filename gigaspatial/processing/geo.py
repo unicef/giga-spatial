@@ -613,6 +613,10 @@ def aggregate_points_to_zones(
     """
     Aggregate point data to zones with flexible aggregation methods.
 
+    When ``aggregation="count"`` and ``value_columns`` is omitted, outputs
+    ``point_count`` (with ``output_suffix`` appended). When ``value_columns``
+    is provided, counts or aggregates non-null values into each column.
+
     For zones with no overlapping points:
     - ``"count"`` aggregation fills missing values with ``0``.
     - All other aggregations fill missing values with ``np.nan``.

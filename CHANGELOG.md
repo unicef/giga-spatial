@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **Point zonal aggregation column lookup and count/collision handling (`gigaspatial/generators/poi.py`, `gigaspatial/processing/geo.py`)**
+    -   Fixed `PoiViewGenerator.map_zonal_stats` looking up `{value_column}_{stat}` (e.g. `"tests_sum"`) instead of `value_column` when aggregating point GeoDataFrames with a `value_column`, and removed the duplicate selection/rename block in the point branch.
+    -   Updated `aggregate_points_to_zones` so `aggregation="count"` uses the `"point_count"` output column only when `value_columns` is omitted; when `value_columns` is provided, it counts non-null values into each named column (fixing `map_zonal_stats(..., stat="count", value_column=...)` and `ZonalViewGenerator.map_points(..., value_columns=...)`).
+    -   Joined only `[zone_id_column, "geometry"]` in `aggregate_points_to_zones` and passed `[["poi_id", "geometry"]]` buffers in `PoiViewGenerator.map_zonal_stats` so zone or POI attributes sharing column names with `value_columns` do not collide during spatial joins or merges.
 -   **OpenCellID token redaction in logs, errors, and config `repr` (`gigaspatial/handlers/opencellid.py`)**
     -   `OpenCellIDDownloader.download_data_unit` now redacts query tokens (`token=***`) in `INFO` download logs instead of logging the authenticated URL.
     -   Sanitized exceptions (including cause/context chains and `request`/`response` URLs) in `OpenCellIDConfig.get_relevant_data_units_by_key` and `OpenCellIDDownloader.download_data_unit`, and wrapped resolved units so error logs from `BaseHandlerDownloader` do not expose the access token.
