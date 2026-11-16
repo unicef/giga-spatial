@@ -10,6 +10,7 @@ GeoJSON, Excel, etc.) into vectorized or tabular formats.
 import dataclasses
 import logging
 from pathlib import Path
+import time
 from typing import List, Mapping, Optional, Union, Dict, Any
 import tempfile
 from urllib.parse import unquote, urlparse
@@ -97,9 +98,14 @@ class HDXConfig(BaseHandlerConfig):
     # Optional configuration with defaults
     base_path: Path = Field(default=global_config.get_path("hdx", "bronze"))
     user_agent: str = Field(
-        default="gigaspatial", description="User agent for HDX API requests"
+        default_factory=lambda: global_config.HDX_USER_AGENT or "giga-spatial/1.0",
+        description="User agent for HDX API requests",
     )
     hdx_site: str = Field(default="prod", description="HDX site to use (prod or test)")
+    hdx_key: Optional[str] = Field(
+        default_factory=lambda: global_config.HDX_KEY or None,
+        description="API key for HDX authentication",
+    )
 
     units_match_country = True
     options_type = HDXResolveOptions
@@ -114,7 +120,8 @@ class HDXConfig(BaseHandlerConfig):
         rows: int = None,
         sort: str = "relevance asc, metadata_modified desc",
         hdx_site: str = "prod",
-        user_agent: str = "gigaspatial",
+        user_agent: Optional[str] = None,
+        hdx_key: Optional[str] = None,
     ) -> List[Dict]:
         """
         Search for datasets on the HDX platform.
@@ -124,7 +131,8 @@ class HDXConfig(BaseHandlerConfig):
             rows: Max number of results to return.
             sort: Field and direction to sort by.
             hdx_site: HDX environment to query.
-            user_agent: API collector identifier.
+            user_agent: API collector identifier. Defaults to configured HDX_USER_AGENT.
+            hdx_key: HDX API token. Defaults to configured HDX_KEY.
 
         Returns:
             A list of matching dataset metadata dictionaries.
@@ -134,13 +142,23 @@ class HDXConfig(BaseHandlerConfig):
                 "HDX operations require 'hdx-python-api'. "
                 "Install it with: pip install 'giga-spatial[hdx]'"
             )
+        resolved_user_agent = (
+            user_agent or global_config.HDX_USER_AGENT or "giga-spatial/1.0"
+        )
+        resolved_key = hdx_key or global_config.HDX_KEY or None
+        create_kwargs = {
+            "hdx_site": hdx_site,
+            "user_agent": resolved_user_agent,
+        }
+        if resolved_key:
+            create_kwargs["hdx_key"] = resolved_key
+            create_kwargs["hdx_read_only"] = False
+        else:
+            create_kwargs["hdx_read_only"] = True
+
         try:
-            Configuration.create(
-                hdx_site=hdx_site,
-                user_agent=user_agent,
-                hdx_read_only=True,
-            )
-        except:
+            Configuration.create(**create_kwargs)
+        except Exception:
             pass
 
         try:
@@ -153,14 +171,22 @@ class HDXConfig(BaseHandlerConfig):
 
     def __post_init__(self):
         super().__post_init__()
+        if not self.user_agent:
+            self.user_agent = global_config.HDX_USER_AGENT or "giga-spatial/1.0"
+        if self.hdx_key == "":
+            self.hdx_key = None
+
         if not _HAS_HDX or Configuration is None or Dataset is None:
             raise ImportError(
                 "HDX operations require 'hdx-python-api'. "
                 "Install it with: pip install 'giga-spatial[hdx]'"
             )
         try:
-            Configuration.read()
-            self._hdx_configured = True
+            current = Configuration.read()
+            if self.hdx_key and hasattr(current, "get_api_key") and current.get_api_key() != self.hdx_key:
+                self._hdx_configured = False
+            else:
+                self._hdx_configured = True
         except Exception:
             self._hdx_configured = False
         self.configure_hdx()
@@ -178,17 +204,41 @@ class HDXConfig(BaseHandlerConfig):
                 "HDX operations require 'hdx-python-api'. "
                 "Install it with: pip install 'giga-spatial[hdx]'"
             )
+        create_kwargs = {
+            "hdx_site": self.hdx_site,
+            "user_agent": self.user_agent,
+        }
+        if self.hdx_key:
+            create_kwargs["hdx_key"] = self.hdx_key
+            create_kwargs["hdx_read_only"] = False
+        else:
+            create_kwargs["hdx_read_only"] = True
+
         if not self._hdx_configured:
             try:
-                Configuration.create(
-                    hdx_site=self.hdx_site,
-                    user_agent=self.user_agent,
-                    hdx_read_only=True,
-                )
+                Configuration.create(**create_kwargs)
                 self._hdx_configured = True
             except Exception as e:
-                self.logger.error(f"Error configuring HDX API: {str(e)}")
-                raise
+                if hasattr(Configuration, "delete"):
+                    try:
+                        Configuration.delete()
+                        Configuration.create(**create_kwargs)
+                        self._hdx_configured = True
+                        return
+                    except Exception:
+                        pass
+                try:
+                    Configuration.read()
+                    self._hdx_configured = True
+                except Exception:
+                    self.logger.error(f"Error configuring HDX API: {str(e)}")
+                    raise
+        elif self.hdx_key and hasattr(Configuration, "delete"):
+            try:
+                Configuration.delete()
+                Configuration.create(**create_kwargs)
+            except Exception:
+                pass
 
     def fetch_dataset(self) -> Dataset:
         """Get the HDX dataset"""
@@ -334,18 +384,36 @@ class HDXConfig(BaseHandlerConfig):
         """
         Resolve an HDX resource to its local storage path.
 
+        One name is used both to find a stored file and to write a download:
+        the file name in the download URL. The resource name is used only when
+        that URL does not name a file.
+
         Args:
             unit: HDX Resource object.
             options: The resolve options (unused).
 
         Returns:
-            Absolute local path for the resource file, named after the file
-            in its download URL (which carries the format's extension), or
-            after the resource name when the URL names no file.
+            Local path for the resource file.
         """
         url = unit.get("download_url") or unit.get("url") or ""
         filename = unquote(urlparse(url).path.rsplit("/", 1)[-1]) or unit.get("name")
         return self.output_dir_path / filename
+
+    def is_unit_available(self, unit, paths) -> bool:
+        """
+        A stored HDX file counts only when it has content.
+
+        An empty file is what a blocked download leaves behind (HDX can return
+        HTTP 202 with an empty body). Treating that as available would skip
+        every later attempt to fetch the real resource.
+        """
+        if not super().is_unit_available(unit, paths):
+            return False
+        for path in paths:
+            with self.data_store.open(str(path), "rb") as handle:
+                if handle.read(1) == b"":
+                    return False
+        return True
 
     def list_resources(self) -> List[str]:
         """List all resources in the dataset directory using the data_store."""
@@ -385,12 +453,14 @@ class HDXConfig(BaseHandlerConfig):
             )
 
     def __repr__(self) -> str:
+        masked_key = "***" if self.hdx_key else "None"
         return (
             f"HDXConfig(\n"
             f"  dataset_name='{self.dataset_name}'\n"
             f"  base_path='{self.base_path}'\n"
             f"  hdx_site='{self.hdx_site}'\n"
             f"  user_agent='{self.user_agent}'\n"
+            f"  hdx_key={masked_key}\n"
             f")"
         )
 
@@ -424,13 +494,52 @@ class HDXDownloader(BaseHandlerDownloader):
         resource_name = resource.get("name", "Unknown")
         self.logger.info(f"Downloading resource: {resource_name}")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            url, local_path = resource.download(folder=tmpdir)
-            target_path = str(self.config.get_data_unit_path(resource))
-            with open(local_path, "rb") as f:
-                self.data_store.write_file(target_path, f)
+        target_path = str(self.config.get_data_unit_path(resource))
+        download_url = resource.get("url") or resource.get("download_url")
+        # HDX's file URL sometimes returns HTTP 202 with an empty body
+        # (x-amzn-waf-action: challenge). The client treats 202 as success,
+        # so an empty file must not be stored. This is not a timeout and
+        # it happens before anything is written to the data store.
+        for attempt in range(3):
+            if attempt > 0:
+                time.sleep(2 ** attempt)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                _url, local_path = resource.download(folder=tmpdir)
+                if Path(local_path).stat().st_size <= 0:
+                    continue
+                with open(local_path, "rb") as f:
+                    self.data_store.write_file(target_path, f)
+                break
+        else:
+            status, nbytes, waf = self._probe_download(download_url)
+            detail = f"HTTP {status} with {nbytes} bytes"
+            if waf:
+                detail += f", WAF action {waf}"
+            raise RuntimeError(
+                f"HDX returned no data for {resource_name} ({detail}). "
+                "The file was not stored. Consider setting an 'hdx_key', specifying a custom "
+                f"'user_agent', or downloading the file manually to '{target_path}'."
+            )
         self.logger.info(f"Downloaded resource: {resource_name} to {target_path}")
         return target_path
+
+    @staticmethod
+    def _probe_download(url: str):
+        """Return status, body length, and WAF action for an empty download."""
+        if not url:
+            return None, 0, None
+        try:
+            from hdx.api.configuration import Configuration
+            from hdx.api.utilities.url_utils import get_ckan_ready_session
+
+            response = get_ckan_ready_session(Configuration.read()).get(url, timeout=30)
+        except Exception:
+            return None, 0, None
+        return (
+            response.status_code,
+            len(response.content),
+            response.headers.get("x-amzn-waf-action"),
+        )
 
 
 class HDXReader(BaseHandlerReader):
