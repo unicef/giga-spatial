@@ -81,7 +81,7 @@ If you encounter a bug but aren't sure how to fix it or submit a pull request, y
 
 Beyond code contributions:
 
-- **Feedback and Insights:** Share your expertise and experiences related to cash transfer by contacting us at [giga@unicef.org](mailto:giga@unicef.org).
+- **Feedback and Insights:** Share your expertise and experiences related to geospatial data, school connectivity, or infrastructure mapping by contacting us at [giga@unicef.org](mailto:giga@unicef.org).
 - **Documentation:** Contribute to our journey by sharing reports, case studies, articles, blogs, or surveys. Contact us to contribute and learn more via [giga@unicef.org](mailto:giga@unicef.org).
 - **Designs:** If you're passionate about UI/UX, animations, graphics, tutorials, etc., contact us to create visuals for the Giga community via [giga@unicef.org](mailto:giga@unicef.org).
 
