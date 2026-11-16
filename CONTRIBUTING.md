@@ -32,6 +32,16 @@ The contract lives here because it describes this repository's code; update it w
 
 Tests marked `live` reach real data sources and are skipped by default. Run them with `pytest -m live`.
 
+## Publishing the docs
+
+Docs versions are the package version's minor. A release `0.11.1` updates the `0.11` docs and points `latest` at them. It does not create a `0.11.1` site. From a checkout of that release, with mike installed:
+
+```bash
+python docs/scripts/publish_docs.py --push
+```
+
+That deploys the docs, writes `robots.txt` and the root sitemap with `/latest/` URLs, and points every version's canonical URL at `/latest/`.
+
 ## How to Contribute to our Giga Project?
 
 1. **Familiarize Yourself:** Before contributing, familiarize yourself with the project by reviewing the README, code of conduct, and existing issues or pull requests.
