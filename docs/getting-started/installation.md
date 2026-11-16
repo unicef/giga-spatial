@@ -41,6 +41,7 @@ Some datasets and tools need packages that most users don't. Install them with a
 | `elevation` | itur | Refractivity in `gigaspatial.processing.elevation` |
 | `maxar` | OWSLib | `MaxarImageDownloader` |
 | `hdx` | hdx-python-api | `HDXHandler` |
+| `excel` | openpyxl, xlrd | Reading and writing `.xlsx` / `.xls` files via `read_dataset` / `write_dataset` |
 
 ## Installing from Source
 

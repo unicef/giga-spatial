@@ -2,7 +2,7 @@
 
 A data store is where a handler keeps its files. `LocalDataStore` is the default. A client is not a data store.
 
-`read_dataset` and `write_dataset` read and write a file through whichever store you pass.
+`read_dataset` and `write_dataset` read and write a file through whichever store you pass. Reading `.xlsx`/`.xls` or writing `.xlsx` requires `pip install "giga-spatial[excel]"`.
 
 ```python
 from gigaspatial import LocalDataStore, ADLSDataStore, read_dataset, write_dataset

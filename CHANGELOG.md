@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **Optional `excel` extra (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/core/io/writers.py`)**
+    -   Added `giga-spatial[excel]` (`openpyxl>=3.1.0`, `xlrd>=2.0.0`, also included in `giga-spatial[all]`) for reading `.xlsx`/`.xls` files and writing `.xlsx` files.
+    -   `read_dataset` and `write_dataset` now raise an `ImportError` with `pip install 'giga-spatial[excel]'` when the required Excel engine is missing.
 -   **HDX configuration and authentication (`gigaspatial/config.py`, `gigaspatial/handlers/hdx.py`)**
     -   Added `HDX_KEY` and `HDX_USER_AGENT` to `Config`, loaded automatically from `.env` or system environment variables.
     -   `HDXConfig` (and `RWIConfig`) supports `hdx_key` and custom `user_agent` parameters. When an `hdx_key` is provided, requests are authenticated (`hdx_read_only=False`), bypassing anonymous rate limiting and WAF challenges. The key is masked in `__repr__`.
@@ -13,6 +16,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **Clean-install imports and runtime dependencies (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/fetchers/healthsites.py`)**
+    -   Replaced `fiona.listlayers` in `read_kmz` with `pyogrio.list_layers`, removing the undeclared `fiona` dependency that broke imports of `PoiViewGenerator`, handlers, generators, and `gigaspatial.core.io` on clean installs with `geopandas>=1.0.1`.
+    -   Replaced `tenacity` in `HealthSitesFetcher._fetch_osm_country_name` with a plain 3-attempt retry loop and exponential backoff (retaining escalating timeouts while failing fast on deterministic `ValueError` lookups).
+    -   Declared `lxml>=5.0.0` (used by `OpenCellIDHandler` HTML parsing) and directly imported transitive dependencies (`pyogrio>=0.7.2`, `pyproj>=3.5.0`, `urllib3>=1.26,<3`) in `[project].dependencies`.
 -   **SRTM tile auto-download in LOS analysis (`gigaspatial/processing/elevation/srtm_manager.py`, `gigaspatial/handlers/nasa/srtm.py`)**
     -   Fixed `TypeError: NasaSRTMDownloader.download_data_unit() missing 1 required positional argument: 'options'` when `LOSAnalyzer.analyze()` encounters missing SRTM tiles. `SRTMManager` now forwards typed `DownloadOptions(show_progress=False)` to `download_data_unit`.
     -   `NasaSRTMDownloader.download_data_unit` now treats `options` as optional (`options: Optional[DownloadOptions] = None`), defaulting to `self.options_type()`, so direct single-argument calls succeed without raising.
