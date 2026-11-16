@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **OpenCellID token redaction in logs, errors, and config `repr` (`gigaspatial/handlers/opencellid.py`)**
+    -   `OpenCellIDDownloader.download_data_unit` now redacts query tokens (`token=***`) in `INFO` download logs instead of logging the authenticated URL.
+    -   Sanitized exceptions (including cause/context chains and `request`/`response` URLs) in `OpenCellIDConfig.get_relevant_data_units_by_key` and `OpenCellIDDownloader.download_data_unit`, and wrapped resolved units so error logs from `BaseHandlerDownloader` do not expose the access token.
+    -   Masked `api_token` and redacted any URL query tokens in `OpenCellIDConfig.__repr__`.
 -   **Clean-install imports and runtime dependencies (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/fetchers/healthsites.py`)**
     -   Replaced `fiona.listlayers` in `read_kmz` with `pyogrio.list_layers`, removing the undeclared `fiona` dependency that broke imports of `PoiViewGenerator`, handlers, generators, and `gigaspatial.core.io` on clean installs with `geopandas>=1.0.1`.
     -   Replaced `tenacity` in `HealthSitesFetcher._fetch_osm_country_name` with a plain 3-attempt retry loop and exponential backoff (retaining escalating timeouts while failing fast on deterministic `ValueError` lookups).
