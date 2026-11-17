@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.11.1] - 2026-11-17
+
 ### Added
 
 -   **Connecting points directly to network nodes (`gigaspatial/processing/network/insertion.py`, `gigaspatial/processing/network/points.py`)**
@@ -63,6 +65,15 @@ All notable changes to this project will be documented in this file.
 
 -   **`build_distance_graph` (`gigaspatial/processing/algorithms.py`)**
     -   Deprecated `build_distance_graph` (to be removed in 0.12) in favor of `SpatialNetwork.from_points` and `SpatialNetwork.from_point_sets`; it now emits a `DeprecationWarning` and delegates to `SpatialNetwork`.
+
+### Documentation
+
+-   **Versioned docs publishing (`docs/scripts/publish_docs.py`, `docs/scripts/site_root.py`, `docs/hooks.py`, `mkdocs.yml`, `CONTRIBUTING.md`)**
+    -   Docs now publish by minor version (`0.11.x` updates `0.11` and aliases `latest`) using `mike` with canonical URLs pointing to `/latest/`, alongside a generated `robots.txt` and root sitemap.
+-   **Domain glossary page (`GLOSSARY.md`, `docs/concepts/glossary.md`, `mkdocs.yml`)**
+    -   Published `GLOSSARY.md` at the repository root and added the **Concepts > Glossary** page included from it, and grouped the spatial networks concept pages under a **Concepts > Spatial networks** subsection.
+-   **Pull request template (`.github/pull_request_template.md`, `CONTRIBUTING.md`)**
+    -   Moved the pull request template to `.github/pull_request_template.md` and tailored it to GigaSpatial with checklists for public API exports, dependencies/extras, changelog, docs, glossary/ADRs, and new handlers.
 
 ## [v0.11.0] - 2026-11-03
 
