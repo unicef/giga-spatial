@@ -8,6 +8,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **ERA5 and ERA5-Land country handlers (`gigaspatial/handlers/cds/era5.py`, `gigaspatial/handlers/cds/era5land.py`)**
+    -   `ERA5Handler` (`cds-era5`) downloads hourly ERA5 single levels (`reanalysis-era5-single-levels`, 0.25°, from 1940). `ERA5LandHandler` (`cds-era5land`) downloads hourly ERA5-Land (`reanalysis-era5-land`, 0.1°, from 1950).
+    -   A country is resolved with `AdminBoundaries`. CDS is asked for that country's bounding boxes, and the stored grid is clipped to the country geometry without resampling.
+    -   Each dataset has its own variable catalogue (262 ERA5 variables, 60 ERA5-Land variables). Select one name, several names, or `variables="all"`.
+    -   Time is a start and end, or year, month, day, and hour. The full archive is downloaded only when `full_history=True`.
+    -   Credentials come from `CDS_API_URL` / `CDS_API_KEY`, `CDSAPI_URL` / `CDSAPI_KEY`, or `~/.cdsapirc`. The key is not stored in `repr`. Install the client with `pip install "giga-spatial[cds]"`.
+    -   `update()` compares each dataset's CDS catalogue end with the last stored hour and downloads only the missing hours. ERA5 and ERA5-Land are checked separately. There is no in-process scheduler: run `python -m gigaspatial.handlers.cds.era5 update` from cron, or call `update()` directly. Pass `--force` to ignore `update_frequency_hours` (default 24).
 -   **Connecting points directly to network nodes (`gigaspatial/processing/network/insertion.py`, `gigaspatial/processing/network/points.py`)**
     -   Added `SpatialNetwork.connect_points(points, id_column=None, connect="knn", k=1, max_distance=None, nodes=None, return_skipped=False)` to add points as `kind="point"` nodes joined directly to existing nodes by straight-line edges (`kind="point_link"` to `"point"` nodes, `kind="connection"` to other nodes) without splitting existing edges, optionally restricted to candidate target `nodes`.
     -   Supports `connect="knn"` (joining each point to its `k` nearest candidate nodes, dropping links beyond `max_distance` when set) and `connect="distance"` (joining each point to every candidate node within `max_distance` meters); points with no candidate node within `max_distance` are skipped with a warning (and returned when `return_skipped=True`).

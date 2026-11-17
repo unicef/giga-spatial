@@ -41,6 +41,8 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | OpenCellID | `OpenCellIDHandler` | Crowd-sourced cell tower locations by country |
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
+| ERA5 | `ERA5Handler` | Hourly ERA5 single-level reanalysis for a country, at 0.25°, from 1940 |
+| ERA5-Land | `ERA5LandHandler` | Hourly ERA5-Land reanalysis for a country, at 0.1°, from 1950 |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 
