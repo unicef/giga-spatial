@@ -64,6 +64,18 @@ _Avoid_: solution, design, layout
 A node of a spatial network that is already part of the existing network a connection planner connects terminals to, such as a fibre node. All roots count as one, already connected to each other. Not a source, which is the place a dataset is requested for.
 _Avoid_: source, anchor, hub
 
+**Origin**:
+A place from which distances, routes, or links are measured in a spatial network, such as a school seeking a clinic or a fibre node. Not a source, which is the place a dataset is requested for.
+_Avoid_: source, left, from-node
+
+**Target**:
+A candidate place that origins reach or link to in a spatial network, such as a clinic, a tower, or a fibre node.
+_Avoid_: right, match, to-node
+
+**Distance table**:
+A long table of reachable origin-to-target pairs and the network distance between them, used as the cost input to accessibility and facility-location models.
+_Avoid_: distance matrix, matches dataframe, cost matrix
+
 **Image downloader**:
 Saves imagery for places into a data store, from an API. The result is image files, not records, and there is no source to load.
 _Avoid_: fetcher, handler

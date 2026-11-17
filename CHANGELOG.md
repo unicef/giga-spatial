@@ -13,6 +13,13 @@ All notable changes to this project will be documented in this file.
     -   Time is a start and end, or year, month, day, and hour. The full archive is downloaded only when `full_history=True`.
     -   Credentials come from `CDS_API_URL` / `CDS_API_KEY`, `CDSAPI_URL` / `CDSAPI_KEY`, or `~/.cdsapirc`. The key is not stored in `repr`. Install the client with `pip install "giga-spatial[cds]"`.
     -   `update()` compares each dataset's CDS catalogue end with the last stored hour and downloads only the missing hours. ERA5 and ERA5-Land are checked separately. There is no in-process scheduler: run `python -m gigaspatial.handlers.cds.era5 update` from cron, or call `update()` directly. Pass `--force` to ignore `update_frequency_hours` (default 24).
+-   **Connecting points directly to network nodes (`gigaspatial/processing/network/insertion.py`, `gigaspatial/processing/network/points.py`)**
+    -   Added `SpatialNetwork.connect_points(points, id_column=None, connect="knn", k=1, max_distance=None, nodes=None, return_skipped=False)` to add points as `kind="point"` nodes joined directly to existing nodes by straight-line edges (`kind="point_link"` to `"point"` nodes, `kind="connection"` to other nodes) without splitting existing edges, optionally restricted to candidate target `nodes`.
+    -   Supports `connect="knn"` (joining each point to its `k` nearest candidate nodes, dropping links beyond `max_distance` when set) and `connect="distance"` (joining each point to every candidate node within `max_distance` meters); points with no candidate node within `max_distance` are skipped with a warning (and returned when `return_skipped=True`).
+    -   Raises `ValueError` if point IDs repeat, collide with existing node IDs, or use reserved node columns (`x`, `y`, `kind`), and shares the unit-sphere `cKDTree` link helpers (`check_connect`, `cross_set_links`, `within_set_links`) in `gigaspatial/processing/network/points.py` with `SpatialNetwork.from_points` and `SpatialNetwork.from_point_sets`.
+-   **Two-set point networks and long distance tables (`gigaspatial/processing/network/core.py`, `gigaspatial/processing/network/algorithms.py`)**
+    -   Added `SpatialNetwork.from_point_sets(origins, targets, ...)` to build an undirected network across two sets of points (`connect="knn"` or `"distance"`), with `within="none" | "origins" | "targets" | "both"` (and optional `within_k` and `within_max_distance` overrides) and a `bipartite` node column (`0` for `origins`, `1` for `targets`).
+    -   Added `SpatialNetwork.distance_table(origins=None, targets=None, max_distance=None, ...)` returning a long `["origin", "target", "distance"]` DataFrame of finite reachable pairs (excluding self-pairs), defaulting `origins` and `targets` to `bipartite == 0` and `1` when present.
 -   **Optional `excel` extra (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/core/io/writers.py`)**
     -   Added `giga-spatial[excel]` (`openpyxl>=3.1.0`, `xlrd>=2.0.0`, also included in `giga-spatial[all]`) for reading `.xlsx`/`.xls` files and writing `.xlsx` files.
     -   `read_dataset` and `write_dataset` now raise an `ImportError` with `pip install 'giga-spatial[excel]'` when the required Excel engine is missing.
@@ -23,6 +30,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **EntityTable distance graph node IDs (`gigaspatial/core/schemas/entity.py`)**
+    -   Rewired `EntityTable.to_distance_graph` and `EntityTable.to_distance_graph_with` to `SpatialNetwork.from_points` and `SpatialNetwork.from_point_sets` indexed by entity `e.id`, fixing the bug where `to_distance_graph_with` used default positional `RangeIndex` values and silently merged row `0` of both tables into a single graph node.
 -   **Point zonal aggregation column lookup and count/collision handling (`gigaspatial/generators/poi.py`, `gigaspatial/processing/geo.py`)**
     -   Fixed `PoiViewGenerator.map_zonal_stats` looking up `{value_column}_{stat}` (e.g. `"tests_sum"`) instead of `value_column` when aggregating point GeoDataFrames with a `value_column`, and removed the duplicate selection/rename block in the point branch.
     -   Updated `aggregate_points_to_zones` so `aggregation="count"` uses the `"point_count"` output column only when `value_columns` is omitted; when `value_columns` is provided, it counts non-null values into each named column (fixing `map_zonal_stats(..., stat="count", value_column=...)` and `ZonalViewGenerator.map_points(..., value_columns=...)`).
@@ -56,6 +65,11 @@ All notable changes to this project will be documented in this file.
     -   Added domain aliases `JRCFloodHazardHandler` and `GlofasFloodHazardHandler`.
     -   Removed `GlofasHandler` and `gigaspatial/handlers/glofas.py`.
     -   Base storage path updated to `bronze/cems/flood_hazard`.
+
+### Deprecated
+
+-   **`build_distance_graph` (`gigaspatial/processing/algorithms.py`)**
+    -   Deprecated `build_distance_graph` (to be removed in 0.12) in favor of `SpatialNetwork.from_points` and `SpatialNetwork.from_point_sets`; it now emits a `DeprecationWarning` and delegates to `SpatialNetwork`.
 
 ## [v0.11.0] - 2026-11-03
 
