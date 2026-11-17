@@ -57,6 +57,9 @@ site_url: https://unicef.github.io/giga-spatial
 repo_url: https://github.com/unicef/giga-spatial
 edit_uri: edit/main/docs/
 
+hooks:
+  - docs/hooks.py
+
 nav:
   - Home: index.md
   - Getting Started:
@@ -76,16 +79,18 @@ nav:
       - Settlement: user-guide/settlement-characterization.md
       - Infrastructure files: user-guide/infrastructure-normalization.md
   - Concepts:
-      - "Spatial networks": concepts/spatial-networks/index.md
-      - Getting a network: concepts/spatial-networks/getting-a-network.md
-      - The data model: concepts/spatial-networks/data-model.md
-      - Editing: concepts/spatial-networks/editing.md
-      - Inserting points: concepts/spatial-networks/inserting-points.md
-      - Reduction: concepts/spatial-networks/reduction.md
-      - Algorithms: concepts/spatial-networks/algorithms.md
-      - Storage and interoperability: concepts/spatial-networks/storage.md
-      - Worked use cases: concepts/spatial-networks/use-cases.md
-      - Performance and pitfalls: concepts/spatial-networks/performance.md
+      - Glossary: concepts/glossary.md
+      - Spatial networks:
+          - concepts/spatial-networks/index.md
+          - Getting a network: concepts/spatial-networks/getting-a-network.md
+          - The data model: concepts/spatial-networks/data-model.md
+          - Editing: concepts/spatial-networks/editing.md
+          - Inserting points: concepts/spatial-networks/inserting-points.md
+          - Reduction: concepts/spatial-networks/reduction.md
+          - Algorithms: concepts/spatial-networks/algorithms.md
+          - Storage and interoperability: concepts/spatial-networks/storage.md
+          - Worked use cases: concepts/spatial-networks/use-cases.md
+          - Performance and pitfalls: concepts/spatial-networks/performance.md
   - API Reference:
       - api/index.md
       - Handlers: api/handlers.md
@@ -163,6 +168,8 @@ markdown_extensions:
 
 plugins:
   - search
+  - mike:
+      canonical_version: latest
   - mkdocstrings:
       default_handler: python
       handlers:

@@ -772,6 +772,156 @@ def test_opencellid_read_options_reach_the_reader(opencellid, tmp_path):
     assert list(recent["lon"]) == [11.0]
 
 
+def _opencellid_regions_html(link: str, country: str = "KE") -> str:
+    return (
+        "<table id='regions'>"
+        "<thead><tr><th>Country Code</th><th>Files (grouped by MCC)</th></tr></thead>"
+        f"<tbody><tr><td>{country}</td><td><a href='{link}'>MCC-639</a></td></tr></tbody>"
+        "</table>"
+    )
+
+
+def _capture_logger(name: str):
+    import logging
+
+    stream = io.StringIO()
+    logger = logging.getLogger(name)
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(message)s"))
+    logger.addHandler(handler)
+    return logger, stream
+
+
+def test_opencellid_download_logs_redact_access_token(tmp_path, monkeypatch):
+    from gigaspatial.handlers import opencellid as ocid_module
+    from gigaspatial.handlers.opencellid import OpenCellIDHandler
+
+    secret = "secret-ocid-token-123"
+    download_link = f"https://opencellid.org/ocid/downloads?token={secret}&file=MCC-639.csv.gz"
+    seen_urls = []
+
+    def _fake_get(url, **kwargs):
+        seen_urls.append(url)
+        return SimpleNamespace(
+            text=_opencellid_regions_html(download_link),
+            raise_for_status=lambda: None,
+        )
+
+    def _fake_stream(url, path, store, **kwargs):
+        seen_urls.append(url)
+        store.write_file(str(path), b"payload")
+        return Path(path)
+
+    monkeypatch.setattr(ocid_module.requests, "get", _fake_get)
+    monkeypatch.setattr(ocid_module, "stream_to_store", _fake_stream)
+
+    logger, stream = _capture_logger("test.opencellid.info")
+    handler = OpenCellIDHandler(
+        base_path=tmp_path, api_token=secret, n_workers=1, logger=logger
+    )
+
+    assert handler.ensure_data_available("KEN") is True
+    assert seen_urls == [
+        f"https://opencellid.org/downloads.php?token={secret}",
+        download_link,
+    ]
+    logs = stream.getvalue()
+    assert secret not in logs
+    assert (
+        "INFO:Downloading OpenCellID data from "
+        "https://opencellid.org/ocid/downloads?token=***&file=MCC-639.csv.gz"
+    ) in logs
+
+
+def test_opencellid_error_logs_and_exceptions_redact_access_token(
+    tmp_path, monkeypatch
+):
+    import requests
+    import urllib3
+    from gigaspatial.handlers import opencellid as ocid_module
+    from gigaspatial.handlers.opencellid import OpenCellIDHandler
+
+    secret = "secret-ocid-token-123"
+    download_link = f"https://opencellid.org/ocid/downloads?token={secret}&file=MCC-639.csv.gz"
+
+    # 1. Discovery failure (HTTPError carrying tokenized URL)
+    resp = requests.Response()
+    resp.status_code = 403
+    resp.url = f"https://opencellid.org/downloads.php?token={secret}"
+
+    def _fail_discovery(url, **kwargs):
+        return SimpleNamespace(
+            raise_for_status=lambda: resp.raise_for_status(),
+            text="",
+        )
+
+    monkeypatch.setattr(ocid_module.requests, "get", _fail_discovery)
+
+    logger, stream = _capture_logger("test.opencellid.errors")
+    handler = OpenCellIDHandler(
+        base_path=tmp_path, api_token=secret, n_workers=1, logger=logger
+    )
+
+    with pytest.raises(requests.HTTPError) as exc_info:
+        handler.config.get_relevant_data_units("KEN")
+
+    assert secret not in str(exc_info.value)
+    assert "token=***" in str(exc_info.value)
+    assert secret not in exc_info.value.response.url
+    assert secret not in handler.get_available_data_info("KEN")["error"]
+    assert secret not in stream.getvalue()
+
+    # 2. Download failure (chained MaxRetryError + BaseHandlerDownloader unit repr/exc_info)
+    stream.seek(0)
+    stream.truncate(0)
+
+    monkeypatch.setattr(
+        ocid_module.requests,
+        "get",
+        lambda url, **kwargs: SimpleNamespace(
+            text=_opencellid_regions_html(download_link),
+            raise_for_status=lambda: None,
+        ),
+    )
+
+    def _fail_stream(url, path, store, **kwargs):
+        max_retry = urllib3.exceptions.MaxRetryError(
+            None, f"/ocid/downloads?token={secret}&file=MCC-639.csv.gz"
+        )
+        try:
+            raise max_retry
+        except urllib3.exceptions.MaxRetryError as inner:
+            raise requests.ConnectionError(inner)
+
+    monkeypatch.setattr(ocid_module, "stream_to_store", _fail_stream)
+
+    assert handler.ensure_data_available("KEN") is False
+    logs = stream.getvalue()
+    assert secret not in logs
+    assert "token=***" in logs
+
+
+def test_opencellid_config_repr_masks_api_token(tmp_path):
+    from gigaspatial.handlers.opencellid import OpenCellIDConfig
+
+    secret = "secret-ocid-token-123"
+    with_token = OpenCellIDConfig(
+        base_path=tmp_path,
+        api_token=secret,
+        download_url="https://opencellid.org/downloads.php?token=inline-secret&next=",
+    )
+    rendered = repr(with_token)
+    assert secret not in rendered
+    assert "inline-secret" not in rendered
+    assert "api_token='***'" in rendered
+
+    without_token = OpenCellIDConfig(base_path=tmp_path, api_token="")
+    assert "api_token=''" in repr(without_token)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HDX
 # ─────────────────────────────────────────────────────────────────────────────
@@ -819,6 +969,168 @@ def test_hdx_read_kwargs_reach_read_dataset(hdx, tmp_path):
 )
 def test_hdx_stores_resources_under_the_download_file_name(hdx, resource, filename):
     assert hdx.config.get_data_unit_path(resource) == hdx.config.output_dir_path / filename
+
+
+def test_hdx_is_unit_available_requires_non_empty_content(hdx):
+    unit = {"name": "ken.csv", "url": "https://example.org/files/ken.csv"}
+    target = hdx.config.get_data_unit_path(unit)
+
+    # File does not exist yet
+    assert hdx.config.is_unit_available(unit, [target]) is False
+
+    # 0-byte file (e.g. left by a WAF challenge) must not count as available
+    hdx.data_store.write_file(str(target), b"")
+    assert hdx.config.is_unit_available(unit, [target]) is False
+
+    # Non-empty file counts as available
+    hdx.data_store.write_file(str(target), b"col1,col2\n1,2\n")
+    assert hdx.config.is_unit_available(unit, [target]) is True
+
+
+def test_hdx_config_authentication_and_repr(tmp_path, monkeypatch):
+    pytest.importorskip("hdx")
+    from gigaspatial.handlers.hdx import HDXConfig
+    from gigaspatial.config import config as global_config
+
+    monkeypatch.setattr(HDXConfig, "configure_hdx", lambda self: None)
+    monkeypatch.setattr(HDXConfig, "fetch_dataset", lambda self: None)
+    monkeypatch.setattr(global_config, "HDX_KEY", "")
+
+    # hdx_key is masked in repr
+    config_with_key = HDXConfig(
+        dataset_name="fake",
+        base_path=tmp_path,
+        hdx_key="secret-api-token-xyz",
+    )
+    assert "secret-api-token-xyz" not in repr(config_with_key)
+    assert "hdx_key=***" in repr(config_with_key)
+
+    # Without key, repr shows None
+    config_no_key = HDXConfig(
+        dataset_name="fake",
+        base_path=tmp_path,
+        hdx_key=None,
+    )
+    assert "hdx_key=None" in repr(config_no_key)
+
+
+def test_hdx_configure_passes_auth_parameters(tmp_path, monkeypatch):
+    pytest.importorskip("hdx")
+    from hdx.api.configuration import Configuration
+    from gigaspatial.handlers.hdx import HDXConfig
+    from gigaspatial.config import config as global_config
+
+    monkeypatch.setattr(HDXConfig, "fetch_dataset", lambda self: None)
+    monkeypatch.setattr(global_config, "HDX_KEY", "")
+
+    captured = []
+
+    def _fake_create(**kwargs):
+        captured.append(kwargs)
+
+    def _fake_read():
+        raise Exception("not configured")
+
+    monkeypatch.setattr(Configuration, "create", _fake_create)
+    monkeypatch.setattr(Configuration, "read", _fake_read)
+
+    # 1. With explicit hdx_key -> hdx_read_only=False and key passed
+    HDXConfig(
+        dataset_name="fake",
+        base_path=tmp_path,
+        hdx_key="my-key",
+        user_agent="custom-agent/1.0",
+    )
+    assert len(captured) == 1
+    assert captured[0]["hdx_key"] == "my-key"
+    assert captured[0]["hdx_read_only"] is False
+    assert captured[0]["user_agent"] == "custom-agent/1.0"
+
+    # 2. Without key -> hdx_read_only=True and no hdx_key passed
+    captured.clear()
+    HDXConfig(
+        dataset_name="fake",
+        base_path=tmp_path,
+        hdx_key=None,
+    )
+    assert len(captured) == 1
+    assert "hdx_key" not in captured[0]
+    assert captured[0]["hdx_read_only"] is True
+
+
+def test_hdx_downloader_retries_and_diagnoses_empty_downloads(hdx, monkeypatch):
+    import time
+    from gigaspatial.handlers.hdx import HDXDownloader, DownloadOptions
+
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+
+    attempts = []
+
+    class _FakeResource(dict):
+        def download(self, folder):
+            attempts.append(folder)
+            empty_file = Path(folder) / "test.csv"
+            empty_file.write_bytes(b"")
+            return "https://example.test/test.csv", str(empty_file)
+
+    downloader = HDXDownloader(config=hdx.config, data_store=hdx.data_store)
+
+    monkeypatch.setattr(
+        downloader,
+        "_probe_download",
+        lambda url: (202, 0, "challenge"),
+    )
+
+    fake_resource = _FakeResource(
+        name="test.csv",
+        url="https://example.test/test.csv",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        downloader.download_data_unit(fake_resource, DownloadOptions())
+
+    # Retried 3 times with exponential backoff (2^1 = 2, 2^2 = 4)
+    assert len(attempts) == 3
+    assert sleeps == [2, 4]
+
+    # Error message contains WAF diagnostics and actionable remedies
+    msg = str(exc_info.value)
+    assert "HTTP 202 with 0 bytes, WAF action challenge" in msg
+    assert "The file was not stored" in msg
+    assert "Consider setting an 'hdx_key'" in msg
+
+
+def test_hdx_downloader_succeeds_after_retry(hdx, monkeypatch):
+    import time
+    from gigaspatial.handlers.hdx import HDXDownloader, DownloadOptions
+
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+
+    attempts = []
+
+    class _FakeResource(dict):
+        def download(self, folder):
+            attempts.append(folder)
+            file_path = Path(folder) / "test.csv"
+            # First attempt returns 0 bytes, second attempt succeeds with data
+            if len(attempts) == 1:
+                file_path.write_bytes(b"")
+            else:
+                file_path.write_bytes(b"data,content\n1,2\n")
+            return "https://example.test/test.csv", str(file_path)
+
+    downloader = HDXDownloader(config=hdx.config, data_store=hdx.data_store)
+    fake_resource = _FakeResource(
+        name="test.csv",
+        url="https://example.test/test.csv",
+    )
+
+    target_path = downloader.download_data_unit(fake_resource, DownloadOptions())
+    assert len(attempts) == 2
+    assert sleeps == [2]
+    assert hdx.data_store.read_file(target_path) == b"data,content\n1,2\n"
 
 
 def test_google_open_buildings_failed_download_leaves_no_file(

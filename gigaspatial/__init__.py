@@ -32,7 +32,11 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.opencellid": ["OpenCellIDHandler"],
         "gigaspatial.handlers.hdx": ["HDXHandler"],
         "gigaspatial.handlers.unosat": ["UnosatHandler"],
-        "gigaspatial.handlers.glofas": ["GlofasHandler"],
+        "gigaspatial.handlers.cems.flood_hazard": [
+            "CEMSFloodHazardHandler",
+            "JRCFloodHazardHandler",
+            "GlofasFloodHazardHandler",
+        ],
         "gigaspatial.handlers.rwi": ["RWIHandler"],
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
@@ -111,7 +115,11 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.opencellid import OpenCellIDHandler
     from gigaspatial.handlers.hdx import HDXHandler
     from gigaspatial.handlers.unosat import UnosatHandler
-    from gigaspatial.handlers.glofas import GlofasHandler
+    from gigaspatial.handlers.cems.flood_hazard import (
+        CEMSFloodHazardHandler,
+        JRCFloodHazardHandler,
+        GlofasFloodHazardHandler,
+    )
     from gigaspatial.handlers.rwi import RWIHandler
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler

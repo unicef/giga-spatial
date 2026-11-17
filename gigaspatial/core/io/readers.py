@@ -5,6 +5,7 @@ with automatic compression detection (gzip, bz2, xz).
 """
 
 import gzip
+import importlib
 import io
 import json
 import os
@@ -16,7 +17,7 @@ from typing import Any, Iterator, Optional, Union
 
 import geopandas as gpd
 import pandas as pd
-import fiona
+import pyogrio
 
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
@@ -87,13 +88,13 @@ def read_kmz(file_obj, layer: str = None, **kwargs) -> gpd.GeoDataFrame:
             for kml_name in kml_filenames:
                 kml_bytes = kmz.read(kml_name)
 
-                # Write KML to a temp file so fiona/GDAL can list and extract layers reliably
+                # Write KML to a temp file so pyogrio/GDAL can list and extract layers reliably
                 with tempfile.NamedTemporaryFile(suffix=".kml", delete=False) as tmp:
                     tmp.write(kml_bytes)
                     tmp_path = tmp.name
 
                 try:
-                    available_layers = fiona.listlayers(tmp_path)
+                    available_layers = [str(row[0]) for row in pyogrio.list_layers(tmp_path)]
 
                     # If specific layer requested, only load that layer
                     target_layers = (
@@ -228,10 +229,22 @@ BINARY_FORMATS = {
     ".fgb",
 }
 
+def _read_excel(file_obj, engine: str, **kwargs) -> pd.DataFrame:
+    """Read an Excel stream and surface an install hint when the engine is missing."""
+    try:
+        importlib.import_module(engine)
+        return pd.read_excel(file_obj, engine=engine, **kwargs)
+    except ImportError as err:
+        raise ImportError(
+            f"Reading Excel files with '{engine}' requires '{engine}'. "
+            "Install it with: pip install 'giga-spatial[excel]'"
+        ) from err
+
+
 PANDAS_READERS = {
     ".csv": pd.read_csv,
-    ".xlsx": lambda f, **kw: pd.read_excel(f, engine="openpyxl", **kw),
-    ".xls": lambda f, **kw: pd.read_excel(f, engine="xlrd", **kw),
+    ".xlsx": lambda f, **kw: _read_excel(f, engine="openpyxl", **kw),
+    ".xls": lambda f, **kw: _read_excel(f, engine="xlrd", **kw),
 }
 
 GEO_READERS = {
@@ -373,6 +386,8 @@ def read_dataset(
                             return PANDAS_READERS[inner_ext](
                                 f, compression=active_compression, **kwargs
                             )
+                    except ImportError:
+                        raise
                     except Exception as e:
                         raise ValueError(
                             f"Error reading compressed tabular file '{path}': {e}"
@@ -461,6 +476,8 @@ def read_dataset(
             try:
                 with data_store.open(path, mode) as f:
                     return PANDAS_READERS[file_extension](f, **kwargs)
+            except ImportError:
+                raise
             except Exception as e:
                 raise ValueError(f"Error reading '{path}' with pandas: {e}") from e
 
@@ -498,7 +515,7 @@ def read_dataset(
             f"Supported compressions: {', '.join(supported_compressions)}"
         )
 
-    except (FileNotFoundError, ValueError):
+    except (FileNotFoundError, ValueError, ImportError):
         raise
     except Exception as e:
         raise RuntimeError(f"Unexpected error reading dataset '{path}': {e}") from e

@@ -10,6 +10,49 @@ All notable changes to this project will be documented in this file.
     -   `UnosatHandler` builds a country catalogue from the public UNOSAT products service and downloads the original files for every activation type the catalogue publishes.
     -   Event dates come from GLIDE numbers. `created_at` stays the publication date. Satellite acquisition dates and "as of" observation dates are stored separately, and a missing date stays null.
     -   A later run requests the catalogue again, downloads only new or changed files, and keeps a replaced file beside the new one.
+-   **Optional `excel` extra (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/core/io/writers.py`)**
+    -   Added `giga-spatial[excel]` (`openpyxl>=3.1.0`, `xlrd>=2.0.0`, also included in `giga-spatial[all]`) for reading `.xlsx`/`.xls` files and writing `.xlsx` files.
+    -   `read_dataset` and `write_dataset` now raise an `ImportError` with `pip install 'giga-spatial[excel]'` when the required Excel engine is missing.
+-   **HDX configuration and authentication (`gigaspatial/config.py`, `gigaspatial/handlers/hdx.py`)**
+    -   Added `HDX_KEY` and `HDX_USER_AGENT` to `Config`, loaded automatically from `.env` or system environment variables.
+    -   `HDXConfig` (and `RWIConfig`) supports `hdx_key` and custom `user_agent` parameters. When an `hdx_key` is provided, requests are authenticated (`hdx_read_only=False`), bypassing anonymous rate limiting and WAF challenges. The key is masked in `__repr__`.
+    -   Added `HDX_KEY` and `HDX_USER_AGENT` to `.env_sample` and configuration docs.
+
+### Fixed
+
+-   **Point zonal aggregation column lookup and count/collision handling (`gigaspatial/generators/poi.py`, `gigaspatial/processing/geo.py`)**
+    -   Fixed `PoiViewGenerator.map_zonal_stats` looking up `{value_column}_{stat}` (e.g. `"tests_sum"`) instead of `value_column` when aggregating point GeoDataFrames with a `value_column`, and removed the duplicate selection/rename block in the point branch.
+    -   Updated `aggregate_points_to_zones` so `aggregation="count"` uses the `"point_count"` output column only when `value_columns` is omitted; when `value_columns` is provided, it counts non-null values into each named column (fixing `map_zonal_stats(..., stat="count", value_column=...)` and `ZonalViewGenerator.map_points(..., value_columns=...)`).
+    -   Joined only `[zone_id_column, "geometry"]` in `aggregate_points_to_zones` and passed `[["poi_id", "geometry"]]` buffers in `PoiViewGenerator.map_zonal_stats` so zone or POI attributes sharing column names with `value_columns` do not collide during spatial joins or merges.
+-   **OpenCellID token redaction in logs, errors, and config `repr` (`gigaspatial/handlers/opencellid.py`)**
+    -   `OpenCellIDDownloader.download_data_unit` now redacts query tokens (`token=***`) in `INFO` download logs instead of logging the authenticated URL.
+    -   Sanitized exceptions (including cause/context chains and `request`/`response` URLs) in `OpenCellIDConfig.get_relevant_data_units_by_key` and `OpenCellIDDownloader.download_data_unit`, and wrapped resolved units so error logs from `BaseHandlerDownloader` do not expose the access token.
+    -   Masked `api_token` and redacted any URL query tokens in `OpenCellIDConfig.__repr__`.
+-   **Clean-install imports and runtime dependencies (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/fetchers/healthsites.py`)**
+    -   Replaced `fiona.listlayers` in `read_kmz` with `pyogrio.list_layers`, removing the undeclared `fiona` dependency that broke imports of `PoiViewGenerator`, handlers, generators, and `gigaspatial.core.io` on clean installs with `geopandas>=1.0.1`.
+    -   Replaced `tenacity` in `HealthSitesFetcher._fetch_osm_country_name` with a plain 3-attempt retry loop and exponential backoff (retaining escalating timeouts while failing fast on deterministic `ValueError` lookups).
+    -   Declared `lxml>=5.0.0` (used by `OpenCellIDHandler` HTML parsing) and directly imported transitive dependencies (`pyogrio>=0.7.2`, `pyproj>=3.5.0`, `urllib3>=1.26,<3`) in `[project].dependencies`.
+-   **SRTM tile auto-download in LOS analysis (`gigaspatial/processing/elevation/srtm_manager.py`, `gigaspatial/handlers/nasa/srtm.py`)**
+    -   Fixed `TypeError: NasaSRTMDownloader.download_data_unit() missing 1 required positional argument: 'options'` when `LOSAnalyzer.analyze()` encounters missing SRTM tiles. `SRTMManager` now forwards typed `DownloadOptions(show_progress=False)` to `download_data_unit`.
+    -   `NasaSRTMDownloader.download_data_unit` now treats `options` as optional (`options: Optional[DownloadOptions] = None`), defaulting to `self.options_type()`, so direct single-argument calls succeed without raising.
+    -   `SRTMManager` now configures the downloader with `NasaSRTMConfig(base_path=self.srtm_directory)` when no explicit downloader is supplied, ensuring missing tiles are downloaded into the manager's configured directory.
+-   **HDX downloads and WAF challenge detection (`gigaspatial/handlers/hdx.py`)**
+    -   `HDXDownloader` verifies downloaded files have non-zero size before committing them to the data store, preventing 0-byte files from being cached when HDX returns an AWS WAF anti-bot challenge (HTTP 202).
+    -   Failed downloads retry up to 3 times with exponential backoff (`time.sleep(2 ** attempt)`).
+    -   If a download returns no data, `HDXDownloader` probes the download URL and raises a clear `RuntimeError` detailing the HTTP status, byte count, WAF challenge action, and suggested resolution (setting `hdx_key`, custom `user_agent`, or manual download to the target path).
+    -   `HDXConfig.is_unit_available` requires stored files to have non-zero content before treating them as available.
+-   **Geofabrik downloads (`gigaspatial/handlers/osm/roads.py`)**
+    -   `OSMRoadsHandler` waits up to 3 minutes for an extract to start sending, and retries twice if the connection stalls. A stall used to fail the download after 60 seconds, while the same link succeeded in a browser.
+-   **OSM road component selection (`gigaspatial/handlers/osm/roads.py`, `gigaspatial/handlers/osm/pbf.py`)**
+    -   `OSMRoadsHandler` now selects the largest connected component before simplifying (and preserves the raw largest component when loading cached simplified extracts), matching `osmnx` so a long road chain with many intermediate nodes is not discarded in favor of a smaller junction network.
+
+### Changed
+
+-   **Refactored flood hazard handler to CEMS (`gigaspatial/handlers/cems/`)**
+    -   Replaced `GlofasHandler` with `CEMSFloodHazardHandler` in `gigaspatial/handlers/cems/flood_hazard.py` to accurately reflect that the dataset provides static Copernicus Emergency Management Service / JRC global river flood hazard maps (return periods 10–500 years), rather than real-time GloFAS river discharge forecasts.
+    -   Added domain aliases `JRCFloodHazardHandler` and `GlofasFloodHazardHandler`.
+    -   Removed `GlofasHandler` and `gigaspatial/handlers/glofas.py`.
+    -   Base storage path updated to `bronze/cems/flood_hazard`.
 
 ## [v0.11.0] - 2026-11-03
 

@@ -1,5 +1,5 @@
 """
-GloFAS global river flood hazard maps (Copernicus EMS, JRC), version 2.1.2.
+CEMS Global River Flood Hazard maps (Copernicus EMS, JRC), version 2.1.2.
 
 Publisher: Copernicus Emergency Management Service, Joint Research Centre.
 Licence: CC BY 4.0.
@@ -74,9 +74,9 @@ def _remote_url(tile_id: int, tile_name: str, layer: str, return_period: Optiona
 
 
 @dataclasses.dataclass(frozen=True)
-class GlofasResolveOptions(ResolveOptions):
+class CEMSFloodHazardResolveOptions(ResolveOptions):
     """
-    Resolve options for one GloFAS load.
+    Resolve options for one CEMS flood hazard load.
 
     Attributes:
         layer: Which map to fetch. Defaults to raw water depth.
@@ -106,22 +106,24 @@ class GlofasResolveOptions(ResolveOptions):
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
-class GlofasConfig(BaseHandlerConfig):
+class CEMSFloodHazardConfig(BaseHandlerConfig):
     """
-    Configuration for GloFAS flood hazard tiles.
+    Configuration for CEMS flood hazard tiles.
 
     Attributes:
         base_path: Directory of the stored files.
         n_workers: Parallel downloads. The base default is the CPU count.
     """
 
-    options_type = GlofasResolveOptions
+    options_type = CEMSFloodHazardResolveOptions
 
-    base_path: Path = Field(default_factory=lambda: global_config.get_path("glofas", "bronze"))
+    base_path: Path = Field(
+        default_factory=lambda: global_config.get_path("cems", "bronze") / "flood_hazard"
+    )
     tiles_gdf: Optional[gpd.GeoDataFrame] = Field(default=None, init=False)
 
     def get_relevant_data_units_by_key(
-        self, search_key: BaseGeometry, options: GlofasResolveOptions
+        self, search_key: BaseGeometry, options: CEMSFloodHazardResolveOptions
     ) -> List[dict]:
         """
         Return one unit per tile that intersects the search geometry.
@@ -175,11 +177,11 @@ class GlofasConfig(BaseHandlerConfig):
             try:
                 grid = read_dataset(cache, data_store=self.data_store)
                 self.tiles_gdf = _as_wgs84(grid)
-                self.logger.info("Loaded GloFAS tile grid from cache")
+                self.logger.info("Loaded CEMS flood hazard tile grid from cache")
                 return self.tiles_gdf
             except ValueError:
                 self.logger.warning(
-                    "Cached GloFAS tile grid is unreadable, downloading it again"
+                    "Cached CEMS flood hazard tile grid is unreadable, downloading it again"
                 )
 
         response = requests.get(TILES_URL, timeout=60)
@@ -187,18 +189,18 @@ class GlofasConfig(BaseHandlerConfig):
         grid = _as_wgs84(gpd.read_file(io.BytesIO(response.content)))
         missing = {"id", "name"} - set(grid.columns)
         if missing:
-            raise ValueError(f"GloFAS tile grid is missing columns: {sorted(missing)}")
+            raise ValueError(f"CEMS flood hazard tile grid is missing columns: {sorted(missing)}")
         write_dataset(grid, self.data_store, str(cache))
         self.tiles_gdf = grid
-        self.logger.info("GloFAS tile grid cached")
+        self.logger.info("CEMS flood hazard tile grid cached")
         return self.tiles_gdf
 
 
-class GlofasDownloader(BaseHandlerDownloader):
-    """Downloads one GloFAS tile into the data store."""
+class CEMSFloodHazardDownloader(BaseHandlerDownloader):
+    """Downloads one CEMS flood hazard tile into the data store."""
 
     options_type = DownloadOptions
-    config_type: ClassVar[type] = GlofasConfig
+    config_type: ClassVar[type] = CEMSFloodHazardConfig
 
     def download_data_unit(self, unit: dict, options: DownloadOptions) -> Path:
         """
@@ -222,11 +224,11 @@ class GlofasDownloader(BaseHandlerDownloader):
         )
 
 
-class GlofasReader(BaseHandlerReader):
-    """Loads stored GloFAS tiles as ``TifProcessor`` objects."""
+class CEMSFloodHazardReader(BaseHandlerReader):
+    """Loads stored CEMS flood hazard tiles as ``TifProcessor`` objects."""
 
     options_type = RasterReadOptions
-    config_type: ClassVar[type] = GlofasConfig
+    config_type: ClassVar[type] = CEMSFloodHazardConfig
 
     def load_from_paths(
         self, source_data_path: List[str], options: RasterReadOptions
@@ -256,29 +258,42 @@ class GlofasReader(BaseHandlerReader):
         return super().crop_to_geometry(data, geometry, predicate=predicate, **kwargs)
 
 
-class GlofasHandler(BaseHandler):
+class CEMSFloodHazardHandler(BaseHandler):
     """
-    Handler for GloFAS flood hazard maps.
+    Handler for CEMS global river flood hazard maps.
 
     A geometry or a country selects the intersecting tiles. One load fetches
     one layer and, for depth layers, one return period:
 
-        GlofasHandler().load_data(geometry)
-        GlofasHandler().load_data("KEN", layer="depth_reclass", return_period=50)
-        GlofasHandler().load_data(geometry, layer="permanent_water")
+        CEMSFloodHazardHandler().load_data(geometry)
+        CEMSFloodHazardHandler().load_data("KEN", layer="depth_reclass", return_period=50)
+        CEMSFloodHazardHandler().load_data(geometry, layer="permanent_water")
     """
 
-    def create_config(self, data_store, logger, **kwargs) -> GlofasConfig:
-        return GlofasConfig(data_store=data_store, logger=logger, **kwargs)
+    def create_config(self, data_store, logger, **kwargs) -> CEMSFloodHazardConfig:
+        return CEMSFloodHazardConfig(data_store=data_store, logger=logger, **kwargs)
 
-    def create_downloader(self, config, data_store, logger, **kwargs) -> GlofasDownloader:
-        return GlofasDownloader(config=config, data_store=data_store, logger=logger)
+    def create_downloader(
+        self, config, data_store, logger, **kwargs
+    ) -> CEMSFloodHazardDownloader:
+        return CEMSFloodHazardDownloader(
+            config=config, data_store=data_store, logger=logger
+        )
 
-    def create_reader(self, config, data_store, logger, **kwargs) -> GlofasReader:
-        return GlofasReader(config=config, data_store=data_store, logger=logger)
+    def create_reader(
+        self, config, data_store, logger, **kwargs
+    ) -> CEMSFloodHazardReader:
+        return CEMSFloodHazardReader(
+            config=config, data_store=data_store, logger=logger
+        )
 
 
 def _as_wgs84(grid: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if grid.crs is None:
         return grid.set_crs("EPSG:4326")
     return grid
+
+
+# Domain aliases
+JRCFloodHazardHandler = CEMSFloodHazardHandler
+GlofasFloodHazardHandler = CEMSFloodHazardHandler

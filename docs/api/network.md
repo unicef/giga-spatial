@@ -48,6 +48,7 @@ The methods below are in this order: building, saving, and converting; reading t
         - to_undirected
         - concat
         - insert_points
+        - connect_points
         - adjacency
         - shortest_path_lengths
         - shortest_paths

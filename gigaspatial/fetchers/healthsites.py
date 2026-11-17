@@ -4,14 +4,14 @@ from typing import Any, Optional, Tuple, Union
 
 import httpx
 import logging
+import time
 
 import geopandas as gpd
 import pandas as pd
 import pycountry
+import requests
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
-
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from gigaspatial.config import config as global_config
 from gigaspatial.fetchers.osm.pois import OSMLocationFetcher
@@ -191,34 +191,54 @@ class HealthSitesFetcher:
 
         return self._fetch_osm_country_name(iso3, country)
 
-    @retry(
-        retry=retry_if_exception_type(Exception),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        reraise=True,
-    )
     def _fetch_osm_country_name(self, iso3: str, original_input: str) -> str:
         """
         Fetch the OSM English country name with retry and escalating timeout.
 
-        Retried up to 3 times with exponential backoff (2s → 4s → 8s wait).
-        Timeout escalates by 2000ms on each attempt.
+        Tries up to 3 times with exponential backoff (2s → 4s wait between attempts).
+        Timeout escalates by 2000 on each attempt.
         """
-        attempt = self._fetch_osm_country_name.retry.statistics.get("attempt_number", 1)
-        timeout = 2000 + (attempt - 1) * 2000  # 2000 → 4000 → 6000ms
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            timeout = 2000 + (attempt - 1) * 2000
 
-        self.logger.debug(
-            "Fetching OSM name for %s (attempt %d, timeout %dms)", iso3, attempt, timeout
-        )
+            self.logger.debug(
+                "Fetching OSM name for %s (attempt %d, timeout %d)",
+                iso3,
+                attempt,
+                timeout,
+            )
 
-        osm_data = OSMLocationFetcher.get_osm_countries(iso3_code=iso3, timeout=timeout)
-        osm_name = osm_data.get("name:en")
+            try:
+                osm_data = OSMLocationFetcher.get_osm_countries(
+                    iso3_code=iso3, timeout=timeout
+                )
+            except Exception as err:
+                is_deterministic = isinstance(err, ValueError) and not isinstance(
+                    err, requests.RequestException
+                )
+                if is_deterministic or attempt == max_attempts:
+                    raise
+                delay = min(2**attempt, 10)
+                self.logger.warning(
+                    "OSM lookup for %s failed (%s); retrying in %ds (attempt %d/%d)",
+                    iso3,
+                    err,
+                    delay,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(delay)
+                continue
 
-        if not osm_name:
-            raise ValueError(f"Could not find OSM English name for: {original_input}")
+            osm_name = osm_data.get("name:en")
+            if not osm_name:
+                raise ValueError(
+                    f"Could not find OSM English name for: {original_input}"
+                )
 
-        self.logger.info("Resolved country to OSM name: %s", osm_name)
-        return osm_name
+            self.logger.info("Resolved country to OSM name: %s", osm_name)
+            return osm_name
 
     @staticmethod
     def _format_timestamp(value: Any) -> str:
