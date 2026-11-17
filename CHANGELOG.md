@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **MERIT Hydro in the Earth Engine registry (`gigaspatial/fetchers/gee/datasets/builtin.py`)**
+    -   Added `merit_hydro` for the `MERIT/Hydro/v1_0_1` image: 3 arc-second global hydrography with elevation, flow direction, river width, permanent water, upstream drainage area, and height above nearest drainage. Licensed CC-BY-NC 4.0 or ODbL 1.0.
 -   **Optional `excel` extra (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/core/io/writers.py`)**
     -   Added `giga-spatial[excel]` (`openpyxl>=3.1.0`, `xlrd>=2.0.0`, also included in `giga-spatial[all]`) for reading `.xlsx`/`.xls` files and writing `.xlsx` files.
     -   `read_dataset` and `write_dataset` now raise an `ImportError` with `pip install 'giga-spatial[excel]'` when the required Excel engine is missing.
