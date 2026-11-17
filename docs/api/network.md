@@ -17,6 +17,7 @@ The methods below are in this order: building, saving, and converting; reading t
       members:
         - from_networkx
         - from_points
+        - from_point_sets
         - load
         - save
         - to_networkx
@@ -55,6 +56,7 @@ The methods below are in this order: building, saving, and converting; reading t
         - reachable
         - nearest_by_network
         - count_within
+        - distance_table
         - connected_components
         - largest_component
         - connect_components
