@@ -427,6 +427,46 @@ def test_from_point_sets_errors():
         )
 
 
+def test_entity_table_distance_graphs_use_entity_ids_not_row_indices():
+    from gigaspatial.core.schemas.entity import EntityTable, GigaEntity
+
+    class SiteEntity(GigaEntity):
+        site_id: str
+
+        @property
+        def id(self) -> str:
+            return self.site_id
+
+    left = EntityTable(
+        entities=[
+            SiteEntity(site_id="school-0", latitude=-1.95, longitude=30.0),
+            SiteEntity(site_id="school-1", latitude=-1.95, longitude=30.05),
+        ]
+    )
+    right = EntityTable(
+        entities=[
+            SiteEntity(site_id="fibre-0", latitude=-1.95, longitude=30.0005),
+            SiteEntity(site_id="fibre-1", latitude=-1.95, longitude=30.10),
+        ]
+    )
+
+    within_graph, within_df = left.to_distance_graph(distance_threshold=200, return_dataframe=True, verbose=False)
+    assert set(within_graph.nodes) == {"school-0", "school-1"}
+    assert within_graph.number_of_edges() == 0
+    assert list(within_df.columns) == ["left_idx", "right_idx", "distance"]
+
+    bipartite_graph, matches_df = left.to_distance_graph_with(
+        right, distance_threshold=200, return_dataframe=True, verbose=False
+    )
+    # Regression check: row 0 of left ("school-0") and row 0 of right ("fibre-0") must not merge into node 0
+    assert set(bipartite_graph.nodes) == {"school-0", "school-1", "fibre-0", "fibre-1"}
+    assert list(bipartite_graph.edges) == [("school-0", "fibre-0")]
+    assert bipartite_graph.edges["school-0", "fibre-0"]["distance"] == pytest.approx(
+        haversine(-1.95, 30.0, -1.95, 30.0005)
+    )
+    assert matches_df[["left_idx", "right_idx"]].values.tolist() == [["school-0", "fibre-0"]]
+
+
 # ----- accessors
 
 
