@@ -31,6 +31,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.ookla_speedtest": ["OoklaSpeedtestHandler"],
         "gigaspatial.handlers.opencellid": ["OpenCellIDHandler"],
         "gigaspatial.handlers.hdx": ["HDXHandler"],
+        "gigaspatial.handlers.unosat": ["UnosatHandler"],
         "gigaspatial.handlers.cems.flood_hazard": [
             "CEMSFloodHazardHandler",
             "JRCFloodHazardHandler",
@@ -113,6 +114,7 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.ookla_speedtest import OoklaSpeedtestHandler
     from gigaspatial.handlers.opencellid import OpenCellIDHandler
     from gigaspatial.handlers.hdx import HDXHandler
+    from gigaspatial.handlers.unosat import UnosatHandler
     from gigaspatial.handlers.cems.flood_hazard import (
         CEMSFloodHazardHandler,
         JRCFloodHazardHandler,

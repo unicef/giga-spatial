@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **UNOSAT historical disaster products (`gigaspatial/handlers/unosat.py`)**
+    -   `UnosatHandler` builds a country catalogue from the public UNOSAT products service and downloads the original files for every activation type the catalogue publishes.
+    -   Event dates come from GLIDE numbers. `created_at` stays the publication date. Satellite acquisition dates and "as of" observation dates are stored separately, and a missing date stays null.
+    -   A later run requests the catalogue again, downloads only new or changed files, and keeps a replaced file beside the new one.
 -   **Connecting points directly to network nodes (`gigaspatial/processing/network/insertion.py`, `gigaspatial/processing/network/points.py`)**
     -   Added `SpatialNetwork.connect_points(points, id_column=None, connect="knn", k=1, max_distance=None, nodes=None, return_skipped=False)` to add points as `kind="point"` nodes joined directly to existing nodes by straight-line edges (`kind="point_link"` to `"point"` nodes, `kind="connection"` to other nodes) without splitting existing edges, optionally restricted to candidate target `nodes`.
     -   Supports `connect="knn"` (joining each point to its `k` nearest candidate nodes, dropping links beyond `max_distance` when set) and `connect="distance"` (joining each point to every candidate node within `max_distance` meters); points with no candidate node within `max_distance` are skipped with a warning (and returned when `return_skipped=True`).
