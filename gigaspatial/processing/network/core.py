@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import shapely
 from pyproj import Transformer
-from scipy.spatial import cKDTree
 
 from gigaspatial.processing.network._arrays import as_positions, repeated_rows
 from gigaspatial.processing.network.algorithms import AlgorithmsMixin
@@ -22,11 +21,14 @@ from gigaspatial.processing.network.geodesy import (
     WGS84,
     haversine,
     line_lengths,
-    meters_to_chord,
-    unit_vectors,
 )
 from gigaspatial.processing.network.kinds import EDGE_KINDS, NODE_KINDS, as_kinds
-from gigaspatial.processing.network.points import RESERVED_NODE_COLUMNS, is_wgs84, points_table
+from gigaspatial.processing.network.points import (
+    RESERVED_NODE_COLUMNS,
+    is_wgs84,
+    points_table,
+    within_set_links,
+)
 
 _EDGE_ID_COLUMNS = ("u", "v", "key")
 
@@ -187,25 +189,7 @@ class SpatialNetwork(EditingMixin, AlgorithmsMixin, ReductionMixin, InsertionMix
         nodes.insert(2, "kind", "point")
         lat = nodes["y"].to_numpy()
         lon = nodes["x"].to_numpy()
-        if connect == "knn":
-            if int(k) < 1:
-                raise ValueError(f"k must be at least 1, got {k}")
-            a, b = _knn_pairs(lat, lon, int(k))
-        elif connect == "distance":
-            if max_distance is None:
-                raise ValueError('connect="distance" needs max_distance')
-            pairs = cKDTree(unit_vectors(lat, lon)).query_pairs(
-                float(meters_to_chord(max_distance)), output_type="ndarray"
-            )
-            a, b = pairs[:, 0], pairs[:, 1]
-        else:
-            raise ValueError(f'connect must be "knn" or "distance", got {connect!r}')
-        length = haversine(lat[a], lon[a], lat[b], lon[b])
-        if max_distance is not None:
-            keep = length <= max_distance
-            a, b, length = a[keep], b[keep], length[keep]
-        order = np.lexsort((b, a))
-        a, b, length = a[order], b[order], length[order]
+        a, b, length = within_set_links(lat, lon, connect, k, max_distance)
 
         ids = nodes.index
         edges = pd.DataFrame(
@@ -739,23 +723,3 @@ def _records(table: pd.DataFrame) -> list:
         for i in np.flatnonzero(~missing[c]):
             records[i][c] = values[i]
     return records
-
-
-# ----- points
-
-
-def _knn_pairs(lat: np.ndarray, lon: np.ndarray, k: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Unordered pairs joining each point to its k nearest neighbours."""
-    n = len(lat)
-    if n < 2:
-        empty = np.empty(0, dtype=np.int64)
-        return empty, empty
-    k = min(k, n - 1)
-    xyz = unit_vectors(lat, lon)
-    _, neighbours = cKDTree(xyz).query(xyz, k=k + 1)
-    rows = np.broadcast_to(np.arange(n)[:, None], neighbours.shape)
-    not_self = neighbours != rows
-    keep = not_self & (np.cumsum(not_self, axis=1) <= k)
-    a, b = rows[keep], neighbours[keep]
-    pairs = np.unique(np.column_stack([np.minimum(a, b), np.maximum(a, b)]), axis=0)
-    return pairs[:, 0], pairs[:, 1]

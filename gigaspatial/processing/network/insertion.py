@@ -18,10 +18,9 @@ from gigaspatial.processing.network.geodesy import (
     chord_to_meters,
     haversine,
     line_lengths,
-    meters_to_chord,
     unit_vectors,
 )
-from gigaspatial.processing.network.points import points_table
+from gigaspatial.processing.network.points import check_connect, cross_set_links, points_table
 
 # Edges points are never joined to: the connections of earlier insertions.
 _NOT_ROADS = ("connection", "point_link")
@@ -174,14 +173,7 @@ class InsertionMixin:
                 candidate nodes, or ``connect`` or ``k`` is invalid.
             KeyError: If ``nodes`` names a node ID not in the network.
         """
-        if connect == "knn":
-            if int(k) < 1:
-                raise ValueError(f"k must be at least 1, got {k}")
-        elif connect == "distance":
-            if max_distance is None:
-                raise ValueError('connect="distance" needs max_distance')
-        else:
-            raise ValueError(f'connect must be "knn" or "distance", got {connect!r}')
+        check_connect(connect, k, max_distance)
 
         table = points_table(points, id_column)
         clash = table.index.intersection(self._nodes.index)
@@ -191,8 +183,8 @@ class InsertionMixin:
 
         x, y = table["x"].to_numpy(), table["y"].to_numpy()
         node_x, node_y = self._nodes["x"].to_numpy(), self._nodes["y"].to_numpy()
-        point_row, target_pos, length = _node_links(
-            tree, candidates, x, y, node_x, node_y, connect, int(k), max_distance
+        point_row, target_pos, length = cross_set_links(
+            x, y, node_x, node_y, connect, int(k), max_distance, tree=tree, candidates=candidates
         )
         if max_distance is None:
             inserted = np.ones(len(x), dtype=bool)
@@ -547,46 +539,6 @@ def _lowest_negative_id(ids: pd.Index) -> int:
         return min(0, int(ids.min())) if len(ids) else 0
     integers = [int(i) for i in ids if isinstance(i, (int, np.integer)) and not isinstance(i, bool) and i < 0]
     return min([0, *integers])
-
-
-def _node_links(
-    tree: cKDTree,
-    candidates: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    node_x: np.ndarray,
-    node_y: np.ndarray,
-    connect: str,
-    k: int,
-    max_distance: Optional[float],
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Point rows, candidate target node positions, and great-circle lengths in meters."""
-    n = len(x)
-    if n == 0:
-        empty = np.empty(0, dtype=np.int64)
-        return empty, empty, np.empty(0, dtype=np.float64)
-    xyz = unit_vectors(y, x)
-    if connect == "knn":
-        k_eff = min(k, len(candidates))
-        _, j = tree.query(xyz, k=k_eff)
-        j = np.asarray(j, dtype=np.int64).reshape(n, k_eff)
-        point_row = np.repeat(np.arange(n, dtype=np.int64), k_eff)
-        target_pos = candidates[j.ravel()]
-    else:
-        radius = float(meters_to_chord(max_distance)) * (1.0 + 1e-12) + 1e-15
-        neighbours = tree.query_ball_point(xyz, radius)
-        counts = np.array([len(nb) for nb in neighbours], dtype=np.int64)
-        point_row = np.repeat(np.arange(n, dtype=np.int64), counts)
-        picked = np.concatenate(neighbours).astype(np.int64) if counts.sum() else np.empty(0, dtype=np.int64)
-        target_pos = candidates[picked]
-    length = haversine(y[point_row], x[point_row], node_y[target_pos], node_x[target_pos])
-    if max_distance is not None:
-        keep = length <= max_distance
-        point_row, target_pos, length = point_row[keep], target_pos[keep], length[keep]
-    if connect == "distance" and len(point_row):
-        order = np.lexsort((target_pos, length, point_row))
-        point_row, target_pos, length = point_row[order], target_pos[order], length[order]
-    return point_row, target_pos, length
 
 
 def _with_skipped(network: Any, points: Any, skipped: np.ndarray, return_skipped: bool) -> Any:
