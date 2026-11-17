@@ -192,6 +192,37 @@ def test_count_within_matches_brute_force(kigali, graph, sample, n_targets):
     assert counts.tolist() == expected and list(counts.index) == origins
 
 
+def test_distance_table_bipartite_defaults_finite_only_and_no_self_pairs():
+    origins = pd.DataFrame({"school": ["s0", "s1", "s2"], "lat": [-1.95, -1.95, -1.95], "lon": [30.0, 30.001, 30.05]})
+    targets = pd.DataFrame({"clinic": ["c0", "c1"], "lat": [-1.95, -1.95], "lon": [30.0005, 30.002]})
+    net = SpatialNetwork.from_point_sets(
+        origins,
+        targets,
+        connect="distance",
+        max_distance=300,
+        origin_id="school",
+        target_id="clinic",
+    )
+    table = net.distance_table()
+    assert list(table.columns) == ["origin", "target", "distance"]
+    assert set(table["origin"]) <= {"s0", "s1"}
+    assert "s2" not in set(table["origin"])
+    assert set(table["target"]) <= {"c0", "c1"}
+    assert np.isfinite(table["distance"]).all()
+    assert (table["origin"] != table["target"]).all()
+
+    # Non-bipartite network defaults to all nodes and excludes self-pairs and unreachable pairs
+    road = line()
+    all_pairs = road.distance_table(max_distance=35.0)
+    assert list(all_pairs[["origin", "target"]].itertuples(index=False, name=None)) == [
+        (1, 2),
+        (1, 3),
+        (2, 3),
+        (3, 4),
+    ]
+    assert all_pairs["distance"].tolist() == [10.0, 30.0, 20.0, 30.0]
+
+
 # ----- structure
 
 
