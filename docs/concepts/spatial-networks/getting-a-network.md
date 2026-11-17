@@ -159,6 +159,12 @@ Name: length, dtype: float64
 
 **Use cases.** A network of point-to-point links is the model for wireless or microwave links between schools, where the question is which towers to connect rather than which roads to follow. Its minimum spanning tree (see [Algorithms](algorithms.md)) is the shortest set of links that connects every school. `weight_func` can give the links another weight, such as a cost that grows faster than distance.
 
+## Links between two sets of points: `from_point_sets`
+
+`SpatialNetwork.from_point_sets(origins, targets, ...)` builds an undirected network across two sets of points, such as schools and clinics or schools and fibre nodes. Each node gets `kind="point"` and a `bipartite` column (`0` for `origins`, `1` for `targets`). By default (`within="none"`), only `origins` to `targets` links are added (`connect="knn"` with `k=1` by default, or `connect="distance"` within `max_distance` metres), so the network is strictly bipartite and works directly with `networkx.algorithms.bipartite` after `to_networkx()`. All points from both sets are kept as nodes, even when `max_distance` leaves some without edges.
+
+`within` adds links inside either set (`"origins"`, `"targets"`, or `"both"`), using `within_k` (defaulting to `k`) and `within_max_distance` (defaulting to `max_distance`). For `ConnectionPlanner`, a pure schools-to-fibre network (`within="none"`) gives the planner nothing to optimise because every school can only take its direct link to a fibre node; `within="origins"` adds school-to-school links so a school can connect through nearby schools to share a route to a fibre root.
+
 ## networkx graphs
 
 `SpatialNetwork.from_networkx` takes any networkx graph whose nodes have `x` and `y`, which includes every osmnx graph. Use it to bring existing work into the library; `to_networkx` goes back (see [Storage and interoperability](storage.md)).
