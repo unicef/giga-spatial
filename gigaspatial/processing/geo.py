@@ -613,6 +613,10 @@ def aggregate_points_to_zones(
     """
     Aggregate point data to zones with flexible aggregation methods.
 
+    When ``aggregation="count"`` and ``value_columns`` is omitted, outputs
+    ``point_count`` (with ``output_suffix`` appended). When ``value_columns``
+    is provided, counts or aggregates non-null values into each column.
+
     For zones with no overlapping points:
     - ``"count"`` aggregation fills missing values with ``0``.
     - All other aggregations fill missing values with ``np.nan``.
@@ -667,7 +671,7 @@ def aggregate_points_to_zones(
     agg_method_for_output_col: Dict[str, str] = {}
 
     if isinstance(aggregation, str):
-        if aggregation == "count":
+        if aggregation == "count" and not value_columns:
             agg_funcs["__count"] = "count"
         elif value_columns is not None:
             agg_funcs = {col: aggregation for col in value_columns}
@@ -700,7 +704,10 @@ def aggregate_points_to_zones(
 
     # --- Spatial join ---
     result = zones.copy()
-    joined = gpd.sjoin(points_gdf, zones, how="inner", predicate=point_zone_predicate)
+    minimal_zones = zones[[zone_id_column, "geometry"]]
+    joined = gpd.sjoin(
+        points_gdf, minimal_zones, how="inner", predicate=point_zone_predicate
+    )
 
     # --- Aggregation ---
     if "__count" in agg_funcs:

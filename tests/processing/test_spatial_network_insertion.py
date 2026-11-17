@@ -233,3 +233,144 @@ def test_kigali_points_reach_their_road(kigali, schools):
     connections = out.edges[out.edges["u"].isin(schools["school"])]
     lengths = out.shortest_path_lengths(connections["u"], connections["v"], pairwise=True)
     assert lengths == pytest.approx(connections["length"].to_numpy())
+
+
+# ----- connect_points
+
+
+def test_connect_points_to_nearest_node():
+    net = road()
+    pts = points((-1.95 + 30 * M, 30.001), (-1.95 - 40 * M, 30.009))
+    out = net.connect_points(pts)
+    assert "split" not in set(out.nodes["kind"])
+    assert "split" not in set(out.edges["kind"])
+    assert out.nodes.loc["p0", "kind"] == "point" and out.nodes.loc["p1", "kind"] == "point"
+    c0 = edge(out, "p0", "a")
+    c1 = edge(out, "p1", "b")
+    assert c0["kind"] == "connection" and edge(out, "a", "p0")["kind"] == "connection"
+    assert c1["kind"] == "connection" and edge(out, "b", "p1")["kind"] == "connection"
+    assert c0["length"] == pytest.approx(haversine(-1.95 + 30 * M, 30.001, -1.95, 30.0))
+    assert c1["length"] == pytest.approx(haversine(-1.95 - 40 * M, 30.009, -1.95, 30.01))
+    assert_valid(out)
+
+    undirected = road(directed=False).connect_points(pts)
+    assert len(undirected.edges[undirected.edges["kind"] == "connection"]) == 2
+    assert_valid(undirected)
+
+
+def test_connect_points_edge_kind_follows_target_node_kind():
+    base_points = points((-1.95, 30.0), (-1.95, 30.01), ids=["t0", "t1"])
+    point_net = SpatialNetwork.from_points(base_points, k=1)
+    with pytest.raises(ValueError, match="no road edges"):
+        point_net.insert_points(points((-1.95 + 20 * M, 30.001), ids=["s0"]))
+
+    out = point_net.connect_points(points((-1.95 + 20 * M, 30.001), ids=["s0"]))
+    assert out.nodes.loc["s0", "kind"] == "point"
+    link = edge(out, "s0", "t0")
+    assert link["kind"] == "point_link"
+    assert_valid(out)
+
+    mixed = road().insert_points(points((-1.95 + 50 * M, 30.005), ids=["existing_point"]))
+    out_mixed = mixed.connect_points(
+        points(
+            (-1.95 + 60 * M, 30.005),  # nearest to existing_point (kind="point")
+            (-1.95 + 5 * M, 30.005),   # nearest to split node -1 (kind="split")
+            (-1.95, 30.0001),          # nearest to road node "a" (kind="road")
+            ids=["to_point", "to_split", "to_road"],
+        )
+    )
+    assert edge(out_mixed, "to_point", "existing_point")["kind"] == "point_link"
+    assert edge(out_mixed, "to_split", -1)["kind"] == "connection"
+    assert edge(out_mixed, "to_road", "a")["kind"] == "connection"
+    assert_valid(out_mixed)
+
+
+def test_connect_points_knn_and_distance_modes():
+    net = road(directed=False)
+    pt = points((-1.95, 30.002))
+
+    both = net.connect_points(pt, connect="knn", k=2)
+    assert set(both.edges[both.edges["u"] == "p0"]["v"]) == {"a", "b"}
+
+    clamped = net.connect_points(pt, connect="knn", k=10)
+    assert set(clamped.edges[clamped.edges["u"] == "p0"]["v"]) == {"a", "b"}
+
+    filtered_knn = net.connect_points(pt, connect="knn", k=2, max_distance=500)
+    assert list(filtered_knn.edges[filtered_knn.edges["u"] == "p0"]["v"]) == ["a"]
+
+    by_dist_one = net.connect_points(pt, connect="distance", max_distance=500)
+    assert list(by_dist_one.edges[by_dist_one.edges["u"] == "p0"]["v"]) == ["a"]
+
+    by_dist_both = net.connect_points(pt, connect="distance", max_distance=2000)
+    assert list(by_dist_both.edges[by_dist_both.edges["u"] == "p0"]["v"]) == ["a", "b"]
+
+
+def test_connect_points_max_distance_and_skipped():
+    pts = points((-1.95 + 20 * M, 30.0), (-1.95 + 500 * M, 30.005))
+    out, skipped = road().connect_points(pts, max_distance=100, return_skipped=True)
+    assert "p0" in out.node_index and "p1" not in out.node_index
+    assert list(skipped.index) == ["p1"]
+
+    listed, skipped_list = road().connect_points([(-1.95 + 500 * M, 30.005)], max_distance=100, return_skipped=True)
+    assert skipped_list == [(-1.95 + 500 * M, 30.005)] and len(listed) == 2
+
+
+def test_connect_points_nodes_filter():
+    net = road().insert_points(points((-1.95 + 10 * M, 30.0), ids=["near_a"]))
+    pt = points((-1.95 + 15 * M, 30.0), ids=["school"])
+
+    # Without filter, nearest node is "near_a" (5 m away).
+    unfiltered = net.connect_points(pt)
+    assert edge(unfiltered, "school", "near_a")["kind"] == "point_link"
+
+    # Filter by node IDs: restrict to ["b"].
+    to_b = net.connect_points(pt, nodes=["b"])
+    assert edge(to_b, "school", "b")["kind"] == "connection"
+
+    # Filter by boolean Series: only road nodes.
+    to_road = net.connect_points(pt, nodes=net.nodes["kind"] == "road")
+    assert edge(to_road, "school", "a")["kind"] == "connection"
+
+    # Filter by boolean numpy mask in node order.
+    mask = (net.nodes["kind"] == "road").to_numpy()
+    to_road_mask = net.connect_points(pt, nodes=mask)
+    assert edge(to_road_mask, "school", "a")["kind"] == "connection"
+
+
+def test_connect_points_custom_weight_and_attributes():
+    gdf = gpd.GeoDataFrame({"pupils": [120]}, geometry=[Point(30.0, -1.95 + 50 * M)], crs="EPSG:4326")
+    out = road(weight="time").connect_points(gdf)
+    assert out.nodes.loc[0, "pupils"] == 120 and out.nodes.loc[0, "kind"] == "point"
+    conn = edge(out, 0, "a")
+    assert conn["time"] == pytest.approx(conn["length"])
+    assert out.total_length(by="kind")["road"] == pytest.approx(road().total_length())
+
+
+def test_connect_points_errors():
+    with pytest.raises(ValueError, match="already node IDs"):
+        road().connect_points(points((-1.95, 30.0), ids=["a"]))
+    with pytest.raises(ValueError, match="reserved"):
+        road().connect_points(points((-1.95, 30.0)).assign(kind="school"))
+    with pytest.raises(ValueError, match="unique"):
+        road().connect_points(points((-1.95, 30.0), (-1.95, 30.01), ids=["s", "s"]))
+    with pytest.raises(ValueError, match="k must be at least 1"):
+        road().connect_points(points((-1.95, 30.0)), k=0)
+    with pytest.raises(ValueError, match="needs max_distance"):
+        road().connect_points(points((-1.95, 30.0)), connect="distance")
+    with pytest.raises(ValueError, match='connect must be "knn" or "distance"'):
+        road().connect_points(points((-1.95, 30.0)), connect="other")
+    with pytest.raises(KeyError, match="not in the network"):
+        road().connect_points(points((-1.95, 30.0)), nodes=["unknown"])
+    with pytest.raises(ValueError, match="no nodes to connect points to"):
+        road().connect_points(points((-1.95, 30.0)), nodes=[])
+
+
+def test_kigali_connect_points(kigali, schools):
+    out = kigali.connect_points(schools, id_column="school")
+    assert_valid(out)
+    nearest = kigali.nearest_nodes(schools, return_distance=True)
+    connections = out.edges[out.edges["u"].isin(schools["school"])].set_index("u").loc[schools["school"]]
+    assert list(connections["v"]) == list(nearest["node_id"])
+    assert connections["length"].to_numpy() == pytest.approx(nearest["distance"].to_numpy())
+    assert (connections["kind"] == "connection").all()
+

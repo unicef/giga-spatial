@@ -772,6 +772,156 @@ def test_opencellid_read_options_reach_the_reader(opencellid, tmp_path):
     assert list(recent["lon"]) == [11.0]
 
 
+def _opencellid_regions_html(link: str, country: str = "KE") -> str:
+    return (
+        "<table id='regions'>"
+        "<thead><tr><th>Country Code</th><th>Files (grouped by MCC)</th></tr></thead>"
+        f"<tbody><tr><td>{country}</td><td><a href='{link}'>MCC-639</a></td></tr></tbody>"
+        "</table>"
+    )
+
+
+def _capture_logger(name: str):
+    import logging
+
+    stream = io.StringIO()
+    logger = logging.getLogger(name)
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(message)s"))
+    logger.addHandler(handler)
+    return logger, stream
+
+
+def test_opencellid_download_logs_redact_access_token(tmp_path, monkeypatch):
+    from gigaspatial.handlers import opencellid as ocid_module
+    from gigaspatial.handlers.opencellid import OpenCellIDHandler
+
+    secret = "secret-ocid-token-123"
+    download_link = f"https://opencellid.org/ocid/downloads?token={secret}&file=MCC-639.csv.gz"
+    seen_urls = []
+
+    def _fake_get(url, **kwargs):
+        seen_urls.append(url)
+        return SimpleNamespace(
+            text=_opencellid_regions_html(download_link),
+            raise_for_status=lambda: None,
+        )
+
+    def _fake_stream(url, path, store, **kwargs):
+        seen_urls.append(url)
+        store.write_file(str(path), b"payload")
+        return Path(path)
+
+    monkeypatch.setattr(ocid_module.requests, "get", _fake_get)
+    monkeypatch.setattr(ocid_module, "stream_to_store", _fake_stream)
+
+    logger, stream = _capture_logger("test.opencellid.info")
+    handler = OpenCellIDHandler(
+        base_path=tmp_path, api_token=secret, n_workers=1, logger=logger
+    )
+
+    assert handler.ensure_data_available("KEN") is True
+    assert seen_urls == [
+        f"https://opencellid.org/downloads.php?token={secret}",
+        download_link,
+    ]
+    logs = stream.getvalue()
+    assert secret not in logs
+    assert (
+        "INFO:Downloading OpenCellID data from "
+        "https://opencellid.org/ocid/downloads?token=***&file=MCC-639.csv.gz"
+    ) in logs
+
+
+def test_opencellid_error_logs_and_exceptions_redact_access_token(
+    tmp_path, monkeypatch
+):
+    import requests
+    import urllib3
+    from gigaspatial.handlers import opencellid as ocid_module
+    from gigaspatial.handlers.opencellid import OpenCellIDHandler
+
+    secret = "secret-ocid-token-123"
+    download_link = f"https://opencellid.org/ocid/downloads?token={secret}&file=MCC-639.csv.gz"
+
+    # 1. Discovery failure (HTTPError carrying tokenized URL)
+    resp = requests.Response()
+    resp.status_code = 403
+    resp.url = f"https://opencellid.org/downloads.php?token={secret}"
+
+    def _fail_discovery(url, **kwargs):
+        return SimpleNamespace(
+            raise_for_status=lambda: resp.raise_for_status(),
+            text="",
+        )
+
+    monkeypatch.setattr(ocid_module.requests, "get", _fail_discovery)
+
+    logger, stream = _capture_logger("test.opencellid.errors")
+    handler = OpenCellIDHandler(
+        base_path=tmp_path, api_token=secret, n_workers=1, logger=logger
+    )
+
+    with pytest.raises(requests.HTTPError) as exc_info:
+        handler.config.get_relevant_data_units("KEN")
+
+    assert secret not in str(exc_info.value)
+    assert "token=***" in str(exc_info.value)
+    assert secret not in exc_info.value.response.url
+    assert secret not in handler.get_available_data_info("KEN")["error"]
+    assert secret not in stream.getvalue()
+
+    # 2. Download failure (chained MaxRetryError + BaseHandlerDownloader unit repr/exc_info)
+    stream.seek(0)
+    stream.truncate(0)
+
+    monkeypatch.setattr(
+        ocid_module.requests,
+        "get",
+        lambda url, **kwargs: SimpleNamespace(
+            text=_opencellid_regions_html(download_link),
+            raise_for_status=lambda: None,
+        ),
+    )
+
+    def _fail_stream(url, path, store, **kwargs):
+        max_retry = urllib3.exceptions.MaxRetryError(
+            None, f"/ocid/downloads?token={secret}&file=MCC-639.csv.gz"
+        )
+        try:
+            raise max_retry
+        except urllib3.exceptions.MaxRetryError as inner:
+            raise requests.ConnectionError(inner)
+
+    monkeypatch.setattr(ocid_module, "stream_to_store", _fail_stream)
+
+    assert handler.ensure_data_available("KEN") is False
+    logs = stream.getvalue()
+    assert secret not in logs
+    assert "token=***" in logs
+
+
+def test_opencellid_config_repr_masks_api_token(tmp_path):
+    from gigaspatial.handlers.opencellid import OpenCellIDConfig
+
+    secret = "secret-ocid-token-123"
+    with_token = OpenCellIDConfig(
+        base_path=tmp_path,
+        api_token=secret,
+        download_url="https://opencellid.org/downloads.php?token=inline-secret&next=",
+    )
+    rendered = repr(with_token)
+    assert secret not in rendered
+    assert "inline-secret" not in rendered
+    assert "api_token='***'" in rendered
+
+    without_token = OpenCellIDConfig(base_path=tmp_path, api_token="")
+    assert "api_token=''" in repr(without_token)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HDX
 # ─────────────────────────────────────────────────────────────────────────────

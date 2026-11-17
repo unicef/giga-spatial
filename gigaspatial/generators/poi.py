@@ -484,20 +484,22 @@ class PoiViewGenerator:
         predicate: Literal["intersects", "within", "fractional"] = "intersects",
         **kwargs,
     ) -> pd.DataFrame:
-        """Enriches POIs with zonal statistics from raster or polygon data.
+        """Enriches POIs with zonal statistics from raster, point, or polygon data.
 
-        Operates in three modes:
+        Operates in four modes:
         1. Raster point sampling: Samples values at exact POI locations.
         2. Raster zonal stats: Calculates stats within circular POI buffers.
-        3. Polygon aggregation: Aggregates polygon data within POI buffers.
+        3. Point aggregation: Counts points (`value_column=None`) or aggregates
+           `value_column` values within POI buffers.
+        4. Polygon aggregation: Aggregates polygon data within POI buffers.
 
         Args:
             data: Data source (TifProcessor(s) or GeoDataFrame).
-            stat: Statistic to calculate (e.g., 'sum', 'mean'). Defaults to 'mean'.
+            stat: Statistic to calculate (e.g., 'sum', 'mean', 'count'). Defaults to 'mean'.
             map_radius_meters: Radius for circular POI buffers. If None, samples
                 directly at point locations (raster only).
             output_column: Destination column name. Defaults to "zonal_stat".
-            value_column: Target column for polygon aggregation.
+            value_column: Target column for point or polygon aggregation.
             predicate: Spatial relationship for aggregation.
                 Defaults to "intersects".
             **kwargs: Extra parameters for sampling or aggregation.
@@ -579,7 +581,7 @@ class PoiViewGenerator:
 
             # Create buffers around POIs
             buffer_gdf = buffer_geodataframe(
-                self.points_gdf,
+                self.points_gdf[["poi_id", "geometry"]],
                 buffer_distance_meters=map_radius_meters,
                 cap_style="round",
             )
@@ -615,14 +617,8 @@ class PoiViewGenerator:
                 )
 
                 output_col_from_agg = (
-                    f"{value_column}_{actual_stat}" if value_column else "point_count"
+                    value_column if value_column is not None else "point_count"
                 )
-                results_df = aggregation_result_gdf[["poi_id", output_col_from_agg]]
-
-                if output_column != "zonal_stat":
-                    results_df = results_df.rename(
-                        columns={output_col_from_agg: output_column}
-                    )
 
             else:
                 if value_column is None:

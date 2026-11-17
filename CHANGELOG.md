@@ -15,6 +15,9 @@ All notable changes to this project will be documented in this file.
     -   The forecast variables are river discharge in the last 24 hours, runoff water equivalent, snow depth water equivalent, and soil wetness index. Each variable keeps the reference dates the EWDS catalogue actually publishes. Control forecasts and perturbed ensemble members, lead times, and the file's variable names and units are kept.
     -   A run reads the catalogue first and requests a reference date only when it is missing, short of the published lead times, or still the open tail after the catalogue update time changes. Repeated runs do not download stored data again.
     -   Static GloFAS v4.0 auxiliary maps (upstream area, elevation, local drain direction, and flood thresholds for return periods 1.5 through 500 years, plus `mu` and `sigma`) are stored separately under `bronze/cems/glofas/auxiliary` and can be loaded without a forecast download. They apply to operational forecasts from 2023-07-26 and are not paired with `version_2_1`, `version_3_1`, or earlier operational runs. Set `EWDS_API_KEY` and accept the CEMS-FLOODS licence before a forecast download.
+-   **Optional `excel` extra (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/core/io/writers.py`)**
+    -   Added `giga-spatial[excel]` (`openpyxl>=3.1.0`, `xlrd>=2.0.0`, also included in `giga-spatial[all]`) for reading `.xlsx`/`.xls` files and writing `.xlsx` files.
+    -   `read_dataset` and `write_dataset` now raise an `ImportError` with `pip install 'giga-spatial[excel]'` when the required Excel engine is missing.
 -   **HDX configuration and authentication (`gigaspatial/config.py`, `gigaspatial/handlers/hdx.py`)**
     -   Added `HDX_KEY` and `HDX_USER_AGENT` to `Config`, loaded automatically from `.env` or system environment variables.
     -   `HDXConfig` (and `RWIConfig`) supports `hdx_key` and custom `user_agent` parameters. When an `hdx_key` is provided, requests are authenticated (`hdx_read_only=False`), bypassing anonymous rate limiting and WAF challenges. The key is masked in `__repr__`.
@@ -22,6 +25,22 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **Point zonal aggregation column lookup and count/collision handling (`gigaspatial/generators/poi.py`, `gigaspatial/processing/geo.py`)**
+    -   Fixed `PoiViewGenerator.map_zonal_stats` looking up `{value_column}_{stat}` (e.g. `"tests_sum"`) instead of `value_column` when aggregating point GeoDataFrames with a `value_column`, and removed the duplicate selection/rename block in the point branch.
+    -   Updated `aggregate_points_to_zones` so `aggregation="count"` uses the `"point_count"` output column only when `value_columns` is omitted; when `value_columns` is provided, it counts non-null values into each named column (fixing `map_zonal_stats(..., stat="count", value_column=...)` and `ZonalViewGenerator.map_points(..., value_columns=...)`).
+    -   Joined only `[zone_id_column, "geometry"]` in `aggregate_points_to_zones` and passed `[["poi_id", "geometry"]]` buffers in `PoiViewGenerator.map_zonal_stats` so zone or POI attributes sharing column names with `value_columns` do not collide during spatial joins or merges.
+-   **OpenCellID token redaction in logs, errors, and config `repr` (`gigaspatial/handlers/opencellid.py`)**
+    -   `OpenCellIDDownloader.download_data_unit` now redacts query tokens (`token=***`) in `INFO` download logs instead of logging the authenticated URL.
+    -   Sanitized exceptions (including cause/context chains and `request`/`response` URLs) in `OpenCellIDConfig.get_relevant_data_units_by_key` and `OpenCellIDDownloader.download_data_unit`, and wrapped resolved units so error logs from `BaseHandlerDownloader` do not expose the access token.
+    -   Masked `api_token` and redacted any URL query tokens in `OpenCellIDConfig.__repr__`.
+-   **Clean-install imports and runtime dependencies (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/fetchers/healthsites.py`)**
+    -   Replaced `fiona.listlayers` in `read_kmz` with `pyogrio.list_layers`, removing the undeclared `fiona` dependency that broke imports of `PoiViewGenerator`, handlers, generators, and `gigaspatial.core.io` on clean installs with `geopandas>=1.0.1`.
+    -   Replaced `tenacity` in `HealthSitesFetcher._fetch_osm_country_name` with a plain 3-attempt retry loop and exponential backoff (retaining escalating timeouts while failing fast on deterministic `ValueError` lookups).
+    -   Declared `lxml>=5.0.0` (used by `OpenCellIDHandler` HTML parsing) and directly imported transitive dependencies (`pyogrio>=0.7.2`, `pyproj>=3.5.0`, `urllib3>=1.26,<3`) in `[project].dependencies`.
+-   **SRTM tile auto-download in LOS analysis (`gigaspatial/processing/elevation/srtm_manager.py`, `gigaspatial/handlers/nasa/srtm.py`)**
+    -   Fixed `TypeError: NasaSRTMDownloader.download_data_unit() missing 1 required positional argument: 'options'` when `LOSAnalyzer.analyze()` encounters missing SRTM tiles. `SRTMManager` now forwards typed `DownloadOptions(show_progress=False)` to `download_data_unit`.
+    -   `NasaSRTMDownloader.download_data_unit` now treats `options` as optional (`options: Optional[DownloadOptions] = None`), defaulting to `self.options_type()`, so direct single-argument calls succeed without raising.
+    -   `SRTMManager` now configures the downloader with `NasaSRTMConfig(base_path=self.srtm_directory)` when no explicit downloader is supplied, ensuring missing tiles are downloaded into the manager's configured directory.
 -   **HDX downloads and WAF challenge detection (`gigaspatial/handlers/hdx.py`)**
     -   `HDXDownloader` verifies downloaded files have non-zero size before committing them to the data store, preventing 0-byte files from being cached when HDX returns an AWS WAF anti-bot challenge (HTTP 202).
     -   Failed downloads retry up to 3 times with exponential backoff (`time.sleep(2 ** attempt)`).
