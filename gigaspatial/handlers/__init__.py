@@ -65,6 +65,13 @@ __getattr__, __dir__, __all__ = attach(
             "JRCFloodHazardHandler",
             "GlofasFloodHazardHandler",
         ],
+        "gigaspatial.handlers.cems.glofas_forecast": [
+            "GlofasForecastConfig",
+            "GlofasForecastDownloader",
+            "GlofasForecastReader",
+            "GlofasForecastHandler",
+            "GlofasForecastResolveOptions",
+        ],
         "gigaspatial.handlers.cems.glofas_historical": [
             "GlofasHistoricalConfig",
             "GlofasHistoricalDownloader",
@@ -154,6 +161,13 @@ if TYPE_CHECKING:
         CEMSFloodHazardResolveOptions,
         JRCFloodHazardHandler,
         GlofasFloodHazardHandler,
+    )
+    from gigaspatial.handlers.cems.glofas_forecast import (
+        GlofasForecastConfig,
+        GlofasForecastDownloader,
+        GlofasForecastReader,
+        GlofasForecastHandler,
+        GlofasForecastResolveOptions,
     )
     from gigaspatial.handlers.cems.glofas_historical import (
         GlofasHistoricalConfig,

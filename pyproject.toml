@@ -127,6 +127,9 @@ roads = [
 pandana = [
     "pandana>=0.8"
 ]
+glofas = [
+    "cfgrib>=0.9.10"
+]
 
 # Meta target using PEP 508 self-references to bundle everything seamlessly
 all = [
@@ -142,7 +145,8 @@ all = [
     "giga-spatial[maxar]",
     "giga-spatial[hdx]",
     "giga-spatial[roads]",
-    "giga-spatial[pandana]"
+    "giga-spatial[pandana]",
+    "giga-spatial[glofas]"
 ]
 
 [tool.setuptools.dynamic]

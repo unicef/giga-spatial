@@ -84,8 +84,8 @@ class Config(BaseSettings):
         default="giga-spatial/1.0", alias="HDX_USER_AGENT"
     )
 
-    # CEMS Early Warning Data Store
-    # Used for GloFAS historical reanalysis. Accept the dataset licence on the
+    # CEMS Early Warning Data Store.
+    # Used for GloFAS historical and forecast downloads. Accept the dataset licence on the
     # EWDS dataset page before the first download.
     EWDS_API_KEY: str = Field(default="", alias="EWDS_API_KEY")
     EWDS_API_URL: str = Field(
