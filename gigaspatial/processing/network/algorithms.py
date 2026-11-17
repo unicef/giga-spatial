@@ -418,6 +418,59 @@ class AlgorithmsMixin:
                 counts[start : start + len(block)] = np.isfinite(block[:, target]).sum(axis=1)
         return pd.Series(counts[inverse], index=self._nodes.index.take(origin), name="count")
 
+    def distance_table(
+        self,
+        origins: Any = None,
+        targets: Any = None,
+        max_distance: Optional[float] = None,
+        weight: Optional[str] = None,
+        directed: Optional[bool] = None,
+    ) -> pd.DataFrame:
+        """Long table of reachable origin-to-target network distances, for ``spopt`` and ``access``.
+
+        Args:
+            origins: Origin node IDs. On a network with a ``bipartite`` column,
+                defaults to the nodes with ``bipartite == 0``; all nodes otherwise.
+            targets: Target node IDs. On a network with a ``bipartite`` column,
+                defaults to the nodes with ``bipartite == 1``; all nodes otherwise.
+            max_distance: Ignore pairs farther than this.
+            weight: Edge column to add up. The network's weight otherwise.
+            directed: ``False`` ignores one-way restrictions.
+
+        Returns:
+            A long table with ``origin``, ``target``, and ``distance``, sorted
+            by origin and distance, containing only finite reachable pairs with
+            ``origin != target``.
+        """
+        sources = self._default_positions(origins, 0)
+        target = self._default_positions(targets, 1)
+        limit = np.inf if max_distance is None else float(max_distance)
+        matrix = self._graph(weight, directed).matrix
+        parts = []
+        if len(sources) and len(target):
+            for start, block in _dijkstra_blocks(matrix, sources, limit=limit):
+                to_targets = block[:, target]
+                row, col = np.nonzero(np.isfinite(to_targets))
+                orig_pos = sources[start + row]
+                targ_pos = target[col]
+                keep = orig_pos != targ_pos
+                parts.append((orig_pos[keep], targ_pos[keep], to_targets[row[keep], col[keep]]))
+        origin = np.concatenate([p[0] for p in parts]) if parts else np.empty(0, dtype=np.int64)
+        node = np.concatenate([p[1] for p in parts]) if parts else np.empty(0, dtype=np.int64)
+        distance = np.concatenate([p[2] for p in parts]) if parts else np.empty(0, dtype=np.float64)
+        order = np.lexsort((node, distance, origin))
+        ids = self._nodes.index
+        return pd.DataFrame(
+            {"origin": ids.take(origin[order]), "target": ids.take(node[order]), "distance": distance[order]}
+        )
+
+    def _default_positions(self, ids: Any, side: int) -> np.ndarray:
+        if ids is not None:
+            return np.unique(self._positions(ids))
+        if "bipartite" in self._nodes.columns:
+            return np.flatnonzero(self._nodes["bipartite"].to_numpy() == side)
+        return np.arange(len(self._nodes), dtype=np.int64)
+
     # ----- structure
 
     def connected_components(self, strong: bool = False) -> pd.Series:
