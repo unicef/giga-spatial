@@ -103,7 +103,7 @@ A node's or edge's `kind` records where it came from, so a result can always be 
 | edge kind `road` | A road segment, or a joined chain of them |
 | edge kind `split` | A piece of a road that was split at a `split` node |
 | edge kind `connection` | The link from an inserted or connected point to its road or node |
-| edge kind `point_link` | A link between two points: from `from_points`, `connect_points`, or `insert_points(chain=True)` |
+| edge kind `point_link` | A link between two points: from `from_points`, `from_point_sets`, `connect_points`, or `insert_points(chain=True)` |
 | edge kind `component_link` | A link `connect_components` added between disconnected parts |
 | edge kind `added` | An edge you added with `add_weighted_edges` |
 | edge kind `bridge` | A straight-line link a connection plan uses between parts of the network that no road joins |

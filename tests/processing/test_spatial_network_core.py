@@ -296,6 +296,201 @@ def test_from_points_rejects_non_points():
         SpatialNetwork.from_points(gdf)
 
 
+# ----- from_point_sets
+
+
+def origin_and_target_points():
+    origins = pd.DataFrame(
+        {
+            "school": ["s0", "s1", "s2"],
+            "lat": [-1.95, -1.95, -1.95],
+            "lon": [30.0, 30.0006, 30.02],
+            "students": [100, 200, 150],
+        }
+    )
+    targets = pd.DataFrame(
+        {
+            "fibre": ["f0", "f1"],
+            "lat": [-1.9505, -1.9505],
+            "lon": [30.0005, 30.0015],
+            "capacity": [10, 20],
+        }
+    )
+    return origins, targets
+
+
+def test_from_point_sets_within_modes():
+    origins, targets = origin_and_target_points()
+
+    none_net = SpatialNetwork.from_point_sets(
+        origins, targets, connect="knn", k=1, within="none", origin_id="school", target_id="fibre"
+    )
+    assert not none_net.directed
+    assert list(none_net.nodes.loc[["s0", "s1", "s2"], "bipartite"]) == [0, 0, 0]
+    assert list(none_net.nodes.loc[["f0", "f1"], "bipartite"]) == [1, 1]
+    assert set(none_net.nodes["kind"]) == {"point"}
+    assert set(none_net.edges["kind"]) == {"point_link"}
+    assert list(none_net.edges[["u", "v"]].itertuples(index=False, name=None)) == [
+        ("s0", "f0"),
+        ("s1", "f0"),
+        ("s2", "f1"),
+    ]
+
+    origins_net = SpatialNetwork.from_point_sets(
+        origins,
+        targets,
+        connect="knn",
+        k=1,
+        within="origins",
+        within_k=2,
+         within_max_distance=200,
+        origin_id="school",
+        target_id="fibre",
+    )
+    origin_pairs = set(origins_net.edges[["u", "v"]].itertuples(index=False, name=None))
+    assert ("s0", "s1") in origin_pairs
+    assert ("s0", "s2") not in origin_pairs
+    assert ("f0", "f1") not in origin_pairs
+
+    targets_net = SpatialNetwork.from_point_sets(
+        origins, targets, connect="knn", k=1, within="targets", origin_id="school", target_id="fibre"
+    )
+    target_pairs = set(targets_net.edges[["u", "v"]].itertuples(index=False, name=None))
+    assert ("f0", "f1") in target_pairs
+    assert ("s0", "s1") not in target_pairs
+
+    both_net = SpatialNetwork.from_point_sets(
+        origins,
+        targets,
+        connect="distance",
+        max_distance=200,
+        within="both",
+        origin_id="school",
+        target_id="fibre",
+    )
+    both_pairs = set(both_net.edges[["u", "v"]].itertuples(index=False, name=None))
+    assert ("s0", "f0") in both_pairs
+    assert ("s0", "s1") in both_pairs
+    assert ("f0", "f1") in both_pairs
+
+
+def test_from_point_sets_keeps_isolated_nodes_and_exports_bipartite_to_networkx():
+    origins, targets = origin_and_target_points()
+    net = SpatialNetwork.from_point_sets(
+        origins, targets, connect="knn", k=1, max_distance=300, origin_id="school", target_id="fibre"
+    )
+    assert list(net.node_index) == ["s0", "s1", "s2", "f0", "f1"]
+    assert net.degree().loc["s2"] == 0
+
+    G = net.to_networkx()
+    assert nx.is_bipartite(G)
+    top = {n for n, d in G.nodes(data=True) if d["bipartite"] == 0}
+    bottom = {n for n, d in G.nodes(data=True) if d["bipartite"] == 1}
+    assert top == {"s0", "s1", "s2"}
+    assert bottom == {"f0", "f1"}
+
+
+def test_from_point_sets_weight_func():
+    origins, targets = origin_and_target_points()
+    net = SpatialNetwork.from_point_sets(
+        origins,
+        targets,
+        k=1,
+        origin_id="school",
+        target_id="fibre",
+        weight="cost",
+        weight_func=lambda u, v, length: length * 2.0,
+    )
+    assert net.weight == "cost"
+    assert np.allclose(net.edges["cost"], net.edges["length"] * 2.0)
+
+
+def test_from_point_sets_errors():
+    origins, targets = origin_and_target_points()
+    # Clashing default RangeIndex IDs raise ValueError
+    with pytest.raises(ValueError, match="both origins and targets"):
+        SpatialNetwork.from_point_sets(origins, targets)
+    # Empty origins or targets raise ValueError pointing to from_points
+    with pytest.raises(ValueError, match="from_points"):
+        SpatialNetwork.from_point_sets(origins.iloc[:0], targets, origin_id="school", target_id="fibre")
+    with pytest.raises(ValueError, match="from_points"):
+        SpatialNetwork.from_point_sets(origins, targets.iloc[:0], origin_id="school", target_id="fibre")
+    # Reserved bipartite column raises ValueError
+    with pytest.raises(ValueError, match="bipartite"):
+        SpatialNetwork.from_point_sets(
+            origins.assign(bipartite=0), targets, origin_id="school", target_id="fibre"
+        )
+    # Invalid within mode raises ValueError
+    with pytest.raises(ValueError, match="within"):
+        SpatialNetwork.from_point_sets(
+            origins, targets, within="all", origin_id="school", target_id="fibre"
+        )
+
+
+def test_entity_table_distance_graphs_use_entity_ids_not_row_indices():
+    from gigaspatial.core.schemas.entity import EntityTable, GigaEntity
+
+    class SiteEntity(GigaEntity):
+        site_id: str
+
+        @property
+        def id(self) -> str:
+            return self.site_id
+
+    left = EntityTable(
+        entities=[
+            SiteEntity(site_id="school-0", latitude=-1.95, longitude=30.0),
+            SiteEntity(site_id="school-1", latitude=-1.95, longitude=30.05),
+        ]
+    )
+    right = EntityTable(
+        entities=[
+            SiteEntity(site_id="fibre-0", latitude=-1.95, longitude=30.0005),
+            SiteEntity(site_id="fibre-1", latitude=-1.95, longitude=30.10),
+        ]
+    )
+
+    within_graph, within_df = left.to_distance_graph(distance_threshold=200, return_dataframe=True, verbose=False)
+    assert set(within_graph.nodes) == {"school-0", "school-1"}
+    assert within_graph.number_of_edges() == 0
+    assert list(within_df.columns) == ["left_idx", "right_idx", "distance"]
+
+    bipartite_graph, matches_df = left.to_distance_graph_with(
+        right, distance_threshold=200, return_dataframe=True, verbose=False
+    )
+    # Regression check: row 0 of left ("school-0") and row 0 of right ("fibre-0") must not merge into node 0
+    assert set(bipartite_graph.nodes) == {"school-0", "school-1", "fibre-0", "fibre-1"}
+    assert list(bipartite_graph.edges) == [("school-0", "fibre-0")]
+    assert bipartite_graph.edges["school-0", "fibre-0"]["distance"] == pytest.approx(
+        haversine(-1.95, 30.0, -1.95, 30.0005)
+    )
+    assert matches_df[["left_idx", "right_idx"]].values.tolist() == [["school-0", "fibre-0"]]
+
+
+def test_build_distance_graph_emits_deprecation_warning_and_delegates():
+    from gigaspatial.processing.algorithms import build_distance_graph
+
+    origins, targets = origin_and_target_points()
+    origins_idx = origins.set_index("school")
+    targets_idx = targets.set_index("fibre")
+
+    with pytest.deprecated_call(match="removed in 0.12.*SpatialNetwork.from_points"):
+        same_graph, same_df = build_distance_graph(
+            origins_idx, origins_idx, distance_threshold=200, max_k=2, return_dataframe=True, verbose=False
+        )
+    assert set(same_graph.nodes) == {"s0", "s1", "s2"}
+    assert list(same_graph.edges) == [("s0", "s1")]
+    assert len(same_df) == 1
+
+    with pytest.deprecated_call(match="removed in 0.12.*from_point_sets"):
+        cross_graph, cross_df = build_distance_graph(
+            origins_idx, targets_idx, distance_threshold=200, max_k=1, return_dataframe=True, verbose=False
+        )
+    assert set(cross_graph.nodes) == {"s0", "s1", "s2", "f0", "f1"}
+    assert ("s0", "f0") in cross_graph.edges and ("s1", "f0") in cross_graph.edges
+    assert list(cross_df.columns) == ["left_idx", "right_idx", "distance"]
+
+
 # ----- accessors
 
 

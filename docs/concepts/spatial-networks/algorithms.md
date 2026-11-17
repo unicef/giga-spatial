@@ -193,6 +193,12 @@ Name: count, dtype: int64
 
 **Use cases.** Accessibility indicators, such as the share of schools with at least one clinic within 5 km, or the number of other schools within reach for sharing resources.
 
+## Origin-to-target distance tables: `distance_table`
+
+`distance_table(origins=None, targets=None, max_distance=None)` returns a long table with `origin`, `target`, and `distance` for every finite reachable pair (with `origin != target`), sorted by origin and distance. On a network built with `from_point_sets` (or any network with a `bipartite` node column), `origins` defaults to the nodes with `bipartite == 0` and `targets` to the nodes with `bipartite == 1`; on other networks both default to all nodes.
+
+**Use cases.** Feeding origin-destination network distances directly into PySAL's `access` (`cost_df`) and `spopt` facility-location and coverage models without building a dense matrix that includes unreachable pairs.
+
 ## Connected components
 
 `connected_components()` labels each node with its component, 0 being the largest. Weak components ignore directions; `strong=True` asks for components in which every node can reach every other along one-way roads.
