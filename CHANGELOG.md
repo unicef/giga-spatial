@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **Connecting points directly to network nodes (`gigaspatial/processing/network/insertion.py`, `gigaspatial/processing/network/points.py`)**
+    -   Added `SpatialNetwork.connect_points(points, id_column=None, connect="knn", k=1, max_distance=None, nodes=None, return_skipped=False)` to add points as `kind="point"` nodes joined directly to existing nodes by straight-line edges (`kind="point_link"` to `"point"` nodes, `kind="connection"` to other nodes) without splitting existing edges, optionally restricted to candidate target `nodes`.
+    -   Supports `connect="knn"` (joining each point to its `k` nearest candidate nodes, dropping links beyond `max_distance` when set) and `connect="distance"` (joining each point to every candidate node within `max_distance` meters); points with no candidate node within `max_distance` are skipped with a warning (and returned when `return_skipped=True`).
+    -   Raises `ValueError` if point IDs repeat, collide with existing node IDs, or use reserved node columns (`x`, `y`, `kind`), and shares the unit-sphere `cKDTree` link helpers (`check_connect`, `cross_set_links`, `within_set_links`) in `gigaspatial/processing/network/points.py` with `SpatialNetwork.from_points` and `SpatialNetwork.from_point_sets`.
 -   **Two-set point networks and long distance tables (`gigaspatial/processing/network/core.py`, `gigaspatial/processing/network/algorithms.py`)**
     -   Added `SpatialNetwork.from_point_sets(origins, targets, ...)` to build an undirected network across two sets of points (`connect="knn"` or `"distance"`), with `within="none" | "origins" | "targets" | "both"` (and optional `within_k` and `within_max_distance` overrides) and a `bipartite` node column (`0` for `origins`, `1` for `targets`).
     -   Added `SpatialNetwork.distance_table(origins=None, targets=None, max_distance=None, ...)` returning a long `["origin", "target", "distance"]` DataFrame of finite reachable pairs (excluding self-pairs), defaulting `origins` and `targets` to `bipartite == 0` and `1` when present.
