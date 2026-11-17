@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **MERIT Hydro in the Earth Engine registry (`gigaspatial/fetchers/gee/datasets/builtin.py`)**
+    -   Added `merit_hydro` for the `MERIT/Hydro/v1_0_1` image: 3 arc-second global hydrography with elevation, flow direction, river width, permanent water, upstream drainage area, and height above nearest drainage. Licensed CC-BY-NC 4.0 or ODbL 1.0.
 -   **Connecting points directly to network nodes (`gigaspatial/processing/network/insertion.py`, `gigaspatial/processing/network/points.py`)**
     -   Added `SpatialNetwork.connect_points(points, id_column=None, connect="knn", k=1, max_distance=None, nodes=None, return_skipped=False)` to add points as `kind="point"` nodes joined directly to existing nodes by straight-line edges (`kind="point_link"` to `"point"` nodes, `kind="connection"` to other nodes) without splitting existing edges, optionally restricted to candidate target `nodes`.
     -   Supports `connect="knn"` (joining each point to its `k` nearest candidate nodes, dropping links beyond `max_distance` when set) and `connect="distance"` (joining each point to every candidate node within `max_distance` meters); points with no candidate node within `max_distance` are skipped with a warning (and returned when `return_skipped=True`).
