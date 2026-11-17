@@ -442,26 +442,26 @@ class AlgorithmsMixin:
             by origin and distance, containing only finite reachable pairs with
             ``origin != target``.
         """
-        sources = self._default_positions(origins, 0)
-        target = self._default_positions(targets, 1)
+        origin_positions = self._default_positions(origins, 0)
+        target_positions = self._default_positions(targets, 1)
         limit = np.inf if max_distance is None else float(max_distance)
         matrix = self._graph(weight, directed).matrix
         parts = []
-        if len(sources) and len(target):
-            for start, block in _dijkstra_blocks(matrix, sources, limit=limit):
-                to_targets = block[:, target]
+        if len(origin_positions) and len(target_positions):
+            for start, block in _dijkstra_blocks(matrix, origin_positions, limit=limit):
+                to_targets = block[:, target_positions]
                 row, col = np.nonzero(np.isfinite(to_targets))
-                orig_pos = sources[start + row]
-                targ_pos = target[col]
+                orig_pos = origin_positions[start + row]
+                targ_pos = target_positions[col]
                 keep = orig_pos != targ_pos
                 parts.append((orig_pos[keep], targ_pos[keep], to_targets[row[keep], col[keep]]))
-        origin = np.concatenate([p[0] for p in parts]) if parts else np.empty(0, dtype=np.int64)
-        node = np.concatenate([p[1] for p in parts]) if parts else np.empty(0, dtype=np.int64)
+        origin_pos = np.concatenate([p[0] for p in parts]) if parts else np.empty(0, dtype=np.int64)
+        target_pos = np.concatenate([p[1] for p in parts]) if parts else np.empty(0, dtype=np.int64)
         distance = np.concatenate([p[2] for p in parts]) if parts else np.empty(0, dtype=np.float64)
-        order = np.lexsort((node, distance, origin))
+        order = np.lexsort((target_pos, distance, origin_pos))
         ids = self._nodes.index
         return pd.DataFrame(
-            {"origin": ids.take(origin[order]), "target": ids.take(node[order]), "distance": distance[order]}
+            {"origin": ids.take(origin_pos[order]), "target": ids.take(target_pos[order]), "distance": distance[order]}
         )
 
     def _default_positions(self, ids: Any, side: int) -> np.ndarray:

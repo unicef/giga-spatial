@@ -13,6 +13,7 @@ from gigaspatial.processing.geo import convert_to_geodataframe, detect_coordinat
 from gigaspatial.processing.network.geodesy import WGS84, haversine, meters_to_chord, unit_vectors
 
 RESERVED_NODE_COLUMNS = ("x", "y", "kind")
+RESERVED_POINT_SET_COLUMNS = (*RESERVED_NODE_COLUMNS, "bipartite")
 
 
 def is_wgs84(crs: Any) -> bool:
@@ -135,10 +136,10 @@ def within_set_links(
 
 
 def cross_set_links(
-    x: np.ndarray,
-    y: np.ndarray,
-    target_x: np.ndarray,
-    target_y: np.ndarray,
+    lat: np.ndarray,
+    lon: np.ndarray,
+    target_lat: np.ndarray,
+    target_lon: np.ndarray,
     connect: str,
     k: int,
     max_distance: Optional[float],
@@ -147,15 +148,15 @@ def cross_set_links(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Origin rows, target positions, and great-circle lengths in meters across two point sets."""
     check_connect(connect, k, max_distance)
-    n = len(x)
+    n = len(lat)
     if n == 0:
         empty = np.empty(0, dtype=np.int64)
         return empty, empty, np.empty(0, dtype=np.float64)
     if candidates is None:
-        candidates = np.arange(len(target_x), dtype=np.int64)
+        candidates = np.arange(len(target_lat), dtype=np.int64)
     if tree is None:
-        tree = cKDTree(unit_vectors(target_y[candidates], target_x[candidates]))
-    xyz = unit_vectors(y, x)
+        tree = cKDTree(unit_vectors(target_lat[candidates], target_lon[candidates]))
+    xyz = unit_vectors(lat, lon)
     if connect == "knn":
         k_eff = min(int(k), len(candidates))
         _, j = tree.query(xyz, k=k_eff)
@@ -169,7 +170,7 @@ def cross_set_links(
         point_row = np.repeat(np.arange(n, dtype=np.int64), counts)
         picked = np.concatenate(neighbours).astype(np.int64) if counts.sum() else np.empty(0, dtype=np.int64)
         target_pos = candidates[picked]
-    length = haversine(y[point_row], x[point_row], target_y[target_pos], target_x[target_pos])
+    length = haversine(lat[point_row], lon[point_row], target_lat[target_pos], target_lon[target_pos])
     if max_distance is not None:
         keep = length <= max_distance
         point_row, target_pos, length = point_row[keep], target_pos[keep], length[keep]

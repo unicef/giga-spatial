@@ -288,7 +288,7 @@ class SpatialNetwork(EditingMixin, AlgorithmsMixin, ReductionMixin, InsertionMix
         tx, ty = target_nodes["x"].to_numpy(), target_nodes["y"].to_numpy()
         n_origins = len(origin_nodes)
 
-        ca, cb, clen = cross_set_links(ox, oy, tx, ty, connect, int(k), max_distance)
+        ca, cb, clen = cross_set_links(oy, ox, ty, tx, connect, int(k), max_distance)
         a_parts = [ca]
         b_parts = [cb + n_origins]
         len_parts = [clen]

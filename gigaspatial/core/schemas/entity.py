@@ -38,7 +38,6 @@ from scipy.spatial import cKDTree
 import networkx as nx
 from tqdm import tqdm
 
-from gigaspatial.processing.algorithms import _network_to_distance_graph
 from gigaspatial.processing.entity_processor import EntityProcessor
 from gigaspatial.processing.network import SpatialNetwork
 from gigaspatial.core.io.data_store import DataStore
@@ -745,13 +744,9 @@ class EntityTable(BaseModel, Generic[E]):
             raise ValueError(
                 "Cannot build distance graph: entities do not have location data."
             )
-        if distance_threshold < 0:
-            raise ValueError("distance_threshold must be non-negative")
-        if max_k <= 0:
-            raise ValueError("max_k must be positive")
+        _validate_distance_graph_params(distance_threshold, max_k)
         if not self.entities:
-            G = nx.Graph()
-            return (G, pd.DataFrame(columns=["left_idx", "right_idx", "distance"])) if return_dataframe else G
+            return _empty_distance_graph(return_dataframe)
         net = SpatialNetwork.from_points(
             self._entity_points_frame(),
             connect="knn",
@@ -796,13 +791,9 @@ class EntityTable(BaseModel, Generic[E]):
             raise ValueError(
                 "Cannot build distance graph: other table's entities do not have location data."
             )
-        if distance_threshold < 0:
-            raise ValueError("distance_threshold must be non-negative")
-        if max_k <= 0:
-            raise ValueError("max_k must be positive")
+        _validate_distance_graph_params(distance_threshold, max_k)
         if not self.entities or not other.entities:
-            G = nx.Graph()
-            return (G, pd.DataFrame(columns=["left_idx", "right_idx", "distance"])) if return_dataframe else G
+            return _empty_distance_graph(return_dataframe)
         net = SpatialNetwork.from_point_sets(
             self._entity_points_frame(),
             other._entity_points_frame(),
@@ -882,3 +873,37 @@ class EntityTable(BaseModel, Generic[E]):
 
     def __getitem__(self, index: int) -> E:
         return self.entities[index]
+
+
+def _validate_distance_graph_params(distance_threshold: float, max_k: int) -> None:
+    if distance_threshold < 0:
+        raise ValueError("distance_threshold must be non-negative")
+    if max_k <= 0:
+        raise ValueError("max_k must be positive")
+
+
+def _empty_distance_graph(return_dataframe: bool) -> Union[nx.Graph, Tuple[nx.Graph, pd.DataFrame]]:
+    G = nx.Graph()
+    return (G, pd.DataFrame(columns=["left_idx", "right_idx", "distance"])) if return_dataframe else G
+
+
+def _network_to_distance_graph(
+    net: SpatialNetwork, return_dataframe: bool
+) -> Union[nx.Graph, Tuple[nx.Graph, pd.DataFrame]]:
+    edges = net.edges
+    matches_df = pd.DataFrame(
+        {
+            "left_idx": edges["u"].to_numpy(),
+            "right_idx": edges["v"].to_numpy(),
+            "distance": edges["length"].to_numpy(),
+        }
+    )
+    G = nx.from_pandas_edgelist(
+        matches_df,
+        source="left_idx",
+        target="right_idx",
+        edge_attr="distance",
+        create_using=nx.Graph(),
+    )
+    G.add_nodes_from(net.node_index)
+    return (G, matches_df) if return_dataframe else G

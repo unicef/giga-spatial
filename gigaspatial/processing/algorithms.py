@@ -12,9 +12,9 @@ import pandas as pd
 
 from gigaspatial.config import config
 from gigaspatial.processing.network import SpatialNetwork
+from gigaspatial.processing.network.points import RESERVED_POINT_SET_COLUMNS
 
 LOGGER = config.get_logger("GigaSpatialProcessing")
-_RESERVED = ("x", "y", "kind", "bipartite")
 
 
 def build_distance_graph(
@@ -97,5 +97,5 @@ def _network_to_distance_graph(
 
 
 def _strip_reserved(df: Union[pd.DataFrame, gpd.GeoDataFrame]) -> Union[pd.DataFrame, gpd.GeoDataFrame]:
-    drop = [c for c in _RESERVED if c in df.columns]
+    drop = [c for c in RESERVED_POINT_SET_COLUMNS if c in df.columns]
     return df.drop(columns=drop) if drop else df

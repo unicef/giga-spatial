@@ -184,7 +184,7 @@ class InsertionMixin:
         x, y = table["x"].to_numpy(), table["y"].to_numpy()
         node_x, node_y = self._nodes["x"].to_numpy(), self._nodes["y"].to_numpy()
         point_row, target_pos, length = cross_set_links(
-            x, y, node_x, node_y, connect, int(k), max_distance, tree=tree, candidates=candidates
+            y, x, node_y, node_x, connect, int(k), max_distance, tree=tree, candidates=candidates
         )
         if max_distance is None:
             inserted = np.ones(len(x), dtype=bool)
