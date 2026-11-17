@@ -14,7 +14,7 @@ from pyproj import Transformer
 
 from gigaspatial.processing.network._arrays import as_positions, repeated_rows
 from gigaspatial.processing.network.algorithms import AlgorithmsMixin
-from gigaspatial.processing.network.editing import EditingMixin
+from gigaspatial.processing.network.editing import EditingMixin, _concat_tables
 from gigaspatial.processing.network.insertion import InsertionMixin
 from gigaspatial.processing.network.reduction import ReductionMixin
 from gigaspatial.processing.network.geodesy import (
@@ -25,12 +25,15 @@ from gigaspatial.processing.network.geodesy import (
 from gigaspatial.processing.network.kinds import EDGE_KINDS, NODE_KINDS, as_kinds
 from gigaspatial.processing.network.points import (
     RESERVED_NODE_COLUMNS,
+    check_connect,
+    cross_set_links,
     is_wgs84,
     points_table,
     within_set_links,
 )
 
 _EDGE_ID_COLUMNS = ("u", "v", "key")
+_WITHIN_MODES = ("none", "origins", "targets", "both")
 
 
 class SpatialNetwork(EditingMixin, AlgorithmsMixin, ReductionMixin, InsertionMixin):
@@ -190,26 +193,121 @@ class SpatialNetwork(EditingMixin, AlgorithmsMixin, ReductionMixin, InsertionMix
         lat = nodes["y"].to_numpy()
         lon = nodes["x"].to_numpy()
         a, b, length = within_set_links(lat, lon, connect, k, max_distance)
+        edges = _point_edges(nodes, a, b, length, weight, weight_func)
+        return cls(nodes, edges, directed=False, weight=weight)
 
-        ids = nodes.index
-        edges = pd.DataFrame(
-            {
-                "u": ids.take(a),
-                "v": ids.take(b),
-                "key": np.zeros(len(a), dtype=np.int16),
-                "length": length,
-                "kind": "point_link",
-            }
-        )
-        if weight_func is not None:
-            if weight == "length":
-                raise ValueError("weight_func needs a weight name other than 'length'")
-            values = np.asarray(weight_func(nodes.iloc[a], nodes.iloc[b], length), dtype=np.float64)
-            if values.shape != (len(a),):
-                raise ValueError(f"weight_func returned shape {values.shape}, expected ({len(a)},)")
-            edges[weight] = values
-        elif weight != "length":
-            raise ValueError(f"weight={weight!r} needs weight_func to compute it")
+    @classmethod
+    def from_point_sets(
+        cls,
+        origins: Any,
+        targets: Any,
+        connect: str = "knn",
+        k: int = 1,
+        max_distance: Optional[float] = None,
+        within: str = "none",
+        within_k: Optional[int] = None,
+        within_max_distance: Optional[float] = None,
+        origin_id: Optional[str] = None,
+        target_id: Optional[str] = None,
+        weight: str = "length",
+        weight_func: Optional[Callable[[pd.DataFrame, pd.DataFrame, np.ndarray], Any]] = None,
+    ) -> "SpatialNetwork":
+        """Build an undirected network across two sets of points, and optionally within either set.
+
+        Each node gets ``kind="point"`` and a ``bipartite`` column: ``0`` for
+        ``origins`` and ``1`` for ``targets``. When ``within="none"``, the
+        network is strictly bipartite and works with ``networkx.algorithms.bipartite``
+        after :meth:`to_networkx`. All points from both sets are kept as nodes,
+        even when ``max_distance`` leaves some without edges.
+
+        Args:
+            origins: First point set (``bipartite=0``), such as schools.
+            targets: Second point set (``bipartite=1``), such as clinics or
+                fibre nodes.
+            connect: ``"knn"`` joins each origin to its ``k`` nearest targets;
+                ``"distance"`` joins every origin-target pair within
+                ``max_distance`` meters.
+            k: Number of target neighbours per origin for ``"knn"``.
+            max_distance: Longest origin-target edge in meters. Required for
+                ``"distance"``; with ``"knn"`` it drops longer links.
+            within: Which sets also get internal links: ``"none"`` (the
+                default), ``"origins"``, ``"targets"``, or ``"both"``.
+                ``"origins"`` lets :class:`ConnectionPlanner` route an origin
+                through nearby origins to reach a target root.
+            within_k: Number of neighbours for within-set ``"knn"`` links.
+                Defaults to ``k``.
+            within_max_distance: Longest within-set edge in meters. Defaults to
+                ``max_distance``.
+            origin_id: Column holding node IDs in ``origins``. The index otherwise.
+            target_id: Column holding node IDs in ``targets``. The index otherwise.
+            weight: Default weight column. Anything but ``"length"`` needs
+                ``weight_func``.
+            weight_func: Computes the ``weight`` column as
+                ``weight_func(nodes_u, nodes_v, length)``.
+
+        Returns:
+            The network. Nodes have kind ``"point"`` and ``bipartite`` ``0`` or
+            ``1``; edges have kind ``"point_link"``.
+
+        Raises:
+            ValueError: If ``origins`` or ``targets`` is empty, IDs repeat
+                within a set or clash between sets, an input column is named
+                ``"x"``, ``"y"``, ``"kind"``, or ``"bipartite"``, or
+                ``connect``, ``within``, ``k``, or ``weight`` is invalid.
+        """
+        if within not in _WITHIN_MODES:
+            raise ValueError(f'within must be one of {", ".join(repr(m) for m in _WITHIN_MODES)}, got {within!r}')
+        check_connect(connect, k, max_distance)
+        wk = k if within_k is None else within_k
+        wmax = max_distance if within_max_distance is None else within_max_distance
+        if within != "none" or within_k is not None or within_max_distance is not None:
+            check_connect(connect, wk, wmax)
+
+        origin_nodes = points_table(origins, origin_id)
+        target_nodes = points_table(targets, target_id)
+        if "bipartite" in origin_nodes.columns or "bipartite" in target_nodes.columns:
+            raise ValueError("Point column 'bipartite' is reserved for set membership")
+        if len(origin_nodes) == 0 or len(target_nodes) == 0:
+            raise ValueError(
+                "origins and targets must both be non-empty; for a single point set, use SpatialNetwork.from_points"
+            )
+        clash = origin_nodes.index.intersection(target_nodes.index)
+        if len(clash):
+            raise ValueError(
+                f"{len(clash)} point IDs appear in both origins and targets, for example {list(clash[:5])}"
+            )
+
+        origin_nodes.insert(2, "kind", "point")
+        origin_nodes.insert(3, "bipartite", np.zeros(len(origin_nodes), dtype=np.int8))
+        target_nodes.insert(2, "kind", "point")
+        target_nodes.insert(3, "bipartite", np.ones(len(target_nodes), dtype=np.int8))
+        nodes = _concat_tables([origin_nodes, target_nodes])
+        nodes.index = nodes.index.rename("node_id")
+
+        ox, oy = origin_nodes["x"].to_numpy(), origin_nodes["y"].to_numpy()
+        tx, ty = target_nodes["x"].to_numpy(), target_nodes["y"].to_numpy()
+        n_origins = len(origin_nodes)
+
+        ca, cb, clen = cross_set_links(ox, oy, tx, ty, connect, int(k), max_distance)
+        a_parts = [ca]
+        b_parts = [cb + n_origins]
+        len_parts = [clen]
+
+        if within in ("origins", "both"):
+            oa, ob, olen = within_set_links(oy, ox, connect, int(wk), wmax)
+            a_parts.append(oa)
+            b_parts.append(ob)
+            len_parts.append(olen)
+        if within in ("targets", "both"):
+            ta, tb, tlen = within_set_links(ty, tx, connect, int(wk), wmax)
+            a_parts.append(ta + n_origins)
+            b_parts.append(tb + n_origins)
+            len_parts.append(tlen)
+
+        a = np.concatenate(a_parts)
+        b = np.concatenate(b_parts)
+        length = np.concatenate(len_parts)
+        edges = _point_edges(nodes, a, b, length, weight, weight_func)
         return cls(nodes, edges, directed=False, weight=weight)
 
     @classmethod
@@ -723,3 +821,33 @@ def _records(table: pd.DataFrame) -> list:
         for i in np.flatnonzero(~missing[c]):
             records[i][c] = values[i]
     return records
+
+
+def _point_edges(
+    nodes: pd.DataFrame,
+    a: np.ndarray,
+    b: np.ndarray,
+    length: np.ndarray,
+    weight: str,
+    weight_func: Optional[Callable[[pd.DataFrame, pd.DataFrame, np.ndarray], Any]],
+) -> pd.DataFrame:
+    ids = nodes.index
+    edges = pd.DataFrame(
+        {
+            "u": ids.take(a),
+            "v": ids.take(b),
+            "key": np.zeros(len(a), dtype=np.int16),
+            "length": length,
+            "kind": "point_link",
+        }
+    )
+    if weight_func is not None:
+        if weight == "length":
+            raise ValueError("weight_func needs a weight name other than 'length'")
+        values = np.asarray(weight_func(nodes.iloc[a], nodes.iloc[b], length), dtype=np.float64)
+        if values.shape != (len(a),):
+            raise ValueError(f"weight_func returned shape {values.shape}, expected ({len(a)},)")
+        edges[weight] = values
+    elif weight != "length":
+        raise ValueError(f"weight={weight!r} needs weight_func to compute it")
+    return edges
