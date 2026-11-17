@@ -27,6 +27,7 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, and Ookl
 | `HEALTHSITES_API_KEY` | Healthsites.io |
 | `GEOREPO_API_KEY`, `GEOREPO_USER_EMAIL` | UNICEF GeoRepo boundaries |
 | `HDX_KEY` | Humanitarian Data Exchange (HDX) and Meta Relative Wealth Index (RWI) |
+| `CDS_API_URL`, `CDS_API_KEY` | Copernicus Climate Data Store, for ERA5 and ERA5-Land. `CDSAPI_URL` and `CDSAPI_KEY`, or `url` and `key` in `~/.cdsapirc`, are also accepted. Accept the dataset licence on the CDS website before the first download |
 | `GIGA_SCHOOL_LOCATION_API_KEY` | Giga school locations |
 | `GIGA_SCHOOL_PROFILE_API_KEY` | Giga school profiles |
 | `GIGA_SCHOOL_MEASUREMENTS_API_KEY` | Giga school connectivity measurements |

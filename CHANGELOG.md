@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **ERA5 and ERA5-Land country handlers (`gigaspatial/handlers/cds/era5.py`, `gigaspatial/handlers/cds/era5land.py`)**
+    -   `ERA5Handler` (`cds-era5`) downloads hourly ERA5 single levels (`reanalysis-era5-single-levels`, 0.25°, from 1940). `ERA5LandHandler` (`cds-era5land`) downloads hourly ERA5-Land (`reanalysis-era5-land`, 0.1°, from 1950).
+    -   A country is resolved with `AdminBoundaries`. CDS is asked for that country's bounding boxes, and the stored grid is clipped to the country geometry without resampling.
+    -   Each dataset has its own variable catalogue (262 ERA5 variables, 60 ERA5-Land variables). Select one name, several names, or `variables="all"`.
+    -   Time is a start and end, or year, month, day, and hour. The full archive is downloaded only when `full_history=True`.
+    -   Credentials come from `CDS_API_URL` / `CDS_API_KEY`, `CDSAPI_URL` / `CDSAPI_KEY`, or `~/.cdsapirc`. The key is not stored in `repr`. Install the client with `pip install "giga-spatial[cds]"`.
+    -   `update()` compares each dataset's CDS catalogue end with the last stored hour and downloads only the missing hours. ERA5 and ERA5-Land are checked separately. There is no in-process scheduler: run `python -m gigaspatial.handlers.cds.era5 update` from cron, or call `update()` directly. Pass `--force` to ignore `update_frequency_hours` (default 24).
 -   **Optional `excel` extra (`pyproject.toml`, `gigaspatial/core/io/readers.py`, `gigaspatial/core/io/writers.py`)**
     -   Added `giga-spatial[excel]` (`openpyxl>=3.1.0`, `xlrd>=2.0.0`, also included in `giga-spatial[all]`) for reading `.xlsx`/`.xls` files and writing `.xlsx` files.
     -   `read_dataset` and `write_dataset` now raise an `ImportError` with `pip install 'giga-spatial[excel]'` when the required Excel engine is missing.

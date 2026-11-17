@@ -84,6 +84,14 @@ class Config(BaseSettings):
         default="giga-spatial/1.0", alias="HDX_USER_AGENT"
     )
 
+    # Copernicus Climate Data Store
+    # Used by ERA5 and ERA5-Land. CDSAPI_URL and CDSAPI_KEY are also read,
+    # because those are the names the official cdsapi client uses.
+    CDS_API_URL: str = Field(
+        default="https://cds.climate.copernicus.eu/api", alias="CDS_API_URL"
+    )
+    CDS_API_KEY: str = Field(default="", alias="CDS_API_KEY")
+
     # Overpass API configuration
     # Used for fetching OpenStreetMap road networks; set a mirror when the main server is down
     OVERPASS_URL: str = Field(
@@ -165,6 +173,7 @@ class Config(BaseSettings):
             "mobile_coverage": "mobile_coverage",
             "wri": "wri",
             "osm": "osm",
+            "cds": "cds",
         },
         description="Mapping of data types to directory names",
     )

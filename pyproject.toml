@@ -20,6 +20,7 @@ keywords = [
     "google open buildings", "microsoft buildings",
     "point of interest", "POI", "catchment", "zonal statistics",
     "raster", "vector", "road network", "rwi", "ookla", "cems", "glofas", "flood hazard", "climate",
+    "era5", "cds",
     "humanitarian", "development", "connectivity", "school connectivity",
     "unicef", "giga", "mapping", "analysis", "python"
 ]
@@ -133,6 +134,12 @@ excel = [
     "openpyxl>=3.1.0",
     "xlrd>=2.0.0"
 ]
+cds = [
+    "cdsapi>=0.7.7",
+    "xarray>=2024.2.0",
+    "netCDF4>=1.6.0",
+    "dask>=2024.12.1"
+]
 
 # Meta target using PEP 508 self-references to bundle everything seamlessly
 all = [
@@ -149,7 +156,8 @@ all = [
     "giga-spatial[hdx]",
     "giga-spatial[roads]",
     "giga-spatial[pandana]",
-    "giga-spatial[excel]"
+    "giga-spatial[excel]",
+    "giga-spatial[cds]"
 ]
 
 [tool.setuptools.dynamic]
