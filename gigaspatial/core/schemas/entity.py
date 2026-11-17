@@ -38,6 +38,7 @@ from scipy.spatial import cKDTree
 import networkx as nx
 from tqdm import tqdm
 
+from gigaspatial.processing.algorithms import _network_to_distance_graph
 from gigaspatial.processing.entity_processor import EntityProcessor
 from gigaspatial.processing.network import SpatialNetwork
 from gigaspatial.core.io.data_store import DataStore
@@ -881,25 +882,3 @@ class EntityTable(BaseModel, Generic[E]):
 
     def __getitem__(self, index: int) -> E:
         return self.entities[index]
-
-
-def _network_to_distance_graph(
-    net: SpatialNetwork, return_dataframe: bool
-) -> Union[nx.Graph, Tuple[nx.Graph, pd.DataFrame]]:
-    edges = net.edges
-    matches_df = pd.DataFrame(
-        {
-            "left_idx": edges["u"].to_numpy(),
-            "right_idx": edges["v"].to_numpy(),
-            "distance": edges["length"].to_numpy(),
-        }
-    )
-    G = nx.from_pandas_edgelist(
-        matches_df,
-        source="left_idx",
-        target="right_idx",
-        edge_attr="distance",
-        create_using=nx.Graph(),
-    )
-    G.add_nodes_from(net.node_index)
-    return (G, matches_df) if return_dataframe else G
