@@ -13,3 +13,4 @@ These records explain decisions that are hard to reverse or surprising without c
 | [0007](0007-osm-extract-choice.md) | OSM extracts are chosen by polygon, with ISO codes only as a fast path and a curated list of multi-country extracts. |
 | [0008](0008-connection-planning.md) | Connecting points to an existing network is a rooted Steiner tree with the existing network as one virtual root, solved by `ConnectionPlanner`. |
 | [0009](0009-point-sets-and-distance-table.md) | Networks between two point sets are built with `from_point_sets`, tagged with `bipartite`, and queried as long cost tables with `distance_table`; `build_distance_graph` is deprecated. |
+| [0010](0010-view-generator-base-and-contract.md) | Point-of-interest and zonal view generators share an internal `BaseViewGenerator` and a uniform `self.view` return and overwrite contract. |

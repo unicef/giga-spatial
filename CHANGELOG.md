@@ -4,8 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+-   **Optional handler injection on view generators (`gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
+    -   Added an optional `handler=None` parameter to dataset `map_*` methods (`map_wp_pop`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_ghsl`, `map_buildings`, `map_rwi`) and `PoiViewGenerator.find_nearest_buildings` without altering default behavior when `handler` is omitted.
+
 ### Fixed
 
+-   **Microsoft buildings handler override in zonal mapping (`gigaspatial/generators/zonal/geometry.py`)**
+    -   Fixed `GeometryBasedZonalViewGenerator.map_ms_buildings` overwriting a passed `handler` argument with a newly instantiated `MSBuildingsHandler`.
 -   **Overture release resolution and explicit release validation (`gigaspatial/fetchers/overture.py`)**
     -   Removed the stale `_DEFAULT_RELEASE` fallback; when `release` is `None` or `"latest"` and the Overture STAC catalog lookup fails, `OvertureAmenityFetcher` now raises a `RuntimeError` advising the caller to pass an explicit `release=` (e.g. `"2026-11-18.0"`) and linking `https://docs.overturemaps.org/release-calendar`.
     -   Added `OvertureAmenityFetcher.get_available_releases()` and switched STAC catalog lookups (`_fetch_stac_catalog`) to `requests.get(..., timeout=20)` with JSON-type validation.

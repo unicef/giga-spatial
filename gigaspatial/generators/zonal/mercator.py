@@ -115,13 +115,14 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
         resolution=1000,
         predicate="intersects",
         output_column="population",
+        handler=None,
         **kwargs,
     ):
         if hasattr(self, "_country") and country is None:
             country = self._country
 
         return super().map_wp_pop(
-            country, resolution, predicate, output_column, **kwargs
+            country, resolution, predicate, output_column, handler=handler, **kwargs
         )
 
     def map_rwi(
@@ -130,20 +131,26 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
         predicate="intersects",
         aggregation="mean",
         output_column: str = "rwi",
+        handler=None,
         **kwargs,
     ):
         if hasattr(self, "_country") and country is None:
             country = self._country
 
-        return super().map_rwi(country, predicate, aggregation, output_column, **kwargs)
+        return super().map_rwi(
+            country, predicate, aggregation, output_column, handler=handler, **kwargs
+        )
 
     def map_buildings(
         self,
         country=None,
         output_column: str = "building_count",
+        handler=None,
         **kwargs,
     ):
         if hasattr(self, "_country") and country is None:
             country = self._country
 
-        return super().map_buildings(country, output_column, **kwargs)
+        return super().map_buildings(
+            country, output_column, handler=handler, **kwargs
+        )

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union, Literal
+from typing import TYPE_CHECKING, Dict, List, Optional, Union, Literal
 from shapely.geometry import Polygon, MultiPolygon
 
 import geopandas as gpd
@@ -22,6 +22,11 @@ from gigaspatial.generators.zonal.base import (
     ZonalViewGeneratorConfig,
     T,
 )
+
+if TYPE_CHECKING:
+    from gigaspatial.handlers.google_ms_combined_buildings import (
+        GoogleMSBuildingsHandler,
+    )
 
 
 class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
@@ -167,6 +172,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         resolution=100,
         stat: str = "sum",
         output_column: str = "built_surface_m2",
+        handler: Optional[GHSLDataHandler] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Map GHSL Built-up Surface data to zones.
@@ -180,11 +186,12 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             stat (str): Statistic to calculate for built surface values within each zone.
                 Defaults to "sum" which gives total built surface area.
             output_column (str): The output column name. Defaults to "built_surface_m2".
+            handler (Optional[GHSLDataHandler]): Optional pre-configured handler.
         Returns:
             pd.DataFrame: Updated view DataFrame and settlement classification.
                 Adds a column with `output_column` containing the aggregated values.
         """
-        handler = GHSLDataHandler(
+        handler = handler or GHSLDataHandler(
             product="GHS_BUILT_S",
             year=year,
             resolution=resolution,
@@ -202,6 +209,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         resolution=1000,
         stat: str = "median",
         output_column: str = "smod_class",
+        handler: Optional[GHSLDataHandler] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Map GHSL Settlement Model data to zones.
@@ -215,11 +223,12 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             stat (str): Statistic to calculate for settlement class values within each zone.
                 Defaults to "median" which gives the predominant settlement class.
             output_column (str): The output column name. Defaults to "smod_class".
+            handler (Optional[GHSLDataHandler]): Optional pre-configured handler.
         Returns:
             pd.DataFrame: Updated view DataFrame and settlement classification.
                 Adds a column with `output_column` containing the aggregated values.
         """
-        handler = GHSLDataHandler(
+        handler = handler or GHSLDataHandler(
             product="GHS_SMOD",
             year=year,
             resolution=resolution,
@@ -234,8 +243,8 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
 
     def map_ghsl(
         self,
-        handler: GHSLDataHandler,
-        stat: str,
+        handler: Optional[GHSLDataHandler] = None,
+        stat: str = "mean",
         output_column: Optional[str] = None,
         **kwargs,
     ) -> pd.DataFrame:
@@ -245,10 +254,12 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         the raster values within each zone using the specified statistic.
 
         Args:
-            hander (GHSLDataHandler): Handler for the GHSL data.
+            handler (Optional[GHSLDataHandler]): Optional pre-configured handler
+                for GHSL data. Defaults to None.
             stat (str): Statistic to calculate for raster values within each zone.
                 Common options: "mean", "sum", "median", "min", "max".
-            output_column (str): The output column name.
+                Defaults to "mean".
+            output_column (Optional[str]): The output column name.
                 If None, uses the GHSL product name in lowercase followed by underscore.
 
         Returns:
@@ -406,7 +417,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self.logger.info("Mapping Microsoft Global Buildings data")
 
         self.logger.info("Loading Microsoft Buildings polygon data")
-        handler = MSBuildingsHandler(data_store=self.data_store)
+        handler = handler or MSBuildingsHandler(data_store=self.data_store)
         buildings_gdf = handler.load_data(
             self.zone_gdf, ensure_available=self.config.ensure_available
         )
@@ -463,6 +474,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         self,
         country: str,
         output_column: str = "building_count",
+        handler: Optional["GoogleMSBuildingsHandler"] = None,
         **kwargs,
     ):
         """Map Google-Microsoft combined buildings data to zones.
@@ -483,6 +495,9 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         output_column : str, default='building_count'
             Name of the column to add to the view containing building counts.
             Must be a valid pandas column name.
+
+        handler : Optional[GoogleMSBuildingsHandler], default=None
+            Optional pre-configured handler for combined building data.
 
         **kwargs : dict
             Additional keyword arguments passed to GoogleMSBuildingsHandler.
@@ -547,13 +562,14 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
 
         self.logger.info(f"Mapping Google-Microsoft Buildings data to zones")
 
-        from gigaspatial.handlers.google_ms_combined_buildings import (
-            GoogleMSBuildingsHandler,
-        )
+        if handler is None:
+            from gigaspatial.handlers.google_ms_combined_buildings import (
+                GoogleMSBuildingsHandler,
+            )
 
-        handler = GoogleMSBuildingsHandler(
-            partition_strategy="s2_grid", data_store=self.data_store
-        )
+            handler = GoogleMSBuildingsHandler(
+                partition_strategy="s2_grid", data_store=self.data_store
+            )
 
         if self.config.ensure_available:
             if not handler.ensure_data_available(country, **kwargs):
@@ -588,9 +604,10 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         stat: str = "sum",
         output_column: str = "ghsl_pop",
         predicate: Literal["intersects", "fractional"] = "intersects",
+        handler: Optional[GHSLDataHandler] = None,
         **kwargs,
     ):
-        handler = GHSLDataHandler(
+        handler = handler or GHSLDataHandler(
             product="GHS_POP",
             resolution=resolution,
             data_store=self.data_store,
@@ -598,7 +615,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         )
 
         if predicate == "fractional":
-            if resolution == 100:
+            if handler.config.resolution == 100:
                 self.logger.warning(
                     "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
                 )
@@ -628,13 +645,14 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             "centroid_within", "intersects", "fractional"
         ] = "intersects",
         output_column: str = "population",
+        handler: Optional[WPPopulationHandler] = None,
         **kwargs,
     ):
 
         # Ensure country is always a list for consistent handling
         countries_list = [country] if isinstance(country, str) else country
 
-        handler = WPPopulationHandler(
+        handler = handler or WPPopulationHandler(
             resolution=resolution,
             data_store=self.data_store,
             **kwargs,
@@ -653,7 +671,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
             f"Mapping WorldPop Population data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
         )
 
-        if predicate == "fractional" and resolution == 100:
+        if predicate == "fractional" and handler.config.resolution == 100:
             self.logger.warning(
                 "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
             )
@@ -734,10 +752,11 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
         predicate: Literal["intersects", "within", "centroid_within"] = "intersects",
         aggregation: Literal["mean", "median", "max", "min"] = "mean",
         output_column: str = "rwi",
+        handler: Optional[RWIHandler] = None,
         **kwargs,
     ):
 
-        handler = RWIHandler(
+        handler = handler or RWIHandler(
             data_store=self.data_store,
             **kwargs,
         )
