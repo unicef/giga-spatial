@@ -17,7 +17,7 @@ DEFAULT_RASTER_DATA = np.arange(1, 17, dtype=np.float32).reshape(4, 4)
 DEFAULT_BOUNDS = (0.0, 0.0, 0.04, 0.04)
 
 
-def unexpected_ctor(name: str):
+def _unexpected_ctor(name: str):
     """Return a failing stub that guards against default handler instantiation."""
 
     def _fail(*args, **kwargs):
@@ -26,6 +26,18 @@ def unexpected_ctor(name: str):
         )
 
     return _fail
+
+
+@pytest.fixture
+def default_raster_data() -> np.ndarray:
+    """Deterministic 4x4 float32 test raster."""
+    return DEFAULT_RASTER_DATA.copy()
+
+
+@pytest.fixture
+def unexpected_ctor():
+    """Factory returning a failing constructor guard for handler injection tests."""
+    return _unexpected_ctor
 
 
 def write_raster_tif(

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+-   **Optional handler injection on view generators (`gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
+    -   Added an optional `handler=None` parameter to dataset `map_*` methods (`map_wp_pop`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_ghsl`, `map_buildings`, `map_rwi`) and `PoiViewGenerator.find_nearest_buildings` without altering default behavior when `handler` is omitted.
+
+### Fixed
+
+-   **Microsoft buildings handler override in zonal mapping (`gigaspatial/generators/zonal/geometry.py`)**
+    -   Fixed `GeometryBasedZonalViewGenerator.map_ms_buildings` overwriting a passed `handler` argument with a newly instantiated `MSBuildingsHandler`.
+
 ## [v0.11.1] - 2026-11-17
 
 ### Added

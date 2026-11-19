@@ -5,7 +5,6 @@ from shapely.geometry import Point, Polygon
 
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
-from tests.generators.conftest import DEFAULT_RASTER_DATA, unexpected_ctor
 
 
 def _make_generator(tmp_path) -> GeometryBasedZonalViewGenerator:
@@ -81,7 +80,9 @@ def _make_zone_gen_in_raster(tmp_path) -> GeometryBasedZonalViewGenerator:
     )
 
 
-def test_zonal_map_wp_pop_uses_injected_handler(tmp_path, make_worldpop_handler, monkeypatch):
+def test_zonal_map_wp_pop_uses_injected_handler(
+    tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch
+):
     import gigaspatial.generators.zonal.geometry as geom_mod
 
     monkeypatch.setattr(geom_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
@@ -93,7 +94,7 @@ def test_zonal_map_wp_pop_uses_injected_handler(tmp_path, make_worldpop_handler,
 
 
 def test_zonal_map_built_s_and_smod_and_ghsl_use_injected_handler(
-    tmp_path, make_ghsl_handler, monkeypatch
+    tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
     import gigaspatial.generators.zonal.geometry as geom_mod
 
@@ -115,7 +116,9 @@ def test_zonal_map_built_s_and_smod_and_ghsl_use_injected_handler(
     )
 
 
-def test_zonal_map_ms_buildings_honors_injected_handler(tmp_path, monkeypatch):
+def test_zonal_map_ms_buildings_honors_injected_handler(
+    tmp_path, unexpected_ctor, monkeypatch
+):
     from types import SimpleNamespace
     import gigaspatial.generators.zonal.geometry as geom_mod
 
@@ -139,7 +142,9 @@ def test_zonal_map_ms_buildings_honors_injected_handler(tmp_path, monkeypatch):
     assert by_zone.loc["z2", "ms_buildings_count"] == 0
 
 
-def test_zonal_map_buildings_uses_injected_handler(tmp_path, monkeypatch):
+def test_zonal_map_buildings_uses_injected_handler(
+    tmp_path, unexpected_ctor, monkeypatch
+):
     from types import SimpleNamespace
     import gigaspatial.handlers.google_ms_combined_buildings as gms_mod
 
@@ -164,7 +169,7 @@ def test_zonal_map_buildings_uses_injected_handler(tmp_path, monkeypatch):
     assert by_zone["z2"] == 1
 
 
-def test_zonal_map_rwi_uses_injected_handler(tmp_path, monkeypatch):
+def test_zonal_map_rwi_uses_injected_handler(tmp_path, unexpected_ctor, monkeypatch):
     from types import SimpleNamespace
     import gigaspatial.generators.zonal.geometry as geom_mod
 
@@ -188,7 +193,7 @@ def test_zonal_map_rwi_uses_injected_handler(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("grid_kind", ["h3", "s2", "mercator", "admin"])
 def test_zonal_subclasses_forward_injected_handlers(
-    tmp_path, make_worldpop_handler, monkeypatch, grid_kind
+    tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch, grid_kind
 ):
     from types import SimpleNamespace
     import gigaspatial.generators.zonal.geometry as geom_mod
@@ -333,7 +338,7 @@ def test_zonal_map_wp_pop_degree_of_urbanization_forces_median(
 
 
 def test_zonal_map_wp_pop_centroid_within_single_and_multi_country(
-    tmp_path, make_worldpop_handler
+    tmp_path, make_worldpop_handler, default_raster_data
 ):
     handler = make_worldpop_handler(
         project="pop",
@@ -342,7 +347,7 @@ def test_zonal_map_wp_pop_centroid_within_single_and_multi_country(
             "RWA": [
                 (
                     "https://data.worldpop.org/GIS/Population/rwa_2020.tif",
-                    DEFAULT_RASTER_DATA,
+                    default_raster_data,
                     (0.0, 0.0, 0.04, 0.04),
                 )
             ],
@@ -440,7 +445,7 @@ def test_zonal_map_wp_pop_age_structures_sums_rasters_and_rejects_multi_country(
 
 
 def test_zonal_map_wp_pop_fractional_1000m_vs_100m_fallback_warning(
-    tmp_path, make_worldpop_handler, caplog
+    tmp_path, make_worldpop_handler, caplog, monkeypatch
 ):
     import logging
 
@@ -462,6 +467,7 @@ def test_zonal_map_wp_pop_fractional_1000m_vs_100m_fallback_warning(
 
     handler_100 = make_worldpop_handler(project="pop", resolution=100, subdir="wp_100")
     gen_100 = _make_raster_zones(tmp_path)
+    monkeypatch.setattr(gen_100.logger, "propagate", True)
     with caplog.at_level(logging.WARNING):
         view_100 = gen_100.map_wp_pop(
             country="RWA",
@@ -547,7 +553,7 @@ def test_zonal_map_smod_reprojects_zones_to_mollweide(tmp_path, make_ghsl_handle
 
 
 def test_zonal_map_ghsl_pop_intersects_and_fractional_1000m_vs_100m_fallback(
-    tmp_path, make_ghsl_handler, caplog
+    tmp_path, make_ghsl_handler, caplog, monkeypatch
 ):
     import logging
 
@@ -587,6 +593,7 @@ def test_zonal_map_ghsl_pop_intersects_and_fractional_1000m_vs_100m_fallback(
         1.5, rel=1e-2
     )
 
+    monkeypatch.setattr(gen.logger, "propagate", True)
     with caplog.at_level(logging.WARNING):
         view = gen.map_ghsl_pop(
             resolution=100,

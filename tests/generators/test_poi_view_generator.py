@@ -6,7 +6,6 @@ from shapely.geometry import Point, Polygon
 
 from gigaspatial import PoiViewGenerator
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from tests.generators.conftest import DEFAULT_RASTER_DATA, unexpected_ctor
 
 
 def _make_pois(tmp_path, extra_cols=None) -> PoiViewGenerator:
@@ -193,7 +192,9 @@ def _make_poi_gen_in_raster(tmp_path) -> PoiViewGenerator:
     return PoiViewGenerator(pois, data_store=LocalDataStore(base_path=tmp_path))
 
 
-def test_poi_map_wp_pop_uses_injected_handler(tmp_path, make_worldpop_handler, monkeypatch):
+def test_poi_map_wp_pop_uses_injected_handler(
+    tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch
+):
     import gigaspatial.generators.poi as poi_mod
 
     monkeypatch.setattr(poi_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
@@ -204,7 +205,9 @@ def test_poi_map_wp_pop_uses_injected_handler(tmp_path, make_worldpop_handler, m
     assert "population" in view.columns
 
 
-def test_poi_map_built_s_uses_injected_handler(tmp_path, make_ghsl_handler, monkeypatch):
+def test_poi_map_built_s_uses_injected_handler(
+    tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
+):
     import gigaspatial.generators.poi as poi_mod
 
     monkeypatch.setattr(poi_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler"))
@@ -215,7 +218,9 @@ def test_poi_map_built_s_uses_injected_handler(tmp_path, make_ghsl_handler, monk
     assert "built_surface_m2" in view.columns
 
 
-def test_poi_map_smod_uses_injected_handler(tmp_path, make_ghsl_handler, monkeypatch):
+def test_poi_map_smod_uses_injected_handler(
+    tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
+):
     import gigaspatial.generators.poi as poi_mod
 
     monkeypatch.setattr(poi_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler"))
@@ -227,7 +232,9 @@ def test_poi_map_smod_uses_injected_handler(tmp_path, make_ghsl_handler, monkeyp
 
 
 @pytest.mark.parametrize("find_globally", [False, True])
-def test_poi_find_nearest_buildings_uses_injected_handler(tmp_path, monkeypatch, find_globally):
+def test_poi_find_nearest_buildings_uses_injected_handler(
+    tmp_path, unexpected_ctor, monkeypatch, find_globally
+):
     from types import SimpleNamespace
     import gigaspatial.handlers.google_ms_combined_buildings as gms_mod
 
@@ -341,7 +348,7 @@ def test_poi_map_wp_pop_degree_of_urbanization_forces_median(tmp_path, make_worl
 
 
 def test_poi_map_wp_pop_centroid_within_single_and_multi_country(
-    tmp_path, make_worldpop_handler
+    tmp_path, make_worldpop_handler, default_raster_data
 ):
     handler = make_worldpop_handler(
         project="pop",
@@ -350,7 +357,7 @@ def test_poi_map_wp_pop_centroid_within_single_and_multi_country(
             "RWA": [
                 (
                     "https://data.worldpop.org/GIS/Population/rwa_2020.tif",
-                    DEFAULT_RASTER_DATA,
+                    default_raster_data,
                     (0.0, 0.0, 0.04, 0.04),
                 )
             ],
@@ -450,7 +457,7 @@ def test_poi_map_wp_pop_age_structures_sums_rasters_and_rejects_multi_country(
 
 
 def test_poi_map_wp_pop_fractional_1000m_vs_100m_fallback_warning(
-    tmp_path, make_worldpop_handler, caplog
+    tmp_path, make_worldpop_handler, caplog, monkeypatch
 ):
     import logging
 
@@ -503,6 +510,7 @@ def test_poi_map_wp_pop_fractional_1000m_vs_100m_fallback_warning(
         },
     )
     gen_100 = PoiViewGenerator(pois, data_store=LocalDataStore(base_path=tmp_path))
+    monkeypatch.setattr(gen_100.logger, "propagate", True)
     with caplog.at_level(logging.WARNING):
         view_100 = gen_100.map_wp_pop(
             country="RWA",
