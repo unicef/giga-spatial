@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Union, Tuple, Literal, Iterable
+from typing import TYPE_CHECKING, List, Optional, Union, Tuple, Literal, Iterable
 from pydantic.dataclasses import dataclass, Field
 
 import geopandas as gpd
@@ -30,6 +30,11 @@ from gigaspatial.processing.geo import (
 )
 from gigaspatial.processing.tif_processor import TifProcessor
 from gigaspatial.processing.buildings_engine import GoogleMSBuildingsEngine
+
+if TYPE_CHECKING:
+    from gigaspatial.handlers.google_ms_combined_buildings import (
+        GoogleMSBuildingsHandler,
+    )
 
 
 @dataclass
@@ -672,6 +677,7 @@ class PoiViewGenerator:
         dataset_year=2020,
         dataset_resolution=100,
         output_column="built_surface_m2",
+        handler: Optional[GHSLDataHandler] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Maps GHSL Built Surface (GHS_BUILT_S) data to POIs.
@@ -684,13 +690,14 @@ class PoiViewGenerator:
             dataset_year: Year of GHSL data to use. Defaults to 2020.
             dataset_resolution: Resolution in meters. Defaults to 100.
             output_column: Output column name. Defaults to "built_surface_m2".
+            handler: Optional pre-configured GHSLDataHandler.
             **kwargs: Extra arguments for GHSLDataHandler.
 
         Returns:
             The updated POI view DataFrame.
         """
         self.logger.info("Mapping GHSL Built Surface data to POIs")
-        handler = GHSLDataHandler(
+        handler = handler or GHSLDataHandler(
             product="GHS_BUILT_S",
             year=dataset_year,
             resolution=dataset_resolution,
@@ -721,6 +728,7 @@ class PoiViewGenerator:
         dataset_year=2020,
         dataset_resolution=1000,
         output_column="smod_class",
+        handler: Optional[GHSLDataHandler] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Maps GHSL Settlement Model (SMOD) data to the POIs.
@@ -732,13 +740,14 @@ class PoiViewGenerator:
             dataset_year: Year of GHSL data. Defaults to 2020.
             dataset_resolution: Resolution in meters. Defaults to 1000.
             output_column: Output column name. Defaults to "smod_class".
+            handler: Optional pre-configured GHSLDataHandler.
             **kwargs: Extra arguments for GHSLDataHandler.
 
         Returns:
             The updated POI view DataFrame.
         """
         self.logger.info("Mapping GHSL Settlement Model (SMOD) data to POIs")
-        handler = GHSLDataHandler(
+        handler = handler or GHSLDataHandler(
             product="GHS_SMOD",
             year=dataset_year,
             resolution=dataset_resolution,
@@ -773,6 +782,7 @@ class PoiViewGenerator:
             "centroid_within", "intersects", "fractional", "within"
         ] = "intersects",
         output_column: str = "population",
+        handler: Optional[WPPopulationHandler] = None,
         **kwargs,
     ):
         """Maps WorldPop population data to POIs.
@@ -787,6 +797,7 @@ class PoiViewGenerator:
             predicate: Spatial relationship for aggregation.
                 Defaults to "intersects".
             output_column: Destination column name. Defaults to "population".
+            handler: Optional pre-configured WPPopulationHandler.
             **kwargs: Extra arguments for WPPopulationHandler.
 
         Returns:
@@ -799,7 +810,7 @@ class PoiViewGenerator:
         # Ensure country is always a list for consistent handling
         countries_list = [country] if isinstance(country, str) else country
 
-        handler = WPPopulationHandler(
+        handler = handler or WPPopulationHandler(
             resolution=resolution,
             data_store=self.data_store,
             **kwargs,
@@ -818,7 +829,7 @@ class PoiViewGenerator:
             f"Mapping WorldPop Population data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
         )
 
-        if predicate == "fractional" and resolution == 100:
+        if predicate == "fractional" and handler.config.resolution == 100:
             self.logger.warning(
                 "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
             )
@@ -1130,6 +1141,7 @@ class PoiViewGenerator:
         country: str,
         search_radius: float = 1000,
         find_nearest_globally: bool = False,
+        handler: Optional["GoogleMSBuildingsHandler"] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Finds the nearest building to each POI within a search radius.
@@ -1139,6 +1151,7 @@ class PoiViewGenerator:
             search_radius: Maximum search distance in meters. Defaults to 1000.
             find_nearest_globally: If True, searches across all neighboring countries.
                 Defaults to False.
+            handler: Optional pre-configured GoogleMSBuildingsHandler.
             **kwargs: Extra parameters for building handlers.
 
         Returns:
@@ -1150,7 +1163,9 @@ class PoiViewGenerator:
                 "Global nearest building search enabled. "
                 "This may be slower than radius-limited search."
             )
-            return self._find_nearest_building_globally(country=country, **kwargs)
+            return self._find_nearest_building_globally(
+                country=country, handler=handler, **kwargs
+            )
 
         if search_radius > 5000:
             self.logger.warning(
@@ -1162,13 +1177,14 @@ class PoiViewGenerator:
             f"Mapping combined buildings data to POIs within {search_radius}m"
         )
 
-        from gigaspatial.handlers.google_ms_combined_buildings import (
-            GoogleMSBuildingsHandler,
-        )
+        if handler is None:
+            from gigaspatial.handlers.google_ms_combined_buildings import (
+                GoogleMSBuildingsHandler,
+            )
 
-        handler = GoogleMSBuildingsHandler(
-            partition_strategy="s2_grid", data_store=self.data_store
-        )
+            handler = GoogleMSBuildingsHandler(
+                partition_strategy="s2_grid", data_store=self.data_store
+            )
 
         if self.config.ensure_available:
             if not handler.ensure_data_available(country, **kwargs):
@@ -1216,19 +1232,21 @@ class PoiViewGenerator:
         self,
         country: str,
         max_global_search: float = 10000,
+        handler: Optional["GoogleMSBuildingsHandler"] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Find the true nearest building for each POI using progressive expansion."""
 
         self.logger.info("Starting global nearest building search...")
 
-        from gigaspatial.handlers.google_ms_combined_buildings import (
-            GoogleMSBuildingsHandler,
-        )
+        if handler is None:
+            from gigaspatial.handlers.google_ms_combined_buildings import (
+                GoogleMSBuildingsHandler,
+            )
 
-        handler = GoogleMSBuildingsHandler(
-            partition_strategy="s2_grid", data_store=self.data_store
-        )
+            handler = GoogleMSBuildingsHandler(
+                partition_strategy="s2_grid", data_store=self.data_store
+            )
 
         if self.config.ensure_available:
             if not handler.ensure_data_available(country, **kwargs):
