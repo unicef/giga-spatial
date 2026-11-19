@@ -3,11 +3,11 @@ import numpy as np
 import pytest
 from shapely.geometry import Point, Polygon
 
+from gigaspatial import ZonalViewGenerator
 from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
 
 
-def _make_generator(tmp_path) -> GeometryBasedZonalViewGenerator:
+def _make_generator(tmp_path) -> ZonalViewGenerator:
     zones = gpd.GeoDataFrame(
         {
             "zone_id": ["z1", "z2"],
@@ -18,7 +18,7 @@ def _make_generator(tmp_path) -> GeometryBasedZonalViewGenerator:
         },
         crs="EPSG:4326",
     )
-    return GeometryBasedZonalViewGenerator(
+    return ZonalViewGenerator(
         zones, data_store=LocalDataStore(base_path=tmp_path)
     )
 
@@ -63,7 +63,7 @@ def test_map_points_multiple_value_columns_with_count_aggregation(tmp_path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _make_zone_gen_in_raster(tmp_path) -> GeometryBasedZonalViewGenerator:
+def _make_zone_gen_in_raster(tmp_path) -> ZonalViewGenerator:
     zones = gpd.GeoDataFrame(
         {
             "zone_id": ["z_sw", "z_ne", "z_out"],
@@ -75,7 +75,7 @@ def _make_zone_gen_in_raster(tmp_path) -> GeometryBasedZonalViewGenerator:
         },
         crs="EPSG:4326",
     )
-    return GeometryBasedZonalViewGenerator(
+    return ZonalViewGenerator(
         zones, data_store=LocalDataStore(base_path=tmp_path)
     )
 
@@ -83,9 +83,9 @@ def _make_zone_gen_in_raster(tmp_path) -> GeometryBasedZonalViewGenerator:
 def test_zonal_map_wp_pop_uses_injected_handler(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators.zonal.geometry as geom_mod
+    import gigaspatial.generators.zonal.base as base_mod
 
-    monkeypatch.setattr(geom_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
+    monkeypatch.setattr(base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
     handler = make_worldpop_handler()
     gen = _make_zone_gen_in_raster(tmp_path)
 
@@ -96,9 +96,9 @@ def test_zonal_map_wp_pop_uses_injected_handler(
 def test_zonal_map_built_s_and_smod_and_ghsl_use_injected_handler(
     tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators.zonal.geometry as geom_mod
+    import gigaspatial.generators.zonal.base as base_mod
 
-    monkeypatch.setattr(geom_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler"))
+    monkeypatch.setattr(base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler"))
     built_h = make_ghsl_handler(product="GHS_BUILT_S", coord_system=4326, subdir="ghsl_b")
     smod_h = make_ghsl_handler(
         product="GHS_SMOD", resolution=1000, coord_system=54009, subdir="ghsl_s"
@@ -120,9 +120,9 @@ def test_zonal_map_ms_buildings_honors_injected_handler(
     tmp_path, unexpected_ctor, monkeypatch
 ):
     from types import SimpleNamespace
-    import gigaspatial.generators.zonal.geometry as geom_mod
+    import gigaspatial.generators.zonal.base as base_mod
 
-    monkeypatch.setattr(geom_mod, "MSBuildingsHandler", unexpected_ctor("MSBuildingsHandler"))
+    monkeypatch.setattr(base_mod, "MSBuildingsHandler", unexpected_ctor("MSBuildingsHandler"))
     buildings = gpd.GeoDataFrame(
         {
             "type": ["house", "house"],
@@ -171,9 +171,9 @@ def test_zonal_map_buildings_uses_injected_handler(
 
 def test_zonal_map_rwi_uses_injected_handler(tmp_path, unexpected_ctor, monkeypatch):
     from types import SimpleNamespace
-    import gigaspatial.generators.zonal.geometry as geom_mod
+    import gigaspatial.generators.zonal.base as base_mod
 
-    monkeypatch.setattr(geom_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
+    monkeypatch.setattr(base_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
     rwi_gdf = gpd.GeoDataFrame(
         {
             "rwi": [1.5],
@@ -196,15 +196,15 @@ def test_zonal_subclasses_forward_injected_handlers(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch, grid_kind
 ):
     from types import SimpleNamespace
-    import gigaspatial.generators.zonal.geometry as geom_mod
+    import gigaspatial.generators.zonal.base as base_mod
     import gigaspatial.handlers.google_ms_combined_buildings as gms_mod
     from gigaspatial.generators.zonal.admin import AdminBoundariesViewGenerator
     from gigaspatial.generators.zonal.h3 import H3ViewGenerator
     from gigaspatial.generators.zonal.mercator import MercatorViewGenerator
     from gigaspatial.generators.zonal.s2 import S2ViewGenerator
 
-    monkeypatch.setattr(geom_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
-    monkeypatch.setattr(geom_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
+    monkeypatch.setattr(base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
+    monkeypatch.setattr(base_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
     monkeypatch.setattr(
         gms_mod,
         "GoogleMSBuildingsHandler",
@@ -255,7 +255,7 @@ def test_zonal_subclasses_forward_injected_handlers(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _make_raster_zones(tmp_path) -> GeometryBasedZonalViewGenerator:
+def _make_raster_zones(tmp_path) -> ZonalViewGenerator:
     """Create polygon zones overlapping known cells of the (0.0, 0.0, 0.04, 0.04) 4x4 grid."""
     zones = gpd.GeoDataFrame(
         {
@@ -270,7 +270,7 @@ def _make_raster_zones(tmp_path) -> GeometryBasedZonalViewGenerator:
         },
         crs="EPSG:4326",
     )
-    return GeometryBasedZonalViewGenerator(
+    return ZonalViewGenerator(
         zones, data_store=LocalDataStore(base_path=tmp_path)
     )
 
@@ -384,7 +384,7 @@ def test_zonal_map_wp_pop_centroid_within_single_and_multi_country(
         },
         crs="EPSG:4326",
     )
-    gen_multi = GeometryBasedZonalViewGenerator(
+    gen_multi = ZonalViewGenerator(
         zones_multi, data_store=LocalDataStore(base_path=tmp_path)
     )
     multi_view = gen_multi.map_wp_pop(
@@ -541,7 +541,7 @@ def test_zonal_map_smod_reprojects_zones_to_mollweide(tmp_path, make_ghsl_handle
         },
         crs="EPSG:4326",
     )
-    gen = GeometryBasedZonalViewGenerator(
+    gen = ZonalViewGenerator(
         zones, data_store=LocalDataStore(base_path=tmp_path)
     )
 
@@ -649,7 +649,7 @@ def test_zonal_view_chaining_exports_and_save_view(
         },
         crs="EPSG:4326",
     )
-    gen = GeometryBasedZonalViewGenerator(zones, config=cfg, data_store=store)
+    gen = ZonalViewGenerator(zones, config=cfg, data_store=store)
 
     gen.map_wp_pop(country="RWA", output_column="wp_pop", handler=wp_h)
     gen.map_built_s(output_column="built_m2", handler=built_h)
@@ -698,10 +698,148 @@ def test_zonal_save_view_geojson(tmp_path):
         },
         crs="EPSG:4326",
     )
-    gen = GeometryBasedZonalViewGenerator(zones, config=cfg, data_store=store)
+    gen = ZonalViewGenerator(zones, config=cfg, data_store=store)
     out_path = gen.save_view("zonal_out", output_format="geojson")
     loaded = gpd.read_file(out_path)
     assert list(loaded["zone_id"]) == ["z1"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hierarchy collapse, deprecation, GeoDataFrame sources & ID validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_zonal_view_generator_public_imports_and_geometry_based_deprecation(tmp_path):
+    from gigaspatial import GeometryBasedZonalViewGenerator as TopDeprecated
+    from gigaspatial import ZonalViewGenerator as TopZonal
+    from gigaspatial.generators import (
+        GeometryBasedZonalViewGenerator as GenDeprecated,
+        ZonalViewGenerator as GenZonal,
+    )
+    from gigaspatial.generators.zonal import (
+        GeometryBasedZonalViewGenerator as ZonalPkgDeprecated,
+        ZonalViewGenerator as ZonalPkgZonal,
+    )
+
+    assert TopZonal is GenZonal is ZonalPkgZonal
+    assert TopDeprecated is GenDeprecated is ZonalPkgDeprecated
+    assert issubclass(TopDeprecated, TopZonal)
+
+    zones = gpd.GeoDataFrame(
+        {
+            "zone_id": ["z1"],
+            "geometry": [Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])],
+        },
+        crs="EPSG:4326",
+    )
+    with pytest.deprecated_call(match="GeometryBasedZonalViewGenerator"):
+        legacy = TopDeprecated(zones, data_store=LocalDataStore(base_path=tmp_path))
+
+    assert isinstance(legacy, TopZonal)
+    assert list(legacy.view["zone_id"]) == ["z1"]
+
+
+def test_zonal_subclasses_inherit_zonal_view_generator_without_override_duplicates():
+    from gigaspatial.generators.zonal.admin import AdminBoundariesViewGenerator
+    from gigaspatial.generators.zonal.h3 import H3ViewGenerator
+    from gigaspatial.generators.zonal.mercator import MercatorViewGenerator
+    from gigaspatial.generators.zonal.s2 import S2ViewGenerator
+
+    for cls in (
+        AdminBoundariesViewGenerator,
+        H3ViewGenerator,
+        S2ViewGenerator,
+        MercatorViewGenerator,
+    ):
+        assert issubclass(cls, ZonalViewGenerator)
+        for method_name in ("map_wp_pop", "map_rwi", "map_buildings"):
+            assert method_name not in cls.__dict__
+
+
+def test_zonal_country_default_resolution_and_missing_country_raises(
+    tmp_path, make_worldpop_handler
+):
+    from gigaspatial.generators.zonal.admin import AdminBoundariesViewGenerator
+
+    store = LocalDataStore(base_path=tmp_path)
+    wp_handler = make_worldpop_handler(store=store)
+
+    area = Polygon([(0.005, 0.005), (0.005, 0.035), (0.035, 0.035), (0.035, 0.005)])
+    admin_path = tmp_path / "admin.geojson"
+    gpd.GeoDataFrame(
+        {"boundary_id": ["adm1"], "name": ["Area 1"], "geometry": [area]},
+        crs="EPSG:4326",
+    ).to_file(admin_path, driver="GeoJSON")
+    admin_gen = AdminBoundariesViewGenerator(
+        country="RWA", admin_level=1, admin_path=admin_path, data_store=store
+    )
+    view = admin_gen.map_wp_pop(output_column="wp_population", handler=wp_handler)
+    assert view.set_index("zone_id").loc["adm1", "wp_population"] == pytest.approx(136.0)
+
+    plain_gen = _make_raster_zones(tmp_path)
+    with pytest.raises(ValueError, match="country"):
+        plain_gen.map_wp_pop(handler=wp_handler)
+    with pytest.raises(ValueError, match="country"):
+        plain_gen.map_rwi()
+    with pytest.raises(ValueError, match="country"):
+        plain_gen.map_buildings()
+
+
+def test_grid_generators_accept_geodataframe_source(tmp_path):
+    from gigaspatial.generators.zonal.h3 import H3ViewGenerator
+    from gigaspatial.generators.zonal.mercator import MercatorViewGenerator
+    from gigaspatial.generators.zonal.s2 import S2ViewGenerator
+
+    store = LocalDataStore(base_path=tmp_path)
+    area_gdf = gpd.GeoDataFrame(
+        {
+            "name": ["area_a"],
+            "geometry": [
+                Polygon([(0.005, 0.005), (0.005, 0.035), (0.035, 0.035), (0.035, 0.005)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+
+    h3_gen = H3ViewGenerator(area_gdf, resolution=7, data_store=store)
+    s2_gen = S2ViewGenerator(area_gdf, level=12, data_store=store)
+    merc_gen = MercatorViewGenerator(area_gdf, zoom_level=14, data_store=store)
+
+    for gen in (h3_gen, s2_gen, merc_gen):
+        assert len(gen.zone_gdf) > 0
+        assert {"zone_id", "geometry"} <= set(gen.zone_gdf.columns)
+
+
+def test_zonal_id_uniqueness_and_custom_column_collision_validation(tmp_path):
+    store = LocalDataStore(base_path=tmp_path)
+    geom1 = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    geom2 = Polygon([(2, 2), (2, 3), (3, 3), (3, 2)])
+
+    dup_default = gpd.GeoDataFrame(
+        {"zone_id": ["dup", "dup"], "geometry": [geom1, geom2]},
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        ZonalViewGenerator(dup_default, data_store=store)
+
+    dup_custom = gpd.GeoDataFrame(
+        {"region_id": ["r1", "r1"], "geometry": [geom1, geom2]},
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        ZonalViewGenerator(dup_custom, zone_id_column="region_id", data_store=store)
+
+    colliding = gpd.GeoDataFrame(
+        {
+            "zone_id": ["z1", "z2"],
+            "region_id": ["r1", "r2"],
+            "geometry": [geom1, geom2],
+        },
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="zone_id"):
+        ZonalViewGenerator(colliding, zone_id_column="region_id", data_store=store)
+
 
 
 

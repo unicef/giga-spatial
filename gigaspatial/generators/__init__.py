@@ -1,5 +1,6 @@
 from gigaspatial.generators.poi import PoiViewGenerator, PoiViewGeneratorConfig
 from gigaspatial.generators.zonal import (
+    ZonalViewGenerator,
     ZonalViewGeneratorConfig,
     GeometryBasedZonalViewGenerator,
     MercatorViewGenerator,
@@ -11,6 +12,7 @@ from gigaspatial.generators.zonal import (
 __all__ = [
     "PoiViewGenerator",
     "PoiViewGeneratorConfig",
+    "ZonalViewGenerator",
     "ZonalViewGeneratorConfig",
     "GeometryBasedZonalViewGenerator",
     "MercatorViewGenerator",

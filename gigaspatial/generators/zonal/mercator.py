@@ -8,18 +8,18 @@ import logging
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.grid.mercator_tiles import MercatorTiles, CountryMercatorTiles
 from gigaspatial.generators.zonal.base import (
+    ZonalViewGenerator,
     ZonalViewGeneratorConfig,
     T,
 )
-from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
 
 
-class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
+class MercatorViewGenerator(ZonalViewGenerator[T]):
     """
     Generates zonal views using Mercator tiles as the zones.
 
     This class specializes in creating zonal views where the zones are defined by
-    Mercator tiles. It extends the `GeometryBasedZonalViewGenerator` and leverages
+    Mercator tiles. It extends `ZonalViewGenerator` and leverages
     the `MercatorTiles` and `CountryMercatorTiles` classes to generate tiles based on
     various input sources.
 
@@ -43,7 +43,7 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
 
     Methods:
         _init_zone_data(source, zoom_level, predicate):  Initializes the Mercator tile GeoDataFrame based on the input source.
-        # Inherits other methods from GeometryBasedZonalViewGenerator, such as:
+        # Inherits other methods from ZonalViewGenerator, such as:
         # map_ghsl(), map_google_buildings(), map_ms_buildings(), aggregate_data(), save_view()
 
     Example:
@@ -90,10 +90,12 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
                 country=source, zoom_level=zoom_level, data_store=data_store
             )
             self._country = source
-        elif isinstance(source, (BaseGeometry, Iterable)):
-            if isinstance(source, Iterable) and all(
-                isinstance(qk, str) for qk in source
-            ):
+        elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame)):
+            tiles = MercatorTiles.from_spatial(
+                source=source, zoom_level=zoom_level, predicate=predicate
+            )
+        elif isinstance(source, Iterable):
+            if all(isinstance(qk, str) for qk in source):
                 tiles = MercatorTiles.from_quadkeys(source)
             else:
                 tiles = MercatorTiles.from_spatial(
@@ -108,49 +110,3 @@ class MercatorViewGenerator(GeometryBasedZonalViewGenerator[T]):
             )
 
         return tiles.to_geodataframe()
-
-    def map_wp_pop(
-        self,
-        country=None,
-        resolution=1000,
-        predicate="intersects",
-        output_column="population",
-        handler=None,
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_wp_pop(
-            country, resolution, predicate, output_column, handler=handler, **kwargs
-        )
-
-    def map_rwi(
-        self,
-        country=None,
-        predicate="intersects",
-        aggregation="mean",
-        output_column: str = "rwi",
-        handler=None,
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_rwi(
-            country, predicate, aggregation, output_column, handler=handler, **kwargs
-        )
-
-    def map_buildings(
-        self,
-        country=None,
-        output_column: str = "building_count",
-        handler=None,
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_buildings(
-            country, output_column, handler=handler, **kwargs
-        )

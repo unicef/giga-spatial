@@ -59,6 +59,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.image_downloaders.maxar_image": ["MaxarImageDownloader"],
         # generators
         "gigaspatial.generators.poi": ["PoiViewGenerator"],
+        "gigaspatial.generators.zonal.base": ["ZonalViewGenerator"],
         "gigaspatial.generators.zonal.geometry": ["GeometryBasedZonalViewGenerator"],
         "gigaspatial.generators.zonal.admin": ["AdminBoundariesViewGenerator"],
         "gigaspatial.generators.zonal.mercator": ["MercatorViewGenerator"],
@@ -138,6 +139,7 @@ if TYPE_CHECKING:
     from gigaspatial.image_downloaders.mapbox_image import MapboxImageDownloader
     from gigaspatial.image_downloaders.maxar_image import MaxarImageDownloader
     from gigaspatial.generators.poi import PoiViewGenerator
+    from gigaspatial.generators.zonal.base import ZonalViewGenerator
     from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
     from gigaspatial.generators.zonal.admin import AdminBoundariesViewGenerator
     from gigaspatial.generators.zonal.mercator import MercatorViewGenerator
