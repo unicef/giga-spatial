@@ -9,8 +9,22 @@ All notable changes to this project will be documented in this file.
 -   **Optional handler injection on view generators (`gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
     -   Added an optional `handler=None` parameter to dataset `map_*` methods (`map_wp_pop`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_ghsl`, `map_buildings`, `map_rwi`) and `PoiViewGenerator.find_nearest_buildings` without altering default behavior when `handler` is omitted.
 
+### Changed
+
+-   **Collapsed zonal view generator hierarchy (`gigaspatial/generators/zonal/`)**
+    -   Merged the abstract `ZonalViewGenerator` base class and `GeometryBasedZonalViewGenerator` into one concrete `ZonalViewGenerator` in `gigaspatial/generators/zonal/base.py`, exported from `gigaspatial`, `gigaspatial.generators`, and `gigaspatial.generators.zonal`.
+    -   Moved `self._country` default resolution in `map_wp_pop`, `map_rwi`, and `map_buildings` onto `ZonalViewGenerator` and removed the duplicated pass-through overrides from `AdminBoundariesViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, and `MercatorViewGenerator`.
+
+### Deprecated
+
+-   **`GeometryBasedZonalViewGenerator` (`gigaspatial/generators/zonal/geometry.py`)**
+    -   Turned `GeometryBasedZonalViewGenerator` into a thin subclass of `ZonalViewGenerator` that emits `DeprecationWarning` on instantiation; it will be removed in a later minor release.
+
 ### Fixed
 
+-   **Grid generator `GeoDataFrame` source handling and `zone_id` validation (`gigaspatial/generators/zonal/`)**
+    -   Fixed `H3ViewGenerator`, `S2ViewGenerator`, and `MercatorViewGenerator` misclassifying a `GeoDataFrame` `source` as an `Iterable` of string identifiers instead of resolving geometries spatially via `from_spatial`.
+    -   Added `zone_id` uniqueness and custom `zone_id_column` collision validation to `ZonalViewGenerator.__init__`, raising `ValueError` on duplicate zone IDs or when a custom `zone_id_column` collides with an existing `"zone_id"` column.
 -   **Microsoft buildings handler override in zonal mapping (`gigaspatial/generators/zonal/geometry.py`)**
     -   Fixed `GeometryBasedZonalViewGenerator.map_ms_buildings` overwriting a passed `handler` argument with a newly instantiated `MSBuildingsHandler`.
 -   **Overture release resolution and explicit release validation (`gigaspatial/fetchers/overture.py`)**

@@ -8,13 +8,13 @@ import logging
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.grid.h3 import H3Hexagons, CountryH3Hexagons
 from gigaspatial.generators.zonal.base import (
+    ZonalViewGenerator,
     ZonalViewGeneratorConfig,
     T,
 )
-from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
 
 
-class H3ViewGenerator(GeometryBasedZonalViewGenerator[T]):
+class H3ViewGenerator(ZonalViewGenerator[T]):
     """
     Generates zonal views using H3 hexagons as the zones.
 
@@ -71,8 +71,12 @@ class H3ViewGenerator(GeometryBasedZonalViewGenerator[T]):
                 data_store=data_store,
             )
             self._country = source
-        elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame, Iterable)):
-            if isinstance(source, Iterable) and all(isinstance(h, str) for h in source):
+        elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame)):
+            hexes = H3Hexagons.from_spatial(
+                source=source, resolution=resolution, contain=contain
+            )
+        elif isinstance(source, Iterable):
+            if all(isinstance(h, str) for h in source):
                 hexes = H3Hexagons.from_hexagons(list(source))
             else:
                 hexes = H3Hexagons.from_spatial(
@@ -87,49 +91,3 @@ class H3ViewGenerator(GeometryBasedZonalViewGenerator[T]):
             )
 
         return hexes.to_geodataframe()
-
-    def map_wp_pop(
-        self,
-        country=None,
-        resolution=1000,
-        predicate="intersects",
-        output_column="population",
-        handler=None,
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_wp_pop(
-            country, resolution, predicate, output_column, handler=handler, **kwargs
-        )
-
-    def map_rwi(
-        self,
-        country=None,
-        predicate="intersects",
-        aggregation="mean",
-        output_column: str = "rwi",
-        handler=None,
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_rwi(
-            country, predicate, aggregation, output_column, handler=handler, **kwargs
-        )
-
-    def map_buildings(
-        self,
-        country=None,
-        output_column: str = "building_count",
-        handler=None,
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_buildings(
-            country, output_column, handler=handler, **kwargs
-        )
