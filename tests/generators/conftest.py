@@ -40,6 +40,12 @@ def unexpected_ctor():
     return _unexpected_ctor
 
 
+@pytest.fixture
+def write_raster():
+    """Fixture returning helper to write deterministic single-band GeoTIFF files."""
+    return write_raster_tif
+
+
 def write_raster_tif(
     path: Path,
     data: np.ndarray = DEFAULT_RASTER_DATA,

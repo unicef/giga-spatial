@@ -43,6 +43,7 @@ class AdminBoundariesViewGenerator(ZonalViewGenerator[T]):
         admin_path: Optional[Union[str, Path]] = None,
         config: Optional[ZonalViewGeneratorConfig] = None,
         logger: logging.Logger = None,
+        ensure_available: bool = True,
     ):
         """
         Initializes the AdminBoundariesViewGenerator.
@@ -52,10 +53,10 @@ class AdminBoundariesViewGenerator(ZonalViewGenerator[T]):
             admin_level (int): The administrative level to load (e.g., 0 for country, 1 for states, 2 for districts).
             admin_path (Union[str, Path], optional): Path to a local administrative boundaries file (GeoJSON, Shapefile).
                                                      If provided, overrides default data loading.
-            config (Optional[ZonalViewGeneratorConfig]): Configuration for the zonal view generator.
-                                                         If None, a default config will be used.
+            config (Optional[ZonalViewGeneratorConfig]): Deprecated configuration object.
             data_store (Optional[DataStore]): Data storage interface. If None, LocalDataStore is used.
             logger (Optional[logging.Logger]): Custom logger instance. If None, a default logger is used.
+            ensure_available (bool): If True, ensures datasets are downloaded locally during mapping.
         """
 
         super().__init__(
@@ -66,6 +67,7 @@ class AdminBoundariesViewGenerator(ZonalViewGenerator[T]):
             config=config,
             data_store=data_store,
             logger=logger,
+            ensure_available=ensure_available,
         )
         self._country = country
         self.logger.info(

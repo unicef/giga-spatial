@@ -14,7 +14,7 @@ view = zones.map_wp_pop(country="RWA")
 print(view.head())
 ```
 
-`source` is the country the cells cover. `resolution=6` is the H3 size: about 36 km² per cell. `map_wp_pop` loads the WorldPop raster for that country and sums it onto the cells. `view` is a table of cells with a `population` column and a geometry.
+`source` is the country the cells cover. `resolution=6` is the H3 size: about 36 km² per cell. `map_wp_pop` loads the WorldPop raster for that country and sums it onto the cells. `view` is a geometry-free table keyed by `zone_id` with a `population` column (call `zones.to_geodataframe()` when you want cell polygon geometries).
 
 `S2ViewGenerator` and `MercatorViewGenerator` follow the same pattern: construct them with a country, then call `map_wp_pop`.
 

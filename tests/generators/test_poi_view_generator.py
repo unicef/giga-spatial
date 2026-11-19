@@ -53,7 +53,8 @@ def test_map_zonal_stats_point_data_with_value_column_and_custom_output(tmp_path
         value_column="tests",
     )
 
-    assert list(result.columns) == ["poi_id", "tests_sum"]
+    assert list(result.columns) == ["poi_id", "latitude", "longitude", "tests_sum"]
+    assert result.equals(gen.view)
     by_poi = result.set_index("poi_id")["tests_sum"]
     assert by_poi["poi_1"] == pytest.approx(30.0)
     assert pd.isna(by_poi["poi_2"])
@@ -68,8 +69,8 @@ def test_map_zonal_stats_point_data_with_value_column_default_output(tmp_path):
         value_column="tests",
     )
 
-    assert list(result.columns) == ["poi_id", "tests"]
-    by_poi = result.set_index("poi_id")["tests"]
+    assert list(result.columns) == ["poi_id", "latitude", "longitude", "zonal_stat"]
+    by_poi = result.set_index("poi_id")["zonal_stat"]
     assert by_poi["poi_1"] == pytest.approx(15.0)
     assert pd.isna(by_poi["poi_2"])
 
@@ -82,7 +83,7 @@ def test_map_zonal_stats_point_data_without_value_column_counts_points(tmp_path)
         output_column="pts_count",
     )
 
-    assert list(result.columns) == ["poi_id", "pts_count"]
+    assert list(result.columns) == ["poi_id", "latitude", "longitude", "pts_count"]
     by_poi = result.set_index("poi_id")["pts_count"]
     assert by_poi["poi_1"] == 2
     assert by_poi["poi_2"] == 0
@@ -98,7 +99,7 @@ def test_map_zonal_stats_polygon_data_with_value_column(tmp_path):
         value_column="tests",
     )
 
-    assert list(result.columns) == ["poi_id", "poly_tests"]
+    assert list(result.columns) == ["poi_id", "latitude", "longitude", "poly_tests"]
     by_poi = result.set_index("poi_id")["poly_tests"]
     assert by_poi["poi_1"] == pytest.approx(30.0)
     assert pd.isna(by_poi["poi_2"])
@@ -138,7 +139,7 @@ def test_map_zonal_stats_point_data_with_value_column_and_stat_count(tmp_path):
         value_column="tests",
     )
 
-    assert list(result.columns) == ["poi_id", "tests_count"]
+    assert list(result.columns) == ["poi_id", "latitude", "longitude", "tests_count"]
     by_poi = result.set_index("poi_id")["tests_count"]
     assert by_poi["poi_1"] == pytest.approx(2.0)
     assert by_poi["poi_2"] == pytest.approx(0.0)
@@ -154,10 +155,17 @@ def test_map_zonal_stats_point_data_ignores_poi_attribute_collision(tmp_path):
         value_column="tests",
     )
 
-    assert list(result.columns) == ["poi_id", "nearby_tests"]
-    by_poi = result.set_index("poi_id")["nearby_tests"]
-    assert by_poi["poi_1"] == pytest.approx(30.0)
-    assert pd.isna(by_poi["poi_2"])
+    assert list(result.columns) == [
+        "poi_id",
+        "tests",
+        "latitude",
+        "longitude",
+        "nearby_tests",
+    ]
+    by_poi = result.set_index("poi_id")
+    assert by_poi.loc["poi_1", "tests"] == pytest.approx(999.0)
+    assert by_poi.loc["poi_1", "nearby_tests"] == pytest.approx(30.0)
+    assert pd.isna(by_poi.loc["poi_2", "nearby_tests"])
 
 
 def test_map_zonal_stats_polygon_data_ignores_poi_attribute_collision(tmp_path):
@@ -170,10 +178,17 @@ def test_map_zonal_stats_polygon_data_ignores_poi_attribute_collision(tmp_path):
         value_column="tests",
     )
 
-    assert list(result.columns) == ["poi_id", "nearby_poly_tests"]
-    by_poi = result.set_index("poi_id")["nearby_poly_tests"]
-    assert by_poi["poi_1"] == pytest.approx(30.0)
-    assert pd.isna(by_poi["poi_2"])
+    assert list(result.columns) == [
+        "poi_id",
+        "tests",
+        "latitude",
+        "longitude",
+        "nearby_poly_tests",
+    ]
+    by_poi = result.set_index("poi_id")
+    assert by_poi.loc["poi_1", "tests"] == pytest.approx(999.0)
+    assert by_poi.loc["poi_1", "nearby_poly_tests"] == pytest.approx(30.0)
+    assert pd.isna(by_poi.loc["poi_2", "nearby_poly_tests"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -195,9 +210,11 @@ def _make_poi_gen_in_raster(tmp_path) -> PoiViewGenerator:
 def test_poi_map_wp_pop_uses_injected_handler(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators.poi as poi_mod
+    import gigaspatial.generators.base as gen_base_mod
 
-    monkeypatch.setattr(poi_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
+    monkeypatch.setattr(
+        gen_base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler")
+    )
     handler = make_worldpop_handler()
     gen = _make_poi_gen_in_raster(tmp_path)
 
@@ -208,9 +225,11 @@ def test_poi_map_wp_pop_uses_injected_handler(
 def test_poi_map_built_s_uses_injected_handler(
     tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators.poi as poi_mod
+    import gigaspatial.generators.base as gen_base_mod
 
-    monkeypatch.setattr(poi_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler"))
+    monkeypatch.setattr(
+        gen_base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler")
+    )
     handler = make_ghsl_handler(product="GHS_BUILT_S", coord_system=4326)
     gen = _make_poi_gen_in_raster(tmp_path)
 
@@ -221,9 +240,11 @@ def test_poi_map_built_s_uses_injected_handler(
 def test_poi_map_smod_uses_injected_handler(
     tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators.poi as poi_mod
+    import gigaspatial.generators.base as gen_base_mod
 
-    monkeypatch.setattr(poi_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler"))
+    monkeypatch.setattr(
+        gen_base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler")
+    )
     handler = make_ghsl_handler(product="GHS_SMOD", resolution=1000, coord_system=54009)
     gen = _make_poi_gen_in_raster(tmp_path)
 
@@ -647,10 +668,6 @@ def test_poi_id_column_default_autogeneration_and_custom_rename_and_duplicate_ra
         PoiViewGenerator(dup_df, poi_id_column="school_id", data_store=store)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Ticket 03 fixes missing custom poi_id_column on DataFrame (poi.py:167-168) to raise ValueError",
-)
 def test_poi_missing_custom_id_column_on_dataframe_raises(tmp_path):
     df = pd.DataFrame({"latitude": [0.01], "longitude": [0.01]})
     with pytest.raises(ValueError):
@@ -661,10 +678,6 @@ def test_poi_missing_custom_id_column_on_dataframe_raises(tmp_path):
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Ticket 03 fixes projected GeoDataFrame coordinate extraction before to_crs (poi.py:135-149)",
-)
 def test_poi_projected_geodataframe_extracts_wgs84_lat_lon(tmp_path):
     projected = gpd.GeoDataFrame(
         {"poi_id": ["p1"]},
@@ -751,10 +764,6 @@ def test_poi_view_chaining_exports_and_save_view(
     assert df_pq.set_index("poi_id").loc["center_pixel", "wp_pop"] == pytest.approx(10.0)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Ticket 03 fixes save_view geojson export using to_geodataframe (poi.py:1042)",
-)
 def test_poi_save_view_geojson(tmp_path):
     from gigaspatial.generators.poi import PoiViewGeneratorConfig
 
@@ -768,6 +777,520 @@ def test_poi_save_view_geojson(tmp_path):
     out_path = gen.save_view("poi_out", output_format="geojson")
     loaded = gpd.read_file(out_path)
     assert list(loaded["poi_id"]) == ["p1"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ticket 03: BaseViewGenerator extraction and unified contracts
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_poi_inherits_internal_base_and_base_is_unexported(tmp_path):
+    import gigaspatial
+    import gigaspatial.generators as gens
+    import gigaspatial.generators.zonal as zonal_gens
+    from gigaspatial.generators.base import BaseViewGenerator, BaseViewGeneratorConfig
+
+    assert issubclass(PoiViewGenerator, BaseViewGenerator)
+    assert "BaseViewGenerator" not in gigaspatial.__all__
+    assert "BaseViewGeneratorConfig" not in gigaspatial.__all__
+    assert "BaseViewGenerator" not in gens.__all__
+    assert "BaseViewGeneratorConfig" not in gens.__all__
+    assert "BaseViewGenerator" not in zonal_gens.__all__
+    assert "BaseViewGeneratorConfig" not in zonal_gens.__all__
+    assert not hasattr(gigaspatial, "BaseViewGenerator")
+
+    gen = _make_pois(tmp_path)
+    assert isinstance(gen, BaseViewGenerator)
+    assert isinstance(gen.config, BaseViewGeneratorConfig)
+
+
+def test_poi_view_and_to_dataframe_return_defensive_copies(tmp_path):
+    gen = _make_pois(tmp_path)
+
+    v = gen.view
+    v["hacked"] = 123
+    assert "hacked" not in gen.view.columns
+
+    df = gen.to_dataframe()
+    df["hacked_2"] = 456
+    assert "hacked_2" not in gen.to_dataframe().columns
+
+
+def test_poi_id_validation_missing_collision_and_missing_crs(tmp_path):
+    store = LocalDataStore(base_path=tmp_path)
+
+    # Missing custom poi_id_column on GeoDataFrame, dict list, tuple list
+    gdf_no_col = gpd.GeoDataFrame(
+        {"geometry": [Point(0.01, 0.01)]}, crs="EPSG:4326"
+    )
+    with pytest.raises(ValueError, match="school_id"):
+        PoiViewGenerator(gdf_no_col, poi_id_column="school_id", data_store=store)
+
+    with pytest.raises(ValueError, match="school_id"):
+        PoiViewGenerator(
+            [{"latitude": 0.01, "longitude": 0.01}],
+            poi_id_column="school_id",
+            data_store=store,
+        )
+
+    with pytest.raises(ValueError, match="school_id"):
+        PoiViewGenerator(
+            [(0.01, 0.01)], poi_id_column="school_id", data_store=store
+        )
+
+    # Collision with existing 'poi_id' column alongside custom poi_id_column
+    colliding_df = pd.DataFrame(
+        {
+            "poi_id": ["p1"],
+            "school_id": ["s1"],
+            "latitude": [0.01],
+            "longitude": [0.01],
+        }
+    )
+    with pytest.raises(ValueError, match="poi_id"):
+        PoiViewGenerator(colliding_df, poi_id_column="school_id", data_store=store)
+
+    colliding_gdf = gpd.GeoDataFrame(
+        {"poi_id": ["p1"], "school_id": ["s1"], "geometry": [Point(0.01, 0.01)]},
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="poi_id"):
+        PoiViewGenerator(colliding_gdf, poi_id_column="school_id", data_store=store)
+
+    # Naive GeoDataFrame without CRS raises ValueError
+    naive_gdf = gpd.GeoDataFrame(
+        {"poi_id": ["p1"], "geometry": [Point(0.01, 0.01)]}, crs=None
+    )
+    with pytest.raises(ValueError, match="CRS"):
+        PoiViewGenerator(naive_gdf, data_store=store)
+
+
+def test_poi_overwrite_contract_across_map_methods(
+    tmp_path, make_worldpop_handler, make_ghsl_handler
+):
+    from types import SimpleNamespace
+
+    store = LocalDataStore(base_path=tmp_path)
+    gen = _make_poi_gen_in_raster(tmp_path)
+
+    # map_points
+    gen.map_points(
+        _make_point_data(),
+        map_radius_meters=500,
+        output_column="pts_c",
+    )
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_points(_make_point_data(), map_radius_meters=500, output_column="pts_c")
+    updated = gen.map_points(
+        _make_point_data(),
+        map_radius_meters=500,
+        output_column="pts_c",
+        overwrite=True,
+    )
+    assert "pts_c" in updated.columns
+
+    # map_polygons
+    polys = _make_polygon_data()
+    gen.map_polygons(polys, map_radius_meters=500, output_column="poly_c")
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_polygons(polys, map_radius_meters=500, output_column="poly_c")
+    gen.map_polygons(
+        polys, map_radius_meters=500, output_column="poly_c", overwrite=True
+    )
+
+    # map_zonal_stats
+    gen.map_zonal_stats(
+        _make_point_data(),
+        stat="mean",
+        map_radius_meters=500,
+        value_column="tests",
+    )
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_zonal_stats(
+            _make_point_data(),
+            stat="sum",
+            map_radius_meters=500,
+            value_column="tests",
+        )
+    gen.map_zonal_stats(
+        _make_point_data(),
+        stat="sum",
+        map_radius_meters=500,
+        value_column="tests",
+        overwrite=True,
+    )
+
+    # map_nearest_points
+    target_pts = pd.DataFrame(
+        {"tid": ["t1"], "latitude": [0.015], "longitude": [0.015]}
+    )
+    gen.map_nearest_points(target_pts, id_column="tid", output_prefix="np")
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_nearest_points(target_pts, id_column="tid", output_prefix="np")
+    gen.map_nearest_points(
+        target_pts, id_column="tid", output_prefix="np", overwrite=True
+    )
+
+    # map_wp_pop & map_built_s & map_smod
+    wp_h = make_worldpop_handler(store=store, subdir="wp_ov")
+    built_h = make_ghsl_handler(product="GHS_BUILT_S", coord_system=4326, store=store, subdir="b_ov")
+    smod_h = make_ghsl_handler(product="GHS_SMOD", resolution=1000, coord_system=54009, store=store, subdir="s_ov")
+
+    gen.map_wp_pop(country="RWA", map_radius_meters=200, handler=wp_h)
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_wp_pop(country="RWA", map_radius_meters=200, handler=wp_h)
+    gen.map_wp_pop(country="RWA", map_radius_meters=200, handler=wp_h, overwrite=True)
+
+    gen.map_built_s(handler=built_h)
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_built_s(handler=built_h)
+    gen.map_built_s(handler=built_h, overwrite=True)
+
+    gen.map_smod(handler=smod_h)
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_smod(handler=smod_h)
+    gen.map_smod(handler=smod_h, overwrite=True)
+
+    # map_rwi
+    rwi_gdf = gpd.GeoDataFrame(
+        {
+            "rwi": [1.2],
+            "geometry": [
+                Polygon([(0.0, 0.0), (0.0, 0.05), (0.05, 0.05), (0.05, 0.0)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    rwi_h = SimpleNamespace(
+        config=SimpleNamespace(get_relevant_data_units=lambda c: ["u"]),
+        load_as_geodataframe=lambda c, ensure_available=True: rwi_gdf,
+    )
+    gen.map_rwi(country="RWA", handler=rwi_h)
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_rwi(country="RWA", handler=rwi_h)
+    gen.map_rwi(country="RWA", handler=rwi_h, overwrite=True)
+
+
+def test_poi_shared_methods_ghsl_rwi_points_polygons_rasters(
+    tmp_path, make_ghsl_handler
+):
+    from types import SimpleNamespace
+
+    store = LocalDataStore(base_path=tmp_path)
+    gen = _make_poi_gen_in_raster(tmp_path)
+
+    # map_ghsl & map_ghsl_pop (intersects + fractional)
+    pop_1000 = make_ghsl_handler(
+        product="GHS_POP", resolution=1000, coord_system=4326, store=store, subdir="gp1000"
+    )
+    view = gen.map_ghsl(handler=pop_1000, stat="mean", output_column="ghsl_mean")
+    assert "ghsl_mean" in view.columns
+    view = gen.map_ghsl_pop(
+        resolution=1000,
+        predicate="fractional",
+        map_radius_meters=200,
+        output_column="gp_frac",
+        handler=pop_1000,
+    )
+    assert view.set_index("poi_id").loc["p1", "gp_frac"] > 0.0
+
+    # map_rwi honors explicit output_column verbatim vs None -> rwi_{aggregation}
+    rwi_gdf = gpd.GeoDataFrame(
+        {
+            "rwi": [2.5],
+            "geometry": [
+                Polygon([(0.0, 0.0), (0.0, 0.05), (0.05, 0.05), (0.05, 0.0)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    rwi_h = SimpleNamespace(
+        config=SimpleNamespace(get_relevant_data_units=lambda c: ["u"]),
+        load_as_geodataframe=lambda c, ensure_available=True: rwi_gdf,
+    )
+    gen.map_rwi(
+        country="RWA",
+        aggregation="median",
+        output_column="custom_wealth",
+        handler=rwi_h,
+    )
+    assert "custom_wealth" in gen.view.columns
+    gen.map_rwi(country="RWA", aggregation="median", handler=rwi_h)
+    assert "rwi_median" in gen.view.columns
+
+    # map_polygons with value_columns=None counts without mutating input
+    polys = _make_polygon_data()
+    orig_cols = list(polys.columns)
+    gen2 = _make_pois(tmp_path)
+    view2 = gen2.map_polygons(polys, map_radius_meters=500, output_column="poly_cnt")
+    assert list(polys.columns) == orig_cols
+    assert view2.set_index("poi_id").loc["poi_1", "poly_cnt"] == 2
+    assert view2.set_index("poi_id").loc["poi_2", "poly_cnt"] == 0
+
+
+def test_poi_empty_data_contract_including_google_and_ms_buildings(tmp_path):
+    from types import SimpleNamespace
+
+    gen = _make_pois(tmp_path)
+
+    # Empty map_google_buildings -> self.view (DataFrame) with NaN columns
+    empty_google = gpd.GeoDataFrame(
+        columns=["full_plus_code", "area_in_meters", "geometry"],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    google_h = SimpleNamespace(
+        load_points=lambda gdf, ensure_available=True, **kw: empty_google
+    )
+    v_g = gen.map_google_buildings(handler=google_h)
+    assert isinstance(v_g, pd.DataFrame) and not isinstance(v_g, gpd.GeoDataFrame)
+    assert v_g.equals(gen.view)
+    assert {"nearest_google_building_id", "nearest_google_building_distance"} <= set(
+        v_g.columns
+    )
+    assert v_g["nearest_google_building_id"].isna().all()
+    assert v_g["nearest_google_building_distance"].isna().all()
+
+    # Empty map_ms_buildings -> self.view (DataFrame) with NaN columns (no GeoDataFrame leak)
+    empty_ms = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    ms_h = SimpleNamespace(load_data=lambda gdf, ensure_available=True: empty_ms)
+    v_ms = gen.map_ms_buildings(handler=ms_h)
+    assert isinstance(v_ms, pd.DataFrame) and not isinstance(v_ms, gpd.GeoDataFrame)
+    assert v_ms.equals(gen.view)
+    assert {"nearest_ms_building_id", "nearest_ms_building_distance"} <= set(
+        v_ms.columns
+    )
+    assert v_ms["nearest_ms_building_id"].isna().all()
+    assert v_ms["nearest_ms_building_distance"].isna().all()
+
+    # Empty map_nearest_points -> self.view with NaN columns
+    v_np = gen.map_nearest_points(
+        pd.DataFrame(columns=["latitude", "longitude"]), output_prefix="empty_np"
+    )
+    assert {"empty_np_id", "empty_np_distance"} <= set(v_np.columns)
+    assert v_np["empty_np_id"].isna().all()
+    assert v_np["empty_np_distance"].isna().all()
+
+    # Empty map_rasters([]) -> self.view with NaN / 0
+    v_r = gen.map_rasters([], stat="mean", output_column="empty_r")
+    assert v_r["empty_r"].isna().all()
+    v_rc = gen.map_rasters([], stat="count", output_column="empty_rc")
+    assert list(v_rc["empty_rc"]) == [0, 0]
+
+    # Empty map_zonal_stats -> self.view
+    v_zs = gen.map_zonal_stats(
+        gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"),
+        stat="mean",
+        value_column="tests",
+        output_column="empty_zs",
+    )
+    assert v_zs["empty_zs"].isna().all()
+
+    # Empty map_aqueduct_flood_hazard -> self.view with NaN
+    aq_h = SimpleNamespace(
+        config=SimpleNamespace(
+            DATASET_URL="https://example.invalid/aq.tif",
+            _get_filename=lambda: "inunriver_hist.tif",
+        ),
+        load_data=lambda gdf, ensure_available=True, **kw: [],
+    )
+    v_aq = gen.map_aqueduct_flood_hazard(handler=aq_h)
+    assert v_aq["inunriver_hist_meters"].isna().all()
+
+    # Empty building files in find_nearest_buildings -> NaN + False
+    gms_empty_h = SimpleNamespace(
+        config=SimpleNamespace(),
+        reader=SimpleNamespace(resolve_source_paths=lambda c, **kw: []),
+        select_options=lambda kw, cfg=None: {},
+        ensure_data_available=lambda c, **kw: True,
+    )
+    v_b = gen.find_nearest_buildings(
+        country="RWA", search_radius=500, handler=gms_empty_h
+    )
+    assert v_b["nearest_building_distance_m"].isna().all()
+    assert list(v_b["building_within_500m"]) == [False, False]
+
+
+def test_poi_availability_and_resolution_failures_propagate(tmp_path):
+    from types import SimpleNamespace
+
+    gen = _make_pois(tmp_path)
+
+    failing_gms = SimpleNamespace(
+        config=SimpleNamespace(),
+        reader=SimpleNamespace(resolve_source_paths=lambda c, **kw: []),
+        select_options=lambda kw, cfg=None: {},
+        ensure_data_available=lambda c, **kw: False,
+    )
+    with pytest.raises(RuntimeError, match="availability"):
+        gen.find_nearest_buildings(country="RWA", handler=failing_gms)
+    with pytest.raises(RuntimeError, match="availability"):
+        gen.find_nearest_buildings(
+            country="RWA", find_nearest_globally=True, handler=failing_gms
+        )
+
+    failing_rwi = SimpleNamespace(
+        config=SimpleNamespace(get_relevant_data_units=lambda c: []),
+    )
+    with pytest.raises(ValueError, match="RWI"):
+        gen.map_rwi(country="RWA", handler=failing_rwi)
+
+
+def test_poi_ensure_available_constructor_and_per_call_override(tmp_path):
+    from types import SimpleNamespace
+
+    observed = []
+    empty_ms = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    ms_h = SimpleNamespace(
+        load_data=lambda gdf, ensure_available=True: (
+            observed.append(ensure_available) or empty_ms
+        )
+    )
+
+    pois = gpd.GeoDataFrame(
+        {"poi_id": ["p1"], "geometry": [Point(0.01, 0.01)]}, crs="EPSG:4326"
+    )
+    gen = PoiViewGenerator(
+        pois, data_store=LocalDataStore(base_path=tmp_path), ensure_available=False
+    )
+    gen.map_ms_buildings(handler=ms_h)
+    gen.map_ms_buildings(handler=ms_h, ensure_available=True, overwrite=True)
+    assert observed == [False, True]
+
+
+def test_poi_deprecation_warnings_and_modern_save_view_formats(
+    tmp_path, make_ghsl_handler
+):
+    import warnings
+    from gigaspatial.generators.poi import PoiViewGeneratorConfig
+
+    store = LocalDataStore(base_path=tmp_path)
+    pois = gpd.GeoDataFrame(
+        {"poi_id": ["p1"], "geometry": [Point(0.015, 0.015)]}, crs="EPSG:4326"
+    )
+
+    # Deprecated config=
+    cfg = PoiViewGeneratorConfig(base_path=tmp_path / "cfg_views")
+    with pytest.deprecated_call(match="PoiViewGeneratorConfig"):
+        gen_cfg = PoiViewGenerator(pois, config=cfg, data_store=store)
+
+    # Deprecated bare name / output_format= on save_view
+    with pytest.deprecated_call(match="save_view"):
+        legacy_out = gen_cfg.save_view("legacy_name", output_format="csv")
+    assert legacy_out.exists()
+
+    # Deprecated dataset_year / dataset_resolution aliases
+    gen = PoiViewGenerator(pois, data_store=store)
+    built_h = make_ghsl_handler(
+        product="GHS_BUILT_S", year=2020, resolution=100, coord_system=4326
+    )
+    with pytest.deprecated_call(match="dataset_year"):
+        gen.map_built_s(
+            dataset_year=2020, output_column="b_alias", handler=built_h
+        )
+    smod_h = make_ghsl_handler(
+        product="GHS_SMOD", year=2020, resolution=1000, coord_system=54009, subdir="s_al"
+    )
+    with pytest.deprecated_call(match="dataset_resolution"):
+        gen.map_smod(
+            dataset_resolution=1000, output_column="s_alias", handler=smod_h
+        )
+
+    # Direct save_view(path) without DeprecationWarning across CSV, Parquet, GeoJSON, GPKG
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        csv_p = gen.save_view(tmp_path / "out" / "pois.csv")
+        pq_p = gen.save_view(tmp_path / "out" / "pois.parquet")
+        pq_geo_p = gen.save_view(
+            tmp_path / "out" / "pois_geo.parquet", include_geometry=True
+        )
+        geojson_p = gen.save_view(tmp_path / "out" / "pois.geojson")
+        gpkg_p = gen.save_view(tmp_path / "out" / "pois.gpkg")
+    assert not [w for w in caught if issubclass(w.category, DeprecationWarning)]
+
+    assert pd.read_csv(csv_p)["poi_id"].tolist() == ["p1"]
+    assert "geometry" not in pd.read_parquet(pq_p).columns
+    assert "geometry" in gpd.read_parquet(pq_geo_p).columns
+    assert gpd.read_file(geojson_p)["poi_id"].tolist() == ["p1"]
+    assert gpd.read_file(gpkg_p)["poi_id"].tolist() == ["p1"]
+
+    with pytest.raises(ValueError, match="include_geometry=False"):
+        gen.save_view(tmp_path / "out" / "bad.geojson", include_geometry=False)
+
+
+def test_poi_map_rasters_cleans_up_merged_processor_without_touching_inputs(
+    tmp_path, default_raster_data, write_raster, monkeypatch
+):
+    from pathlib import Path
+    from gigaspatial.processing.tif_processor import TifProcessor
+
+    store = LocalDataStore(base_path=tmp_path)
+    p1 = write_raster(tmp_path / "t1.tif", data=default_raster_data, bounds=(0.0, 0.0, 0.02, 0.04))
+    p2 = write_raster(tmp_path / "t2.tif", data=default_raster_data, bounds=(0.02, 0.0, 0.04, 0.04))
+    tp1 = TifProcessor(dataset_path=p1, data_store=store)
+    tp2 = TifProcessor(dataset_path=p2, data_store=store)
+
+    created_temp_dirs = []
+    orig_post_init = TifProcessor.__post_init__
+
+    def _tracking_post_init(self):
+        orig_post_init(self)
+        created_temp_dirs.append(Path(self._temp_dir))
+
+    monkeypatch.setattr(TifProcessor, "__post_init__", _tracking_post_init)
+    gen = _make_poi_gen_in_raster(tmp_path)
+    view = gen.map_rasters(
+        [tp1, tp2], map_radius_meters=200, output_column="merged_val"
+    )
+
+    assert "merged_val" in view.columns
+    assert len(created_temp_dirs) == 1
+    assert not created_temp_dirs[0].exists()
+    # Caller-owned TifProcessors stay alive
+    assert Path(tp1._temp_dir).exists()
+    assert Path(tp2._temp_dir).exists()
+    tp1.cleanup()
+    tp2.cleanup()
+
+
+def test_poi_google_and_ms_buildings_non_empty_and_overwrite_contract(tmp_path):
+    from types import SimpleNamespace
+
+    gen = _make_pois(tmp_path)
+
+    google_pts = gpd.GeoDataFrame(
+        {
+            "full_plus_code": ["G_1", "G_2"],
+            "geometry": [Point(0.001, 0.0), Point(1.001, 0.0)],
+        },
+        crs="EPSG:4326",
+    )
+    google_h = SimpleNamespace(
+        load_points=lambda gdf, ensure_available=True, **kw: google_pts
+    )
+    v_g = gen.map_google_buildings(handler=google_h)
+    assert v_g.set_index("poi_id").loc["poi_1", "nearest_google_building_id"] == "G_1"
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_google_buildings(handler=google_h)
+    gen.map_google_buildings(handler=google_h, overwrite=True)
+
+    ms_polys = gpd.GeoDataFrame(
+        {
+            "geometry": [
+                Polygon([(0.001, -0.001), (0.002, -0.001), (0.002, 0.001), (0.001, 0.001)]),
+            ]
+        },
+        crs="EPSG:4326",
+    )
+    ms_h = SimpleNamespace(load_data=lambda gdf, ensure_available=True: ms_polys)
+    v_ms = gen.map_ms_buildings(handler=ms_h)
+    assert "nearest_ms_building_id" in v_ms.columns
+    assert "nearest_ms_building_distance" in v_ms.columns
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_ms_buildings(handler=ms_h)
+    gen.map_ms_buildings(handler=ms_h, overwrite=True)
+
+
 
 
 

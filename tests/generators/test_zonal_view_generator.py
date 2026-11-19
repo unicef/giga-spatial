@@ -33,10 +33,11 @@ def test_map_points_value_columns_with_default_count_aggregation(tmp_path):
         crs="EPSG:4326",
     )
 
-    mapped = gen.map_points(pts, value_columns="tests")
-
-    assert mapped["z1"] == pytest.approx(2.0)
-    assert mapped["z2"] == pytest.approx(0.0)
+    view = gen.map_points(pts, value_columns="tests")
+    assert view.equals(gen.view)
+    by_zone = view.set_index("zone_id")["tests"]
+    assert by_zone["z1"] == pytest.approx(2.0)
+    assert by_zone["z2"] == pytest.approx(0.0)
 
 
 def test_map_points_multiple_value_columns_with_count_aggregation(tmp_path):
@@ -50,12 +51,12 @@ def test_map_points_multiple_value_columns_with_count_aggregation(tmp_path):
         crs="EPSG:4326",
     )
 
-    mapped = gen.map_points(pts, value_columns=["a", "b"], aggregation="count")
-
-    assert mapped["a"]["z1"] == pytest.approx(1.0)
-    assert mapped["a"]["z2"] == pytest.approx(0.0)
-    assert mapped["b"]["z1"] == pytest.approx(2.0)
-    assert mapped["b"]["z2"] == pytest.approx(0.0)
+    view = gen.map_points(pts, value_columns=["a", "b"], aggregation="count")
+    by_zone = view.set_index("zone_id")
+    assert by_zone.loc["z1", "a"] == pytest.approx(1.0)
+    assert by_zone.loc["z2", "a"] == pytest.approx(0.0)
+    assert by_zone.loc["z1", "b"] == pytest.approx(2.0)
+    assert by_zone.loc["z2", "b"] == pytest.approx(0.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,9 +84,11 @@ def _make_zone_gen_in_raster(tmp_path) -> ZonalViewGenerator:
 def test_zonal_map_wp_pop_uses_injected_handler(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators.zonal.base as base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
-    monkeypatch.setattr(base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
+    monkeypatch.setattr(
+        gen_base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler")
+    )
     handler = make_worldpop_handler()
     gen = _make_zone_gen_in_raster(tmp_path)
 
@@ -96,9 +99,11 @@ def test_zonal_map_wp_pop_uses_injected_handler(
 def test_zonal_map_built_s_and_smod_and_ghsl_use_injected_handler(
     tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators.zonal.base as base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
-    monkeypatch.setattr(base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler"))
+    monkeypatch.setattr(
+        gen_base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler")
+    )
     built_h = make_ghsl_handler(product="GHS_BUILT_S", coord_system=4326, subdir="ghsl_b")
     smod_h = make_ghsl_handler(
         product="GHS_SMOD", resolution=1000, coord_system=54009, subdir="ghsl_s"
@@ -171,9 +176,9 @@ def test_zonal_map_buildings_uses_injected_handler(
 
 def test_zonal_map_rwi_uses_injected_handler(tmp_path, unexpected_ctor, monkeypatch):
     from types import SimpleNamespace
-    import gigaspatial.generators.zonal.base as base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
-    monkeypatch.setattr(base_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
+    monkeypatch.setattr(gen_base_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
     rwi_gdf = gpd.GeoDataFrame(
         {
             "rwi": [1.5],
@@ -183,7 +188,7 @@ def test_zonal_map_rwi_uses_injected_handler(tmp_path, unexpected_ctor, monkeypa
     )
     fake_handler = SimpleNamespace(
         config=SimpleNamespace(get_relevant_data_units=lambda c: ["rwa_rwi.csv"]),
-        load_as_geodataframe=lambda c: rwi_gdf,
+        load_as_geodataframe=lambda c, ensure_available=True: rwi_gdf,
     )
     gen = _make_generator(tmp_path)
 
@@ -196,15 +201,17 @@ def test_zonal_subclasses_forward_injected_handlers(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch, grid_kind
 ):
     from types import SimpleNamespace
-    import gigaspatial.generators.zonal.base as base_mod
+    import gigaspatial.generators.base as gen_base_mod
     import gigaspatial.handlers.google_ms_combined_buildings as gms_mod
     from gigaspatial.generators.zonal.admin import AdminBoundariesViewGenerator
     from gigaspatial.generators.zonal.h3 import H3ViewGenerator
     from gigaspatial.generators.zonal.mercator import MercatorViewGenerator
     from gigaspatial.generators.zonal.s2 import S2ViewGenerator
 
-    monkeypatch.setattr(base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler"))
-    monkeypatch.setattr(base_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
+    monkeypatch.setattr(
+        gen_base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler")
+    )
+    monkeypatch.setattr(gen_base_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
     monkeypatch.setattr(
         gms_mod,
         "GoogleMSBuildingsHandler",
@@ -233,7 +240,7 @@ def test_zonal_subclasses_forward_injected_handlers(
     rwi_gdf = gpd.GeoDataFrame({"rwi": [2.0], "geometry": [area]}, crs="EPSG:4326")
     rwi_handler = SimpleNamespace(
         config=SimpleNamespace(get_relevant_data_units=lambda c: ["u"]),
-        load_as_geodataframe=lambda c: rwi_gdf,
+        load_as_geodataframe=lambda c, ensure_available=True: rwi_gdf,
     )
     building_file = tmp_path / "bldg.parquet"
     bldg_handler = SimpleNamespace(
@@ -682,10 +689,6 @@ def test_zonal_view_chaining_exports_and_save_view(
     assert df_pq.set_index("zone_id").loc["sw_four", "wp_pop"] == pytest.approx(46.0)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Ticket 03 fixes save_view geojson export using to_geodataframe (base.py:501)",
-)
 def test_zonal_save_view_geojson(tmp_path):
     from gigaspatial.generators.zonal.base import ZonalViewGeneratorConfig
 
@@ -839,6 +842,455 @@ def test_zonal_id_uniqueness_and_custom_column_collision_validation(tmp_path):
     )
     with pytest.raises(ValueError, match="zone_id"):
         ZonalViewGenerator(colliding, zone_id_column="region_id", data_store=store)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ticket 03: BaseViewGenerator extraction and unified zonal contracts
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_zonal_inherits_base_and_preserves_projected_crs_on_to_geodataframe(tmp_path):
+    import pandas as pd
+    from gigaspatial.generators.base import BaseViewGenerator, BaseViewGeneratorConfig
+
+    assert issubclass(ZonalViewGenerator, BaseViewGenerator)
+    projected_zones = gpd.GeoDataFrame(
+        {
+            "zone_id": ["z1"],
+            "geometry": [Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])],
+        },
+        crs="EPSG:4326",
+    ).to_crs("EPSG:3857")
+
+    gen = ZonalViewGenerator(
+        projected_zones,
+        zone_data_crs="EPSG:3857",
+        data_store=LocalDataStore(base_path=tmp_path),
+    )
+    assert isinstance(gen, BaseViewGenerator)
+    assert isinstance(gen.config, BaseViewGeneratorConfig)
+
+    # Defensive copy checks
+    v = gen.view
+    v["hacked"] = 1
+    assert "hacked" not in gen.view.columns
+    df = gen.to_dataframe()
+    assert isinstance(df, pd.DataFrame) and not isinstance(df, gpd.GeoDataFrame)
+    df["hacked_2"] = 2
+    assert "hacked_2" not in gen.to_dataframe().columns
+
+    # Preserves projected CRS
+    gdf = gen.to_geodataframe()
+    assert gdf.crs == "EPSG:3857"
+    assert list(gdf["zone_id"]) == ["z1"]
+
+
+def test_zonal_spatial_primitives_update_view_and_enforce_overwrite(
+    tmp_path, make_worldpop_handler, make_ghsl_handler, default_raster_data, write_raster
+):
+    from types import SimpleNamespace
+    from gigaspatial.processing.tif_processor import TifProcessor
+
+    store = LocalDataStore(base_path=tmp_path)
+    gen = _make_zone_gen_in_raster(tmp_path)
+
+    # map_points -> returns self.view
+    pts = gpd.GeoDataFrame(
+        {"val": [5.0], "geometry": [Point(0.01, 0.01)]}, crs="EPSG:4326"
+    )
+    v_pts = gen.map_points(pts, output_column="pt_cnt")
+    assert v_pts.equals(gen.view)
+    assert v_pts.set_index("zone_id").loc["z_sw", "pt_cnt"] == 1
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_points(pts, output_column="pt_cnt")
+    gen.map_points(pts, output_column="pt_cnt", overwrite=True)
+
+    # map_polygons with value_columns=None -> non-mutating count and returns self.view
+    polys = gpd.GeoDataFrame(
+        {
+            "val": [10.0],
+            "geometry": [
+                Polygon([(0.005, 0.005), (0.005, 0.015), (0.015, 0.015), (0.015, 0.005)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    orig_cols = list(polys.columns)
+    v_poly = gen.map_polygons(polys, output_column="poly_cnt")
+    assert list(polys.columns) == orig_cols
+    assert v_poly.equals(gen.view)
+    assert v_poly.set_index("zone_id").loc["z_sw", "poly_cnt"] == 1
+    assert v_poly.set_index("zone_id").loc["z_ne", "poly_cnt"] == 0
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_polygons(polys, output_column="poly_cnt")
+    with pytest.raises(ValueError, match="value_columns"):
+        gen.map_polygons(polys, value_columns=None, aggregation="sum")
+    gen.map_polygons(polys, output_column="poly_cnt", overwrite=True)
+
+    # map_rasters -> updates and returns self.view
+    tif_path = write_raster(tmp_path / "r.tif", data=default_raster_data)
+    tp = TifProcessor(dataset_path=tif_path, data_store=store)
+    v_ras = gen.map_rasters(tp, stat="mean", output_column="r_mean")
+    assert v_ras.equals(gen.view)
+    assert "r_mean" in v_ras.columns
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_rasters(tp, stat="mean", output_column="r_mean")
+    gen.map_rasters(tp, stat="max", output_column="r_mean", overwrite=True)
+    tp.cleanup()
+
+    # Dataset methods enforce overwrite=False and allow overwrite=True
+    wp_h = make_worldpop_handler(store=store, subdir="wp_z_ov")
+    gen.map_wp_pop(country="RWA", handler=wp_h)
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_wp_pop(country="RWA", handler=wp_h)
+    gen.map_wp_pop(country="RWA", handler=wp_h, overwrite=True)
+
+    built_h = make_ghsl_handler(
+        product="GHS_BUILT_S", coord_system=4326, store=store, subdir="b_z_ov"
+    )
+    gen.map_built_s(handler=built_h)
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_built_s(handler=built_h)
+    gen.map_built_s(handler=built_h, overwrite=True)
+
+    # map_buildings overwrite
+    b_file = tmp_path / "b.parquet"
+    b_h = SimpleNamespace(
+        config=SimpleNamespace(),
+        reader=SimpleNamespace(resolve_source_paths=lambda c, **kw: [b_file]),
+        select_options=lambda kw, cfg=None: {},
+        ensure_data_available=lambda c, **kw: True,
+        load_centroids=lambda fp: {"coords": np.array([[0.01, 0.01]])},
+    )
+    gen.map_buildings(country="RWA", handler=b_h)
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_buildings(country="RWA", handler=b_h)
+    gen.map_buildings(country="RWA", handler=b_h, overwrite=True)
+
+
+def test_zonal_shared_aqueduct_chain_coverage_and_rwi_output_column(
+    tmp_path, default_raster_data, write_raster
+):
+    from types import SimpleNamespace
+    from gigaspatial.processing.tif_processor import TifProcessor
+
+    store = LocalDataStore(base_path=tmp_path)
+    gen = _make_zone_gen_in_raster(tmp_path)
+
+    tif_path = write_raster(tmp_path / "aq.tif", data=default_raster_data)
+    aq_tp = TifProcessor(dataset_path=tif_path, data_store=store)
+    aq_h = SimpleNamespace(
+        config=SimpleNamespace(
+            DATASET_URL="https://example.invalid/aq.tif",
+            _get_filename=lambda: "inunriver_hist.tif",
+        ),
+        load_data=lambda gdf, ensure_available=True, **kw: aq_tp,
+    )
+
+    rwi_gdf = gpd.GeoDataFrame(
+        {
+            "rwi": [1.8],
+            "geometry": [
+                Polygon([(0.002, 0.002), (0.002, 0.018), (0.018, 0.018), (0.018, 0.002)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    rwi_h = SimpleNamespace(
+        config=SimpleNamespace(get_relevant_data_units=lambda c: ["u"]),
+        load_as_geodataframe=lambda c, ensure_available=True: rwi_gdf,
+    )
+
+    returned = gen.chain_operations(
+        [
+            {"method": "map_aqueduct_flood_hazard", "kwargs": {"handler": aq_h}},
+            {
+                "method": "map_rwi",
+                "kwargs": {
+                    "country": "RWA",
+                    "aggregation": "median",
+                    "output_column": "wealth_exact",
+                    "handler": rwi_h,
+                },
+            },
+            {
+                "method": "map_rwi",
+                "kwargs": {
+                    "country": "RWA",
+                    "aggregation": "max",
+                    "handler": rwi_h,
+                },
+            },
+        ]
+    )
+    assert returned is gen
+    assert {"inunriver_hist_meters", "wealth_exact", "rwi_max"} <= set(gen.view.columns)
+    assert gen.view.set_index("zone_id").loc["z_sw", "wealth_exact"] == pytest.approx(1.8)
+
+    bounds = gpd.GeoDataFrame(
+        geometry=[Polygon([(0.0, 0.0), (0.0, 0.04), (0.04, 0.04), (0.04, 0.0)])],
+        crs="EPSG:4326",
+    )
+    cov = gen.validate_data_coverage(bounds)
+    assert cov["total_zones"] == 3
+    assert cov["covered_zones"] == 2
+    assert cov["uncovered_zones"] == 1
+
+
+def test_zonal_empty_data_contract_including_google_and_ms_buildings(tmp_path):
+    import pandas as pd
+    from types import SimpleNamespace
+
+    gen = _make_generator(tmp_path)
+
+    # Empty map_google_buildings -> self.view (DataFrame), NOT _zone_gdf.copy()
+    empty_google = gpd.GeoDataFrame(
+        columns=["full_plus_code", "area_in_meters", "geometry"],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    google_h = SimpleNamespace(
+        load_points=lambda gdf, ensure_available=True, **kw: empty_google
+    )
+    v_g = gen.map_google_buildings(handler=google_h)
+    assert isinstance(v_g, pd.DataFrame) and not isinstance(v_g, gpd.GeoDataFrame)
+    assert v_g.equals(gen.view)
+    assert list(v_g["google_buildings_count"]) == [0, 0]
+    assert v_g["google_buildings_area_in_meters"].isna().all()
+
+    # Empty map_ms_buildings -> self.view (DataFrame), NOT _zone_gdf.copy()
+    empty_ms = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    ms_h = SimpleNamespace(load_data=lambda gdf, ensure_available=True: empty_ms)
+    v_ms = gen.map_ms_buildings(handler=ms_h)
+    assert isinstance(v_ms, pd.DataFrame) and not isinstance(v_ms, gpd.GeoDataFrame)
+    assert v_ms.equals(gen.view)
+    assert list(v_ms["ms_buildings_count"]) == [0, 0]
+    assert v_ms["ms_buildings_area_in_meters"].isna().all()
+
+    # Empty map_points -> 0 for count, NaN for sum
+    v_pt_cnt = gen.map_points(
+        gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"), output_column="empty_pt_cnt"
+    )
+    assert list(v_pt_cnt["empty_pt_cnt"]) == [0, 0]
+    v_pt_sum = gen.map_points(
+        gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"),
+        value_columns="val",
+        aggregation="sum",
+        output_column="empty_pt_sum",
+    )
+    assert v_pt_sum["empty_pt_sum"].isna().all()
+
+    # Empty map_polygons -> 0 for count, NaN for mean
+    v_poly_cnt = gen.map_polygons(
+        gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"), output_column="empty_poly_cnt"
+    )
+    assert list(v_poly_cnt["empty_poly_cnt"]) == [0, 0]
+    v_poly_mean = gen.map_polygons(
+        gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"),
+        value_columns="val",
+        aggregation="mean",
+        output_column="empty_poly_mean",
+    )
+    assert v_poly_mean["empty_poly_mean"].isna().all()
+
+    # Empty map_rasters([]) -> self.view with NaN
+    v_r = gen.map_rasters([], stat="mean", output_column="empty_z_r")
+    assert v_r["empty_z_r"].isna().all()
+
+    # Empty building files in map_buildings -> 0 counts
+    gms_empty = SimpleNamespace(
+        config=SimpleNamespace(),
+        reader=SimpleNamespace(resolve_source_paths=lambda c, **kw: []),
+        select_options=lambda kw, cfg=None: {},
+        ensure_data_available=lambda c, **kw: True,
+    )
+    v_b = gen.map_buildings(country="RWA", handler=gms_empty)
+    assert list(v_b["building_count"]) == [0, 0]
+
+
+def test_zonal_availability_and_resolution_failures_propagate(tmp_path):
+    from types import SimpleNamespace
+
+    gen = _make_generator(tmp_path)
+
+    failing_gms = SimpleNamespace(
+        config=SimpleNamespace(),
+        reader=SimpleNamespace(resolve_source_paths=lambda c, **kw: []),
+        select_options=lambda kw, cfg=None: {},
+        ensure_data_available=lambda c, **kw: False,
+    )
+    with pytest.raises(RuntimeError, match="availability"):
+        gen.map_buildings(country="RWA", handler=failing_gms)
+
+    failing_rwi = SimpleNamespace(
+        config=SimpleNamespace(get_relevant_data_units=lambda c: []),
+    )
+    with pytest.raises(ValueError, match="RWI"):
+        gen.map_rwi(country="RWA", handler=failing_rwi)
+
+
+def test_zonal_ensure_available_deprecations_and_direct_save_view(
+    tmp_path, make_ghsl_handler
+):
+    import warnings
+    import pandas as pd
+    from types import SimpleNamespace
+    from gigaspatial.generators.zonal.base import ZonalViewGeneratorConfig
+    from gigaspatial.generators.zonal.h3 import H3ViewGenerator
+
+    store = LocalDataStore(base_path=tmp_path)
+
+    # ensure_available constructor & per-call override on subclass
+    observed = []
+    empty_ms = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    ms_h = SimpleNamespace(
+        load_data=lambda gdf, ensure_available=True: (
+            observed.append(ensure_available) or empty_ms
+        )
+    )
+    area = Polygon([(0.005, 0.005), (0.005, 0.035), (0.035, 0.035), (0.035, 0.005)])
+    h3_gen = H3ViewGenerator(area, resolution=7, data_store=store, ensure_available=False)
+    h3_gen.map_ms_buildings(handler=ms_h)
+    h3_gen.map_ms_buildings(handler=ms_h, ensure_available=True, overwrite=True)
+    assert observed == [False, True]
+
+    # Deprecated ZonalViewGeneratorConfig & save_view legacy signature
+    zones = gpd.GeoDataFrame(
+        {
+            "zone_id": ["z1"],
+            "geometry": [
+                Polygon([(0.001, 0.001), (0.001, 0.019), (0.019, 0.019), (0.019, 0.001)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    cfg = ZonalViewGeneratorConfig(base_path=tmp_path / "cfg_zonal")
+    with pytest.deprecated_call(match="ZonalViewGeneratorConfig"):
+        gen_cfg = ZonalViewGenerator(zones, config=cfg, data_store=store)
+    with pytest.deprecated_call(match="save_view"):
+        legacy_p = gen_cfg.save_view("legacy_z")
+    assert legacy_p.exists() and legacy_p.suffix == ".parquet"
+
+    # Deprecated dataset_year / dataset_resolution on zonal
+    gen = ZonalViewGenerator(zones, data_store=store)
+    built_h = make_ghsl_handler(
+        product="GHS_BUILT_S", year=2020, resolution=100, coord_system=4326
+    )
+    with pytest.deprecated_call(match="dataset_year"):
+        gen.map_built_s(dataset_year=2020, output_column="bz", handler=built_h)
+    smod_h = make_ghsl_handler(
+        product="GHS_SMOD", year=2020, resolution=1000, coord_system=54009, subdir="sz_al"
+    )
+    with pytest.deprecated_call(match="dataset_resolution"):
+        gen.map_smod(dataset_resolution=1000, output_column="sz", handler=smod_h)
+
+    # Direct save_view(path) without DeprecationWarning
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        csv_p = gen.save_view(tmp_path / "direct" / "zones.csv")
+        pq_p = gen.save_view(tmp_path / "direct" / "zones.parquet")
+        pq_geo_p = gen.save_view(
+            tmp_path / "direct" / "zones_geo.parquet", include_geometry=True
+        )
+        geojson_p = gen.save_view(tmp_path / "direct" / "zones.geojson")
+        gpkg_p = gen.save_view(tmp_path / "direct" / "zones.gpkg")
+    assert not [w for w in caught if issubclass(w.category, DeprecationWarning)]
+
+    assert pd.read_csv(csv_p)["zone_id"].tolist() == ["z1"]
+    assert "geometry" not in pd.read_parquet(pq_p).columns
+    assert "geometry" in gpd.read_parquet(pq_geo_p).columns
+    assert gpd.read_file(geojson_p)["zone_id"].tolist() == ["z1"]
+    assert gpd.read_file(gpkg_p)["zone_id"].tolist() == ["z1"]
+
+
+def test_zonal_handler_loaded_rasters_cleaned_up_deterministically(
+    tmp_path, make_ghsl_handler, make_worldpop_handler, monkeypatch
+):
+    from pathlib import Path
+    from gigaspatial.processing.tif_processor import TifProcessor
+
+    store = LocalDataStore(base_path=tmp_path)
+    created_temp_dirs = []
+    orig_post_init = TifProcessor.__post_init__
+
+    def _tracking_post_init(self):
+        orig_post_init(self)
+        created_temp_dirs.append(Path(self._temp_dir))
+
+    monkeypatch.setattr(TifProcessor, "__post_init__", _tracking_post_init)
+
+    gen = _make_raster_zones(tmp_path)
+    built_h = make_ghsl_handler(
+        product="GHS_BUILT_S", year=2020, resolution=100, coord_system=4326, store=store
+    )
+    gen.map_built_s(handler=built_h)
+
+    wp_h = make_worldpop_handler(project="pop", resolution=1000, store=store)
+    gen.map_wp_pop(country="RWA", predicate="centroid_within", handler=wp_h)
+
+    assert len(created_temp_dirs) >= 2
+    assert all(not d.exists() for d in created_temp_dirs)
+
+
+def test_zonal_google_and_ms_buildings_non_empty_use_polygons_and_overwrite(tmp_path):
+    from types import SimpleNamespace
+
+    gen = _make_generator(tmp_path)
+
+    google_pts = gpd.GeoDataFrame(
+        {
+            "full_plus_code": ["G_1", "G_2"],
+            "area_in_meters": [50.0, 75.0],
+            "geometry": [Point(0.3, 0.3), Point(0.5, 0.5)],
+        },
+        crs="EPSG:4326",
+    )
+    google_polys = gpd.GeoDataFrame(
+        {
+            "area_in_meters": [50.0, 75.0],
+            "geometry": [
+                Polygon([(0.2, 0.2), (0.2, 0.4), (0.4, 0.4), (0.4, 0.2)]),
+                Polygon([(0.4, 0.4), (0.4, 0.6), (0.6, 0.6), (0.6, 0.4)]),
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    google_h = SimpleNamespace(
+        load_points=lambda gdf, ensure_available=True, **kw: google_pts,
+        load_polygons=lambda gdf, ensure_available=True, **kw: google_polys,
+    )
+    v_g = gen.map_google_buildings(handler=google_h, use_polygons=False)
+    by_z = v_g.set_index("zone_id")
+    assert by_z.loc["z1", "google_buildings_count"] == 2
+    assert by_z.loc["z1", "google_buildings_area_in_meters"] == pytest.approx(125.0)
+    assert by_z.loc["z2", "google_buildings_count"] == 0
+    assert np.isnan(by_z.loc["z2", "google_buildings_area_in_meters"])
+
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_google_buildings(handler=google_h)
+    v_gp = gen.map_google_buildings(
+        handler=google_h, use_polygons=True, overwrite=True
+    )
+    assert v_gp.set_index("zone_id").loc["z1", "google_buildings_count"] == 2
+
+    ms_polys = gpd.GeoDataFrame(
+        {
+            "geometry": [
+                Polygon([(0.2, 0.2), (0.2, 0.3), (0.3, 0.3), (0.3, 0.2)]),
+            ]
+        },
+        crs="EPSG:4326",
+    )
+    ms_h = SimpleNamespace(load_data=lambda gdf, ensure_available=True: ms_polys)
+    v_ms = gen.map_ms_buildings(handler=ms_h, use_polygons=False)
+    assert v_ms.set_index("zone_id").loc["z1", "ms_buildings_count"] == 1
+    assert v_ms.set_index("zone_id").loc["z1", "ms_buildings_area_in_meters"] > 0.0
+    with pytest.raises(ValueError, match="already exist"):
+        gen.map_ms_buildings(handler=ms_h)
+    v_msp = gen.map_ms_buildings(handler=ms_h, use_polygons=True, overwrite=True)
+    assert v_msp.set_index("zone_id").loc["z1", "ms_buildings_count"] == 1
+
+
 
 
 

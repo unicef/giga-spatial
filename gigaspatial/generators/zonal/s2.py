@@ -50,6 +50,7 @@ class S2ViewGenerator(ZonalViewGenerator[T]):
         data_store: Optional[DataStore] = None,
         logger: logging.Logger = None,
         max_cells: int = 1000,
+        ensure_available: bool = True,
     ):
 
         super().__init__(
@@ -60,6 +61,7 @@ class S2ViewGenerator(ZonalViewGenerator[T]):
             config=config,
             data_store=data_store,
             logger=logger,
+            ensure_available=ensure_available,
         )
         self.logger.info("Initialized S2ViewGenerator")
 

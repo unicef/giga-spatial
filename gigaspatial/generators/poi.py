@@ -1,35 +1,27 @@
-from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union, Tuple, Literal, Iterable
-from pydantic.dataclasses import dataclass, Field
-
-import geopandas as gpd
-import pandas as pd
-import numpy as np
 import logging
 import warnings
+from pathlib import Path
+from typing import TYPE_CHECKING, List, Literal, Optional, Tuple, Union
 
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+from pydantic import Field
 from scipy.spatial import cKDTree
 
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.core.io.writers import write_dataset
-
+from gigaspatial.generators.base import BaseViewGenerator, BaseViewGeneratorConfig
 from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
 from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
-from gigaspatial.handlers.ghsl import GHSLDataHandler
-from gigaspatial.handlers.worldpop import WPPopulationHandler
-
+from gigaspatial.processing.buildings_engine import GoogleMSBuildingsEngine
 from gigaspatial.processing.geo import (
+    calculate_distance,
     convert_to_geodataframe,
-    buffer_geodataframe,
     detect_coordinate_columns,
-    aggregate_points_to_zones,
-    aggregate_polygons_to_zones,
     get_centroids,
 )
 from gigaspatial.processing.tif_processor import TifProcessor
-from gigaspatial.processing.buildings_engine import GoogleMSBuildingsEngine
 
 if TYPE_CHECKING:
     from gigaspatial.handlers.google_ms_combined_buildings import (
@@ -37,9 +29,12 @@ if TYPE_CHECKING:
     )
 
 
-@dataclass
-class PoiViewGeneratorConfig:
+class PoiViewGeneratorConfig(BaseViewGeneratorConfig):
     """Configuration for POI (Point of Interest) view generation.
+
+    .. deprecated::
+        Pass ``ensure_available=`` directly to :class:`PoiViewGenerator` and
+        a target file path directly to :meth:`PoiViewGenerator.save_view`.
 
     Attributes:
         base_path: The base directory where generated POI views will be saved.
@@ -51,19 +46,25 @@ class PoiViewGeneratorConfig:
 
     base_path: Path = Field(default=global_config.get_path("poi", "views"))
     output_format: str = "csv"
-    ensure_available: bool = True
 
 
-class PoiViewGenerator:
+class PoiViewGenerator(BaseViewGenerator):
     """POI View Generator for multi-source attribute enrichment.
 
-    Integrates various geospatial datasets such as Google Open Buildings,
-    Microsoft Global Buildings, GHSL (Built Surface/SMOD), and WorldPop with
-    Points of Interest (POIs).
+    Integrates geospatial datasets such as Google Open Buildings,
+    Microsoft Global Buildings, GHSL (Built Surface/SMOD/Population),
+    WorldPop, RWI, and WRI Aqueduct Flood Hazard with Points of Interest (POIs).
 
     The POIs can be initialized from a list of (latitude, longitude) tuples,
     a list of dictionaries, a pandas DataFrame, or a geopandas GeoDataFrame.
     """
+
+    id_column = "poi_id"
+    _default_config_cls = PoiViewGeneratorConfig
+    _is_point_generator = True
+    _coverage_label = "pois"
+    _default_built_s_radius = 150
+    _default_aqueduct_buffer_meters = 500
 
     def __init__(
         self,
@@ -73,32 +74,60 @@ class PoiViewGenerator:
         poi_id_column: str = "poi_id",
         config: Optional[PoiViewGeneratorConfig] = None,
         data_store: Optional[DataStore] = None,
-        logger: logging.Logger = None,
+        logger: Optional[logging.Logger] = None,
+        ensure_available: bool = True,
     ):
-        """Initializes the PoiViewGenerator with the input points and configurations.
-
-        The input `points` are converted into an internal GeoDataFrame
-        (`_points_gdf`) for consistent geospatial operations.
+        """Initialize the PoiViewGenerator with input points and options.
 
         Args:
             points: The input points of interest. Can be a list of (lat, lon)
                 tuples, a list of dicts, a pandas DataFrame, or a GeoDataFrame.
             poi_id_column: The name of the column containing unique IDs for
                 each POI. Defaults to "poi_id".
-            config: Configuration for the generation process. If None,
-                defaults are used.
+            config: Deprecated configuration object.
             data_store: Storage interface for data management. If None,
                 LocalDataStore is used.
             logger: Custom logger. If None, uses a default logger.
+            ensure_available: If True, ensures datasets are downloaded locally
+                during mapping unless overridden per call.
         """
         if hasattr(points, "__len__") and len(points) == 0:
             raise ValueError("Points input cannot be empty")
 
-        self.config = config or PoiViewGeneratorConfig()
-        self.data_store = data_store or LocalDataStore()
-        self.logger = logger or global_config.get_logger(self.__class__.__name__)
-        self._points_gdf = self._init_points_gdf(points, poi_id_column)
-        self._view: pd.DataFrame = self._points_gdf.drop(columns=["geometry"])
+        points_gdf = self._init_points_gdf(points, poi_id_column)
+        super().__init__(
+            base_gdf=points_gdf,
+            ensure_available=ensure_available,
+            config=config,
+            data_store=data_store,
+            logger=logger,
+        )
+        self._points_gdf = self._base_gdf
+
+    @staticmethod
+    def _normalize_poi_id(df: pd.DataFrame, poi_id_column: str) -> pd.DataFrame:
+        """Validate and standardize the POI identifier column to ``'poi_id'``."""
+        if poi_id_column not in df.columns:
+            if poi_id_column != "poi_id":
+                raise ValueError(
+                    f"POI ID column '{poi_id_column}' not found in input points."
+                )
+            df["poi_id"] = [f"poi_{i}" for i in range(len(df))]
+            return df
+
+        if poi_id_column != "poi_id" and "poi_id" in df.columns:
+            raise ValueError(
+                f"Column 'poi_id' already exists in input; cannot rename '{poi_id_column}' to 'poi_id'."
+            )
+
+        if poi_id_column != "poi_id":
+            df = df.rename(columns={poi_id_column: "poi_id"})
+
+        if df["poi_id"].duplicated().any():
+            raise ValueError(
+                f"Column '{poi_id_column}' provided as 'poi_id_column' contains duplicate values."
+            )
+        return df
 
     @staticmethod
     def _init_points_gdf(
@@ -107,26 +136,8 @@ class PoiViewGenerator:
         ],
         poi_id_column: str,
     ) -> gpd.GeoDataFrame:
-        """Standardizes diversas point input formats into a GeoDataFrame.
-
-        Ensures coordinate columns are 'latitude' and 'longitude' and that each
-        point has a unique identifier in the 'poi_id' column.
-
-        Args:
-            points: The input points in one of the supported formats.
-            poi_id_column: The name of the column containing unique identifiers
-                to be renamed/standardized to 'poi_id'.
-
-        Returns:
-            A standardized GeoDataFrame with 'latitude', 'longitude',
-            and 'poi_id' columns.
-
-        Raises:
-            ValueError: If the input type is unsupported or contains duplicate
-                identifiers.
-        """
+        """Standardize diverse point input formats into an EPSG:4326 GeoDataFrame."""
         if isinstance(points, gpd.GeoDataFrame):
-            # Check for duplicate indices and reset if found
             if points.index.duplicated().any():
                 warnings.warn(
                     "Duplicate indices detected in GeoDataFrame. Resetting index to ensure unique indices.",
@@ -134,77 +145,53 @@ class PoiViewGenerator:
                     stacklevel=2,
                 )
                 points = points.reset_index(drop=True)
-            # Convert geometry to lat/lon if needed
-            if points.geometry.name == "geometry":
-                points = points.copy()
-                points["latitude"] = points.geometry.y
-                points["longitude"] = points.geometry.x
-            if poi_id_column not in points.columns:
-                points["poi_id"] = [f"poi_{i}" for i in range(len(points))]
-            else:
-                points = points.rename(
-                    columns={poi_id_column: "poi_id"},
-                )
-                if points["poi_id"].duplicated().any():
-                    raise ValueError(
-                        f"Column '{poi_id_column}' provided as 'poi_id_column' contains duplicate values."
-                    )
 
+            points = points.copy()
+            if points.crs is None:
+                raise ValueError("Input GeoDataFrame must have a CRS set.")
             if points.crs != "EPSG:4326":
                 points = points.to_crs("EPSG:4326")
-            return points
+            if points.active_geometry_name != "geometry":
+                points = points.rename_geometry("geometry")
 
-        elif isinstance(points, pd.DataFrame):
-            # Detect and standardize coordinate columns
-            try:
-                # Check for duplicate indices and reset if found
-                if points.index.duplicated().any():
-                    warnings.warn(
-                        "Duplicate indices detected in DataFrame. Resetting index to ensure unique indices.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
-                    points = points.reset_index(drop=True)
-                lat_col, lon_col = detect_coordinate_columns(points)
-                points = points.copy()
-                points["latitude"] = points[lat_col]
-                points["longitude"] = points[lon_col]
-                if poi_id_column not in points.columns:
-                    points[poi_id_column] = [f"poi_{i}" for i in range(len(points))]
-                else:
-                    points = points.rename(
-                        columns={poi_id_column: "poi_id"},
-                    )
-                    if points["poi_id"].duplicated().any():
-                        raise ValueError(
-                            f"Column '{poi_id_column}' provided as 'poi_id_column' contains duplicate values."
-                        )
-                return convert_to_geodataframe(
-                    points, lat_col="latitude", lon_col="longitude"
+            points["latitude"] = points.geometry.y
+            points["longitude"] = points.geometry.x
+            return PoiViewGenerator._normalize_poi_id(points, poi_id_column)
+
+        if isinstance(points, pd.DataFrame):
+            if points.index.duplicated().any():
+                warnings.warn(
+                    "Duplicate indices detected in DataFrame. Resetting index to ensure unique indices.",
+                    UserWarning,
+                    stacklevel=2,
                 )
+                points = points.reset_index(drop=True)
+            try:
+                lat_col, lon_col = detect_coordinate_columns(points)
             except ValueError as e:
                 raise ValueError(
                     f"Could not detect coordinate columns in DataFrame: {str(e)}"
-                )
+                ) from e
 
-        elif isinstance(points, list):
+            points = points.copy()
+            points["latitude"] = points[lat_col]
+            points["longitude"] = points[lon_col]
+            points = PoiViewGenerator._normalize_poi_id(points, poi_id_column)
+            return convert_to_geodataframe(
+                points, lat_col="latitude", lon_col="longitude"
+            )
+
+        if isinstance(points, list):
             if len(points) == 0:
-                return gpd.GeoDataFrame(
-                    columns=["latitude", "longitude", "poi_id", "geometry"],
-                    geometry="geometry",
-                    crs="EPSG:4326",
-                )
+                raise ValueError("Points input cannot be empty")
 
             if isinstance(points[0], tuple) and len(points[0]) == 2:
-                # List of (lat, lon) tuples
                 df = pd.DataFrame(points, columns=["latitude", "longitude"])
-                df["poi_id"] = [f"poi_{i}" for i in range(len(points))]
+                df = PoiViewGenerator._normalize_poi_id(df, poi_id_column)
                 return convert_to_geodataframe(df)
 
-            elif isinstance(points[0], dict):
-                # List of dictionaries
+            if isinstance(points[0], dict):
                 df = pd.DataFrame(points)
-                # Check for duplicate indices and reset if found
                 if df.index.duplicated().any():
                     warnings.warn(
                         "Duplicate indices detected in DataFrame created from dictionary list. Resetting index to ensure unique indices.",
@@ -214,80 +201,24 @@ class PoiViewGenerator:
                     df = df.reset_index(drop=True)
                 try:
                     lat_col, lon_col = detect_coordinate_columns(df)
-                    df["latitude"] = df[lat_col]
-                    df["longitude"] = df[lon_col]
-                    if poi_id_column not in df.columns:
-                        df["poi_id"] = [f"poi_{i}" for i in range(len(points))]
-                    else:
-                        df = df.rename(
-                            columns={poi_id_column: "poi_id"},
-                        )
-                        if df["poi_id"].duplicated().any():
-                            raise ValueError(
-                                f"Column '{poi_id_column}' provided as 'poi_id_column' contains duplicate values."
-                            )
-                    return convert_to_geodataframe(
-                        df, lat_col="latitude", lon_col="longitude"
-                    )
                 except ValueError as e:
                     raise ValueError(
                         f"Could not detect coordinate columns in dictionary list: {str(e)}"
-                    )
+                    ) from e
+
+                df["latitude"] = df[lat_col]
+                df["longitude"] = df[lon_col]
+                df = PoiViewGenerator._normalize_poi_id(df, poi_id_column)
+                return convert_to_geodataframe(
+                    df, lat_col="latitude", lon_col="longitude"
+                )
 
         raise ValueError("Unsupported points input type for PoiViewGenerator.")
 
     @property
     def points_gdf(self) -> gpd.GeoDataFrame:
-        """Gets the internal GeoDataFrame of points of interest."""
-        return self._points_gdf
-
-    @property
-    def view(self) -> pd.DataFrame:
-        """The DataFrame representing the current point of interest view."""
-        return self._view
-
-    def _update_view(self, new_data: pd.DataFrame) -> None:
-        """Merges new enrichment data into the internal view.
-
-        Args:
-            new_data: A DataFrame containing 'poi_id' and the new columns
-                to be added.
-
-        Raises:
-            ValueError: If 'poi_id' is missing from `new_data`.
-        """
-        if "poi_id" not in new_data.columns:
-            available_cols = list(new_data.columns)
-            raise ValueError(
-                f"new_data DataFrame must contain 'poi_id' column. "
-                f"Available columns: {available_cols}"
-            )
-
-        # Check for poi_id mismatches
-        original_poi_ids = set(self._view["poi_id"])
-        new_poi_ids = set(new_data["poi_id"])
-        missing_pois = original_poi_ids - new_poi_ids
-
-        if missing_pois:
-            self.logger.warning(
-                f"{len(missing_pois)} POIs will have NaN values for new columns"
-            )
-
-        # Ensure poi_id is the index for efficient merging
-        # Create a copy to avoid SettingWithCopyWarning if new_data is a slice
-        new_data_indexed = new_data.set_index("poi_id").copy()
-
-        # Merge on 'poi_id' (which is now the index of self._view and new_data_indexed)
-        # Using left join to keep all POIs from the original view
-        self._view = (
-            self._view.set_index("poi_id")
-            .join(new_data_indexed, how="left")
-            .reset_index()
-        )
-
-        self.logger.debug(
-            f"View updated with columns: {list(new_data_indexed.columns)}"
-        )
+        """A copy of the internal GeoDataFrame of points of interest."""
+        return self._base_gdf.copy()
 
     def map_nearest_points(
         self,
@@ -296,9 +227,10 @@ class PoiViewGenerator:
         lat_column: Optional[str] = None,
         lon_column: Optional[str] = None,
         output_prefix: str = "nearest",
+        overwrite: bool = False,
         **kwargs,
     ) -> pd.DataFrame:
-        """Enriches POIs with IDs and distances to their nearest neighbors.
+        """Enrich POIs with IDs and distances to their nearest neighbors and update ``self.view``.
 
         Args:
             points_df: DataFrame containing the target points to search.
@@ -310,35 +242,36 @@ class PoiViewGenerator:
                 it is automatically detected.
             output_prefix: Prefix for the new '{prefix}_id' and
                 '{prefix}_distance' columns. Defaults to "nearest".
-            **kwargs: Additional parameters for the distance calculator.
+            overwrite: If True, allows replacing existing output columns in the view.
+            **kwargs: Additional parameters.
 
         Returns:
-            A DataFrame containing 'poi_id' and the generated mapping columns.
-
-        Raises:
-            ValueError: If coordinate columns cannot be detected or expected
-                columns are missing from `points_df`.
+            The updated POI view DataFrame.
         """
+        id_out = f"{output_prefix}_id"
+        dist_out = f"{output_prefix}_distance"
+        self._validate_output_columns([id_out, dist_out], overwrite=overwrite)
+
         self.logger.info(
             f"Mapping nearest points from {points_df.__class__.__name__} to POIs"
         )
 
-        # Validate input DataFrame
-        if points_df.empty:
-            self.logger.info("No points found in the input DataFrame")
-            return self.view
+        if points_df is None or points_df.empty:
+            self.logger.warning("No points found in the input DataFrame")
+            return self._fill_empty_columns(
+                {id_out: np.nan, dist_out: np.nan}, overwrite=overwrite
+            )
 
-        # Handle GeoDataFrame
         if isinstance(points_df, gpd.GeoDataFrame):
             points_df = points_df.copy()
-            if points_df.geometry.name == "geometry":
-                points_df["latitude"] = points_df.geometry.y
-                points_df["longitude"] = points_df.geometry.x
-                lat_column = "latitude"
-                lon_column = "longitude"
-                self.logger.info("Extracted coordinates from geometry")
+            if points_df.crs is not None and points_df.crs != "EPSG:4326":
+                points_df = points_df.to_crs("EPSG:4326")
+            points_df["latitude"] = points_df.geometry.y
+            points_df["longitude"] = points_df.geometry.x
+            lat_column = "latitude"
+            lon_column = "longitude"
+            self.logger.info("Extracted coordinates from geometry")
 
-        # Detect coordinate columns if not provided
         if lat_column is None or lon_column is None:
             try:
                 detected_lat, detected_lon = detect_coordinate_columns(points_df)
@@ -350,7 +283,6 @@ class PoiViewGenerator:
             except ValueError as e:
                 raise ValueError(f"Could not detect coordinate columns: {str(e)}")
 
-        # Validate required columns
         required_columns = [lat_column, lon_column]
         if id_column is not None:
             required_columns.append(id_column)
@@ -362,11 +294,9 @@ class PoiViewGenerator:
                 f"Missing required columns in points_df: {missing_columns}"
             )
 
-        from gigaspatial.processing.geo import calculate_distance
-
         self.logger.info("Calculating nearest points for each POI")
         tree = cKDTree(points_df[[lat_column, lon_column]])
-        points_df_poi = self.points_gdf.copy()
+        points_df_poi = self.points_gdf
         _, idx = tree.query(points_df_poi[["latitude", "longitude"]], k=1)
         df_nearest = points_df.iloc[idx]
         dist = calculate_distance(
@@ -375,8 +305,6 @@ class PoiViewGenerator:
             lat2=df_nearest[lat_column],
             lon2=df_nearest[lon_column],
         )
-        # Create a temporary DataFrame to hold the results for merging
-        # Use id_column if provided, otherwise use index
         if id_column is not None:
             nearest_ids = points_df.iloc[idx][id_column].values
         else:
@@ -385,118 +313,129 @@ class PoiViewGenerator:
         temp_result_df = pd.DataFrame(
             {
                 "poi_id": points_df_poi["poi_id"],
-                f"{output_prefix}_id": nearest_ids,
-                f"{output_prefix}_distance": dist,
+                id_out: nearest_ids,
+                dist_out: dist,
             }
         )
 
         self.logger.info(
             f"Nearest points mapping complete with prefix '{output_prefix}'"
         )
-        return temp_result_df  # Return the DataFrame
+        return self._update_view(temp_result_df, overwrite=overwrite)
 
     def map_google_buildings(
         self,
         handler: Optional[GoogleOpenBuildingsHandler] = None,
+        ensure_available: Optional[bool] = None,
+        overwrite: bool = False,
         **kwargs,
     ) -> pd.DataFrame:
-        """Maps Google Open Buildings data to POIs by finding the nearest building.
-
-        Enriches the view with IDs and distances to the nearest Google building
-        plus code for each POI.
+        """Map Google Open Buildings data to POIs by finding the nearest building.
 
         Args:
-            handler: Optional handler for Google Open Buildings data. If None,
-                a default one is initialized.
+            handler: Optional handler for Google Open Buildings data.
+            ensure_available: Override generator's ``ensure_available`` flag.
+            overwrite: If True, replaces existing output columns in the view.
             **kwargs: Additional parameters passed to `handler.load_points`.
 
         Returns:
             The updated POI view DataFrame.
         """
+        out_cols = ["nearest_google_building_id", "nearest_google_building_distance"]
+        self._validate_output_columns(out_cols, overwrite=overwrite)
+        eff_ensure = self._resolve_ensure_available(ensure_available)
+
         self.logger.info("Mapping Google Open Buildings data to POIs")
         handler = handler or GoogleOpenBuildingsHandler(data_store=self.data_store)
 
         self.logger.info("Loading Google Buildings point data")
         buildings_df = handler.load_points(
-            self.points_gdf, ensure_available=self.config.ensure_available, **kwargs
+            self.points_gdf, ensure_available=eff_ensure, **kwargs
         )
         if buildings_df is None or len(buildings_df) == 0:
-            self.logger.info("No Google buildings data found for the provided POIs")
-            return self.view
+            self.logger.warning("No Google buildings data found for the provided POIs")
+            return self._fill_empty_columns(
+                {
+                    "nearest_google_building_id": np.nan,
+                    "nearest_google_building_distance": np.nan,
+                },
+                overwrite=overwrite,
+            )
 
-        mapped_data = self.map_nearest_points(
+        return self.map_nearest_points(
             points_df=buildings_df,
             id_column="full_plus_code",
             output_prefix="nearest_google_building",
+            overwrite=overwrite,
             **kwargs,
         )
-        self._update_view(mapped_data)
-        return self.view
 
     def map_ms_buildings(
         self,
         handler: Optional[MSBuildingsHandler] = None,
+        ensure_available: Optional[bool] = None,
+        overwrite: bool = False,
         **kwargs,
     ) -> pd.DataFrame:
-        """Maps Microsoft Global Buildings data to POIs by finding the nearest building.
-
-        Enriches the view with IDs and distances to the nearest MS building
-        for each POI.
+        """Map Microsoft Global Buildings data to POIs by finding the nearest building.
 
         Args:
-            handler: Optional handler for MS Buildings data. If None, a
-                default one is initialized.
-            **kwargs: Additional parameters for the data reader.
+            handler: Optional handler for MS Buildings data.
+            ensure_available: Override generator's ``ensure_available`` flag.
+            overwrite: If True, replaces existing output columns in the view.
+            **kwargs: Additional parameters.
 
         Returns:
             The updated POI view DataFrame.
         """
+        out_cols = ["nearest_ms_building_id", "nearest_ms_building_distance"]
+        self._validate_output_columns(out_cols, overwrite=overwrite)
+        eff_ensure = self._resolve_ensure_available(ensure_available)
+
         self.logger.info("Mapping Microsoft Global Buildings data to POIs")
         handler = handler or MSBuildingsHandler(data_store=self.data_store)
         self.logger.info("Loading Microsoft Buildings polygon data")
-        buildings_gdf = handler.load_data(
-            self.points_gdf, ensure_available=self.config.ensure_available
-        )
+        buildings_gdf = handler.load_data(self.points_gdf, ensure_available=eff_ensure)
         if buildings_gdf is None or len(buildings_gdf) == 0:
-            self.logger.info("No Microsoft buildings data found for the provided POIs")
-            return self.points_gdf.copy()
+            self.logger.warning(
+                "No Microsoft buildings data found for the provided POIs"
+            )
+            return self._fill_empty_columns(
+                {
+                    "nearest_ms_building_id": np.nan,
+                    "nearest_ms_building_distance": np.nan,
+                },
+                overwrite=overwrite,
+            )
 
         building_centroids = get_centroids(buildings_gdf)
-
-        if "building_id" not in buildings_gdf:
+        if "building_id" not in building_centroids.columns:
             self.logger.info("Creating building IDs from coordinates")
             building_centroids["building_id"] = building_centroids.apply(
                 lambda row: f"{row.geometry.y:.6f}_{row.geometry.x:.6f}",
                 axis=1,
             )
 
-        mapped_data = self.map_nearest_points(
+        return self.map_nearest_points(
             points_df=building_centroids,
             id_column="building_id",
             output_prefix="nearest_ms_building",
+            overwrite=overwrite,
             **kwargs,
         )
-        self._update_view(mapped_data)
-        return self.view
 
     def map_zonal_stats(
         self,
-        data: Union[List[TifProcessor], gpd.GeoDataFrame],
+        data: Union[TifProcessor, List[TifProcessor], gpd.GeoDataFrame],
         stat: str = "mean",
         map_radius_meters: Optional[float] = None,
         output_column: str = "zonal_stat",
         value_column: Optional[str] = None,
         predicate: Literal["intersects", "within", "fractional"] = "intersects",
+        overwrite: bool = False,
         **kwargs,
     ) -> pd.DataFrame:
-        """Enriches POIs with zonal statistics from raster, point, or polygon data.
-
-        Operates in four modes:
-        1. Raster point sampling: Samples values at exact POI locations.
-        2. Raster zonal stats: Calculates stats within circular POI buffers.
-        3. Point aggregation: Counts points (`value_column=None`) or aggregates
-           `value_column` values within POI buffers.
-        4. Polygon aggregation: Aggregates polygon data within POI buffers.
+        """Enrich POIs with zonal statistics from raster, point, or polygon data and update ``self.view``.
 
         Args:
             data: Data source (TifProcessor(s) or GeoDataFrame).
@@ -505,99 +444,45 @@ class PoiViewGenerator:
                 directly at point locations (raster only).
             output_column: Destination column name. Defaults to "zonal_stat".
             value_column: Target column for point or polygon aggregation.
-            predicate: Spatial relationship for aggregation.
-                Defaults to "intersects".
-            **kwargs: Extra parameters for sampling or aggregation.
+            predicate: Spatial relationship for aggregation. Defaults to "intersects".
+            overwrite: If True, replaces an existing column in the view.
+            **kwargs: Extra parameters for raster sampling.
 
         Returns:
-            The calculated results as a DataFrame with 'poi_id'.
-
-        Raises:
-            ValueError: If inputs are invalid or incomplete for the chosen mode.
+            The updated POI view DataFrame.
         """
+        self._validate_output_columns([output_column], overwrite=overwrite)
 
-        raster_processor: Optional[TifProcessor] = None
+        if isinstance(data, TifProcessor) or (
+            isinstance(data, list) and all(isinstance(x, TifProcessor) for x in data)
+        ):
+            return self.map_rasters(
+                raster_data=data,
+                stat=stat,
+                output_column=output_column,
+                map_radius_meters=map_radius_meters,
+                overwrite=overwrite,
+                **kwargs,
+            )
 
-        if isinstance(data, TifProcessor):
-            raster_processor = data
-        elif isinstance(data, list) and all(isinstance(x, TifProcessor) for x in data):
-            if not data:
-                self.logger.info("No valid raster data provided")
-                return self.view
-
-            if len(data) > 1:
-                all_source_paths = [tp.dataset_path for tp in data]
-
-                self.logger.info(
-                    f"Merging {len(all_source_paths)} rasters into a single TifProcessor for zonal statistics."
-                )
-                raster_processor = TifProcessor(
-                    dataset_path=all_source_paths,
-                    data_store=self.data_store,
-                    **kwargs,
-                )
-            else:
-                raster_processor = data[0]
-
-        if raster_processor:
-            results_df = pd.DataFrame({"poi_id": self.points_gdf["poi_id"]})
-            raster_crs = raster_processor.crs
-
-            if map_radius_meters is not None:
-                self.logger.info(
-                    f"Calculating {stat} within {map_radius_meters}m buffers around POIs"
-                )
-                # Create buffers around POIs
-                buffers_gdf = buffer_geodataframe(
-                    self.points_gdf,
-                    buffer_distance_meters=map_radius_meters,
-                    cap_style="round",
-                )
-
-                # Calculate zonal statistics
-                sampled_values = raster_processor.sample_by_polygons(
-                    polygon_list=buffers_gdf.to_crs(raster_crs).geometry,
-                    stat=stat,
-                )
-            else:
-                self.logger.info(f"Sampling {stat} at POI locations")
-                # Sample directly at POI locations
-                coord_list = (
-                    self.points_gdf.to_crs(raster_crs).get_coordinates().to_numpy()
-                )
-                sampled_values = raster_processor.sample_by_coordinates(
-                    coordinate_list=coord_list, **kwargs
-                )
-
-            results_df[output_column] = sampled_values
-
-        elif isinstance(data, gpd.GeoDataFrame):
-            # Handle polygon data
+        if isinstance(data, gpd.GeoDataFrame):
             if data.empty:
-                self.logger.info("No valid GeoDataFrame data provided")
-                return pd.DataFrame(
-                    columns=["poi_id", output_column]
-                )  # Return empty DataFrame
+                self.logger.warning("No valid GeoDataFrame data provided")
+                is_count = stat == "count" or (
+                    value_column is None
+                    and (data.geom_type.empty or any(data.geom_type.isin(["MultiPoint", "Point"])))
+                )
+                return self._fill_empty_columns(
+                    {output_column: 0 if is_count else np.nan},
+                    overwrite=overwrite,
+                )
 
             if map_radius_meters is None:
                 raise ValueError(
-                    "map_radius_meters must be provided for for GeoDataFrame data"
+                    "map_radius_meters must be provided for GeoDataFrame data"
                 )
-
-            # Create buffers around POIs
-            buffer_gdf = buffer_geodataframe(
-                self.points_gdf[["poi_id", "geometry"]],
-                buffer_distance_meters=map_radius_meters,
-                cap_style="round",
-            )
 
             if any(data.geom_type.isin(["MultiPoint", "Point"])):
-
-                self.logger.info(
-                    f"Aggregating point data within {map_radius_meters}m buffers around POIs using predicate '{predicate}'"
-                )
-
-                # If no value_column, default to 'count'
                 if value_column is None:
                     actual_stat = "count"
                     self.logger.warning(
@@ -610,531 +495,77 @@ class PoiViewGenerator:
                             f"Value column '{value_column}' not found in input GeoDataFrame."
                         )
 
-                aggregation_result_gdf = aggregate_points_to_zones(
+                return self.map_points(
                     points=data,
-                    zones=buffer_gdf,
                     value_columns=value_column,
                     aggregation=actual_stat,
-                    point_zone_predicate=predicate,  # can't be `fractional``
-                    zone_id_column="poi_id",
-                    output_suffix="",
-                    drop_geometry=True,
-                )
-
-                output_col_from_agg = (
-                    value_column if value_column is not None else "point_count"
-                )
-
-            else:
-                if value_column is None:
-                    raise ValueError(
-                        "value_column must be provided for polygon data aggregation."
-                    )
-                if value_column not in data.columns:
-                    raise ValueError(
-                        f"Value column '{value_column}' not found in input GeoDataFrame."
-                    )
-                self.logger.info(
-                    f"Aggregating polygon data within {map_radius_meters}m buffers around POIs using predicate '{predicate}'"
-                )
-
-                # Aggregate polygons to buffers
-                aggregation_result_gdf = aggregate_polygons_to_zones(
-                    polygons=data,
-                    zones=buffer_gdf,
-                    value_columns=value_column,
-                    aggregation=stat,
                     predicate=predicate,
-                    zone_id_column="poi_id",
-                    output_suffix="",
-                    drop_geometry=True,
+                    output_column=output_column,
+                    map_radius_meters=map_radius_meters,
+                    overwrite=overwrite,
                 )
 
-                output_col_from_agg = value_column
-
-            results_df = aggregation_result_gdf[["poi_id", output_col_from_agg]]
-
-            if output_column != "zonal_stat":
-                results_df = results_df.rename(
-                    columns={output_col_from_agg: output_column}
-                )
-
-        else:
-            raise ValueError(
-                "data must be either a list of TifProcessor objects or a GeoDataFrame"
-            )
-
-        # self._update_view(results_df) # Removed direct view update
-        self.logger.info(
-            f"Zonal statistics mapping complete for column(s) derived from '{output_column}' or '{value_column}'"
-        )
-        return results_df  # Return the DataFrame
-
-    def map_built_s(
-        self,
-        map_radius_meters: float = 150,
-        stat: str = "sum",
-        dataset_year=2020,
-        dataset_resolution=100,
-        output_column="built_surface_m2",
-        handler: Optional[GHSLDataHandler] = None,
-        **kwargs,
-    ) -> pd.DataFrame:
-        """Maps GHSL Built Surface (GHS_BUILT_S) data to POIs.
-
-        Enriches POIs with the estimated built surface area within a buffer.
-
-        Args:
-            map_radius_meters: Buffer distance in meters. Defaults to 150.
-            stat: Agregation statistic. Defaults to "sum".
-            dataset_year: Year of GHSL data to use. Defaults to 2020.
-            dataset_resolution: Resolution in meters. Defaults to 100.
-            output_column: Output column name. Defaults to "built_surface_m2".
-            handler: Optional pre-configured GHSLDataHandler.
-            **kwargs: Extra arguments for GHSLDataHandler.
-
-        Returns:
-            The updated POI view DataFrame.
-        """
-        self.logger.info("Mapping GHSL Built Surface data to POIs")
-        handler = handler or GHSLDataHandler(
-            product="GHS_BUILT_S",
-            year=dataset_year,
-            resolution=dataset_resolution,
-            data_store=self.data_store,
-            **kwargs,
-        )
-        self.logger.info("Loading GHSL Built Surface raster tiles")
-        tif_processors = handler.load_data(
-            self.points_gdf.copy(),
-            ensure_available=self.config.ensure_available,
-            merge_rasters=True,
-            **handler.select_options(kwargs),
-        )
-
-        mapped_data = self.map_zonal_stats(
-            data=tif_processors,
-            stat=stat,
-            map_radius_meters=map_radius_meters,
-            output_column=output_column,
-            **kwargs,
-        )
-        self._update_view(mapped_data)
-        return self.view
-
-    def map_smod(
-        self,
-        stat="median",
-        dataset_year=2020,
-        dataset_resolution=1000,
-        output_column="smod_class",
-        handler: Optional[GHSLDataHandler] = None,
-        **kwargs,
-    ) -> pd.DataFrame:
-        """Maps GHSL Settlement Model (SMOD) data to the POIs.
-
-        Samples the SMOD class value at each POI's location.
-
-        Args:
-            stat: Aggregation statistic. Defaults to "median".
-            dataset_year: Year of GHSL data. Defaults to 2020.
-            dataset_resolution: Resolution in meters. Defaults to 1000.
-            output_column: Output column name. Defaults to "smod_class".
-            handler: Optional pre-configured GHSLDataHandler.
-            **kwargs: Extra arguments for GHSLDataHandler.
-
-        Returns:
-            The updated POI view DataFrame.
-        """
-        self.logger.info("Mapping GHSL Settlement Model (SMOD) data to POIs")
-        handler = handler or GHSLDataHandler(
-            product="GHS_SMOD",
-            year=dataset_year,
-            resolution=dataset_resolution,
-            data_store=self.data_store,
-            coord_system=54009,
-            **kwargs,
-        )
-
-        self.logger.info("Loading GHSL SMOD raster tiles")
-        tif_processors = handler.load_data(
-            self.points_gdf.copy(),
-            ensure_available=self.config.ensure_available,
-            merge_rasters=True,
-            **handler.select_options(kwargs),
-        )
-
-        mapped_data = self.map_zonal_stats(
-            data=tif_processors,
-            stat=stat,
-            output_column=output_column,
-            **kwargs,
-        )
-        self._update_view(mapped_data)
-        return self.view
-
-    def map_wp_pop(
-        self,
-        country: Union[str, List[str]],
-        map_radius_meters: float,
-        resolution=1000,
-        predicate: Literal[
-            "centroid_within", "intersects", "fractional", "within"
-        ] = "intersects",
-        output_column: str = "population",
-        handler: Optional[WPPopulationHandler] = None,
-        **kwargs,
-    ):
-        """Maps WorldPop population data to POIs.
-
-        Enriches POIs with statistical population counts within a specified
-        buffer radius.
-
-        Args:
-            country: ISO country code or list of codes to process.
-            map_radius_meters: Buffer distance in meters around each POI.
-            resolution: Dataset resolution in meters. Defaults to 1000.
-            predicate: Spatial relationship for aggregation.
-                Defaults to "intersects".
-            output_column: Destination column name. Defaults to "population".
-            handler: Optional pre-configured WPPopulationHandler.
-            **kwargs: Extra arguments for WPPopulationHandler.
-
-        Returns:
-            The updated POI view DataFrame.
-
-        Raises:
-            ValueError: If 'age_structures' project is used with multiple
-                countries simultaneously.
-        """
-        # Ensure country is always a list for consistent handling
-        countries_list = [country] if isinstance(country, str) else country
-
-        handler = handler or WPPopulationHandler(
-            resolution=resolution,
-            data_store=self.data_store,
-            **kwargs,
-        )
-
-        # Force statistic based on project type: categorical data (DU) use median, population counts use sum.
-        stat = "median" if handler.config.project == "degree_of_urbanization" else "sum"
-
-        # Restrict to single country for age_structures project
-        if handler.config.project == "age_structures" and len(countries_list) > 1:
-            raise ValueError(
-                "For 'age_structures' project, only a single country can be processed at a time."
-            )
-
-        self.logger.info(
-            f"Mapping WorldPop Population data (year: {handler.config.year}, resolution: {handler.config.resolution}m)"
-        )
-
-        if predicate == "fractional" and handler.config.resolution == 100:
-            self.logger.warning(
-                "Fractional aggregations only supported for datasets with 1000m resolution. Using `intersects` as predicate"
-            )
-            predicate = "intersects"
-
-        data_to_process: Union[List[TifProcessor], gpd.GeoDataFrame, pd.DataFrame]
-
-        if predicate == "centroid_within":
-            if handler.config.project == "age_structures":
-                # Single country enforced above
-                iso = countries_list[0]
-                raw = handler.load_data(
-                    iso,
-                    ensure_available=self.config.ensure_available,
-                    **handler.select_options(kwargs),
-                )
-                all_tif_processors = self._ensure_tif_list(raw)
-
-                # Sum results from each tif_processor separately
-                summed_results_by_poi = {
-                    poi_id: 0.0 for poi_id in self.points_gdf["poi_id"].unique()
-                }
-
-                self.logger.info(
-                    f"Sampling individual age_structures rasters using '{stat}' statistic and summing results per POI."
-                )
-                for tif_processor in all_tif_processors:
-                    single_raster_df = self.map_zonal_stats(
-                        data=tif_processor,
-                        stat=stat,
-                        map_radius_meters=map_radius_meters,
-                        value_column="pixel_value",
+            if value_column is None:
+                if stat == "count":
+                    return self.map_polygons(
+                        polygons=data,
+                        value_columns=None,
+                        aggregation="count",
                         predicate=predicate,
-                        output_column=output_column,  # This output_column will be in the temporary DF
-                        **kwargs,
+                        output_column=output_column,
+                        map_radius_meters=map_radius_meters,
+                        overwrite=overwrite,
                     )
-                    # Add values from this single raster to the cumulative sum
-                    for _, row in single_raster_df.iterrows():
-                        summed_results_by_poi[row["poi_id"]] += row[output_column]
-
-                # Convert the summed dictionary back to a DataFrame
-                data_to_process = pd.DataFrame(
-                    list(summed_results_by_poi.items()),
-                    columns=["poi_id", output_column],
+                raise ValueError(
+                    "value_column must be provided for polygon data aggregation."
                 )
 
-            else:
-                # Non age_structures: flat list across all countries
-                tif_processors: List[TifProcessor] = []
-                for iso in countries_list:
-                    raw = handler.load_data(
-                        iso,
-                        ensure_available=self.config.ensure_available,
-                        **handler.select_options(kwargs),
-                    )
-                    tif_processors.extend(self._ensure_tif_list(raw))
-
-                data_to_process = (
-                    tif_processors  # List[TifProcessor] for map_zonal_stats
+            if value_column not in data.columns:
+                raise ValueError(
+                    f"Value column '{value_column}' not found in input GeoDataFrame."
                 )
 
-        # Polygon‑based path
-        else:
-            # 'data_to_process' will be a GeoDataFrame
-            data_to_process = pd.concat(
-                [
-                    handler.load_into_geodataframe(
-                        c, ensure_available=self.config.ensure_available, **kwargs
-                    )
-                    for c in countries_list  # Original iteration over countries_list
-                ],
-                ignore_index=True,
-            )
-
-        self.logger.info(
-            f"Mapping WorldPop Population data into {map_radius_meters}m zones around POIs using '{stat}' statistic"
-        )
-
-        final_mapped_df: pd.DataFrame
-
-        # Dispatch based on data_to_process type
-        if (
-            isinstance(data_to_process, pd.DataFrame)
-            and output_column in data_to_process.columns
-            and "poi_id" in data_to_process.columns
-        ):
-            final_mapped_df = data_to_process  # Pre‑summed from age_structures branch
-        else:
-            # List of TifProcessor, GDF, or DF – let map_zonal_stats handle
-            final_mapped_df = self.map_zonal_stats(
-                data=data_to_process,
-                stat=stat,
-                map_radius_meters=map_radius_meters,
-                value_column="pixel_value",
+            return self.map_polygons(
+                polygons=data,
+                value_columns=value_column,
+                aggregation=stat,
                 predicate=predicate,
                 output_column=output_column,
-                **kwargs,
+                map_radius_meters=map_radius_meters,
+                overwrite=overwrite,
             )
 
-        self._update_view(final_mapped_df)
-        return self.view
+        raise ValueError(
+            "data must be either a list of TifProcessor objects or a GeoDataFrame"
+        )
 
-    def map_aqueduct_flood_hazard(
+    def _resolve_building_files(
         self,
-        handler=None,
-        return_period: str = "rp00100",
-        flood_type: str = "inunriver",
-        climate_scenario: str = "historical",
-        year: str = "1980",
-        model: Optional[str] = "000000000WATCH",
-        subsidence: Optional[str] = None,
-        projection: Optional[str] = None,
-        buffer_meters: float = 500,
-        output_column: Optional[str] = None,
+        country: str,
+        handler: Optional["GoogleMSBuildingsHandler"],
+        ensure_available: Optional[bool],
         **kwargs,
-    ) -> pd.DataFrame:
-        """Maps WRI Aqueduct 3.0 flood hazard depth to POIs.
-
-        Loads the corresponding global Aqueduct raster and samples the mean
-        flood inundation depth within a circular buffer around each POI
-        using :meth:`map_zonal_stats`.
-
-        Args:
-            handler: Optional pre-built :class:`~gigaspatial.handlers.wri.AqueductFloodHandler`.
-                If provided, it overrides other hazard parameters.
-            return_period: Return-period key, e.g. ``"rp00100"``.
-                Defaults to ``"rp00100"``.
-            flood_type: Flood type — ``"inunriver"`` (riverine) or
-                ``"inuncoast"`` (coastal). Defaults to ``"inunriver"``.
-            climate_scenario: Climate scenario — ``"historical"``, ``"rcp4p5"``,
-                or ``"rcp8p5"``. Defaults to ``"historical"``.
-            year: Reference year. Defaults to ``"1980"``.
-            model: *Riverine only.* GCM model token (e.g. ``"000000000WATCH"``).
-            subsidence: *Coastal only.* Subsidence assumption — ``"nosub"`` or ``"wtsub"``.
-            projection: *Coastal only.* Projection percentile — ``"0"``, ``"0_perc_05"``,
-                or ``"0_perc_50"``.
-            buffer_meters: Sampling buffer radius in metres. Mean flood depth
-                within this circle is used as the POI value. Defaults to 500.
-            output_column: Optional column name. If ``None``, the filename
-                (without extension) plus ``_meters`` is used.
-            **kwargs: Forwarded to the handler's ``load_data`` call.
-
-        Returns:
-            The updated POI view DataFrame.
-        """
-        from gigaspatial.handlers.wri import AqueductFloodHandler
-
-        h = handler or AqueductFloodHandler(
-            flood_type=flood_type,
-            climate_scenario=climate_scenario,
-            year=year,
-            return_period=return_period,
-            model=model,
-            subsidence=subsidence,
-            projection=projection,
-            data_store=self.data_store,
-        )
-
-        self.logger.info(
-            f"Mapping WRI Aqueduct flood hazard to POIs ({h.config.DATASET_URL})"
-        )
-
-        # Load the raster
-        tif = h.load_data(
-            self.points_gdf,
-            ensure_available=self.config.ensure_available,
-            **kwargs,
-        )
-
-        if not tif:
-            self.logger.warning("Could not load Aqueduct raster; skipping.")
-            return self.view
-
-        # Determine column name
-        col = output_column or (
-            h.config._get_filename().replace(".tif", "") + "_meters"
-        )
-
-        self.logger.info(f"Sampling flood depth into column: {col}")
-        mapped = self.map_zonal_stats(
-            data=tif,
-            stat="mean",
-            map_radius_meters=buffer_meters,
-            output_column=col,
-        )
-        self._update_view(mapped)
-
-        self.logger.info("Flood hazard mapping complete.")
-        return self.view
-
-    def save_view(
-        self,
-        name: str,
-        output_format: Optional[str] = None,
-    ) -> Path:
-        """Saves the current POI view (the enriched DataFrame) to a file.
-
-        The output path and format are determined by the `config` or
-        overridden by the `output_format` parameter.
-
-        Args:
-            name: The base name for the output file (without extension).
-            output_format: The desired output format (e.g., "csv", "geojson").
-                If None, the format from `config` will be used.
-
-        Returns:
-            The full path to the saved output file.
-        """
-        format_to_use = output_format or self.config.output_format
-        output_path = self.config.base_path / f"{name}.{format_to_use}"
-
-        self.logger.info(f"Saving POI view to {output_path}")
-        # Save the current view, which is a pandas DataFrame, not a GeoDataFrame
-        # GeoJSON/Shapefile formats would require converting back to GeoDataFrame first.
-        # For CSV, Parquet, Feather, this is fine.
-        if format_to_use in ["geojson", "shp", "gpkg"]:
-            self.logger.warning(
-                f"Saving to {format_to_use} requires converting back to GeoDataFrame. Geometry column will be re-added."
-            )
-            # Re-add geometry for saving to geospatial formats
-            view_to_save_gdf = self.view.merge(
-                self.points_gdf[["poi_id", "geometry"]], on="poi_id", how="left"
-            )
-            write_dataset(
-                data=view_to_save_gdf,
-                path=str(output_path),
-                data_store=self.data_store,
-            )
-        else:
-            write_dataset(
-                data=self.view,  # Use the internal _view DataFrame
-                path=str(output_path),
-                data_store=self.data_store,
+    ) -> tuple["GoogleMSBuildingsHandler", List[Path]]:
+        if handler is None:
+            from gigaspatial.handlers.google_ms_combined_buildings import (
+                GoogleMSBuildingsHandler,
             )
 
-        return output_path
+            handler = GoogleMSBuildingsHandler(
+                partition_strategy="s2_grid", data_store=self.data_store
+            )
 
-    def to_dataframe(self) -> pd.DataFrame:
-        """Returns the current POI view as a standard pandas DataFrame.
+        eff_ensure = self._resolve_ensure_available(ensure_available)
+        if eff_ensure:
+            if not handler.ensure_data_available(country, **kwargs):
+                raise RuntimeError(
+                    f"Could not ensure Google/Microsoft building data availability for '{country}'."
+                )
 
-        Returns:
-            The current enriched view.
-        """
-        return self.view
-
-    def to_geodataframe(self) -> gpd.GeoDataFrame:
-        """Returns the current POI view merged with original point geometries.
-
-        Returns:
-            The current view merged with point geometries as a GeoDataFrame.
-        """
-        return gpd.GeoDataFrame(
-            self.view.merge(
-                self.points_gdf[["poi_id", "geometry"]], on="poi_id", how="left"
-            ),
-            crs="EPSG:4326",
+        building_files = handler.reader.resolve_source_paths(
+            country, **handler.select_options(kwargs, handler.config)
         )
-
-    def chain_operations(self, operations: List[dict]) -> "PoiViewGenerator":
-        """Executes multiple mapping operations in sequence for fluent configuration.
-
-        Args:
-            operations: A list of dictionaries, each with 'method' (str)
-                and 'kwargs' (dict).
-
-        Returns:
-            The instance itself (self) for method chaining.
-
-        Raises:
-            AttributeError: If a specified method does not exist on the generator.
-
-        Example:
-            generator.chain_operations([
-                {'method': 'map_google_buildings', 'kwargs': {}},
-                {'method': 'map_built_s', 'kwargs': {'map_radius_meters': 200}},
-            ])
-        """
-        for op in operations:
-            method_name = op["method"]
-            kwargs = op.get("kwargs", {})
-            if hasattr(self, method_name):
-                getattr(self, method_name)(**kwargs)
-            else:
-                raise AttributeError(f"Method {method_name} not found")
-        return self
-
-    def validate_data_coverage(self, data_bounds: gpd.GeoDataFrame) -> dict:
-        """Calculates statistics on how many POIs are covered by the data area.
-
-        Args:
-            data_bounds: A GeoDataFrame representing the spatial extent of
-                the target dataset.
-
-        Returns:
-            A dictionary with 'total_pois', 'covered_pois',
-            'coverage_percentage', and 'uncovered_pois'.
-        """
-        poi_within = self.points_gdf.within(data_bounds.union_all())
-        coverage_stats = {
-            "total_pois": len(self.points_gdf),
-            "covered_pois": poi_within.sum(),
-            "coverage_percentage": (poi_within.sum() / len(self.points_gdf)) * 100,
-            "uncovered_pois": (~poi_within).sum(),
-        }
-        return coverage_stats
+        return handler, building_files
 
     def find_nearest_buildings(
         self,
@@ -1142,30 +573,28 @@ class PoiViewGenerator:
         search_radius: float = 1000,
         find_nearest_globally: bool = False,
         handler: Optional["GoogleMSBuildingsHandler"] = None,
+        ensure_available: Optional[bool] = None,
+        overwrite: bool = False,
         **kwargs,
     ) -> pd.DataFrame:
-        """Finds the nearest building to each POI within a search radius.
-
-        Args:
-            country: ISO country code for building data.
-            search_radius: Maximum search distance in meters. Defaults to 1000.
-            find_nearest_globally: If True, searches across all neighboring countries.
-                Defaults to False.
-            handler: Optional pre-configured GoogleMSBuildingsHandler.
-            **kwargs: Extra parameters for building handlers.
-
-        Returns:
-            A DataFrame with nearest building IDs and distances for each POI.
-        """
-
+        """Find the nearest building to each POI within a search radius and update ``self.view``."""
         if find_nearest_globally:
             self.logger.info(
                 "Global nearest building search enabled. "
                 "This may be slower than radius-limited search."
             )
             return self._find_nearest_building_globally(
-                country=country, handler=handler, **kwargs
+                country=country,
+                handler=handler,
+                ensure_available=ensure_available,
+                overwrite=overwrite,
+                **kwargs,
             )
+
+        within_col = f"building_within_{search_radius}m"
+        self._validate_output_columns(
+            ["nearest_building_distance_m", within_col], overwrite=overwrite
+        )
 
         if search_radius > 5000:
             self.logger.warning(
@@ -1177,35 +606,21 @@ class PoiViewGenerator:
             f"Mapping combined buildings data to POIs within {search_radius}m"
         )
 
-        if handler is None:
-            from gigaspatial.handlers.google_ms_combined_buildings import (
-                GoogleMSBuildingsHandler,
-            )
-
-            handler = GoogleMSBuildingsHandler(
-                partition_strategy="s2_grid", data_store=self.data_store
-            )
-
-        if self.config.ensure_available:
-            if not handler.ensure_data_available(country, **kwargs):
-                self.logger.warning(
-                    "No Google/Microsoft building data available for %s; "
-                    "returning empty POI–building mapping.",
-                    country,
-                )
-                empty_df = pd.DataFrame(
-                    {
-                        "poi_id": self.points_gdf.index,
-                        "nearest_building_distance_m": np.nan,
-                        f"building_within_{search_radius}m": False,
-                    }
-                )
-                self._update_view(empty_df)
-                return self.view
-
-        building_files = handler.reader.resolve_source_paths(
-            country, **handler.select_options(kwargs, handler.config)
+        handler, building_files = self._resolve_building_files(
+            country=country,
+            handler=handler,
+            ensure_available=ensure_available,
+            **kwargs,
         )
+        if not building_files:
+            self.logger.warning(
+                "No Google/Microsoft building files found for %s; filling empty mapping.",
+                country,
+            )
+            return self._fill_empty_columns(
+                {"nearest_building_distance_m": np.nan, within_col: False},
+                overwrite=overwrite,
+            )
 
         result = GoogleMSBuildingsEngine.nearest_buildings_to_pois(
             handler=handler,
@@ -1220,54 +635,44 @@ class PoiViewGenerator:
             {
                 "poi_id": result.distances_m.index,
                 "nearest_building_distance_m": distances_clean,
-                f"building_within_{search_radius}m": result.distances_m
-                <= search_radius,
+                within_col: result.distances_m <= search_radius,
             }
         )
 
-        self._update_view(result_df)
-        return self.view
+        return self._update_view(result_df, overwrite=overwrite)
 
     def _find_nearest_building_globally(
         self,
         country: str,
         max_global_search: float = 10000,
         handler: Optional["GoogleMSBuildingsHandler"] = None,
+        ensure_available: Optional[bool] = None,
+        overwrite: bool = False,
         **kwargs,
     ) -> pd.DataFrame:
         """Find the true nearest building for each POI using progressive expansion."""
+        within_col = f"building_within_{max_global_search}m"
+        self._validate_output_columns(
+            ["nearest_building_distance_m", within_col], overwrite=overwrite
+        )
 
         self.logger.info("Starting global nearest building search...")
 
-        if handler is None:
-            from gigaspatial.handlers.google_ms_combined_buildings import (
-                GoogleMSBuildingsHandler,
-            )
-
-            handler = GoogleMSBuildingsHandler(
-                partition_strategy="s2_grid", data_store=self.data_store
-            )
-
-        if self.config.ensure_available:
-            if not handler.ensure_data_available(country, **kwargs):
-                self.logger.warning(
-                    "No Google/Microsoft building data available for %s; "
-                    "returning empty POI–building mapping.",
-                    country,
-                )
-                empty_df = pd.DataFrame(
-                    {
-                        "poi_id": self.points_gdf.index,
-                        "nearest_building_distance_m": np.nan,
-                        f"building_within_{max_global_search}m": False,
-                    }
-                )
-                self._update_view(empty_df)
-                return self.view
-
-        building_files = handler.reader.resolve_source_paths(
-            country, **handler.select_options(kwargs, handler.config)
+        handler, building_files = self._resolve_building_files(
+            country=country,
+            handler=handler,
+            ensure_available=ensure_available,
+            **kwargs,
         )
+        if not building_files:
+            self.logger.warning(
+                "No Google/Microsoft building files found for %s; filling empty mapping.",
+                country,
+            )
+            return self._fill_empty_columns(
+                {"nearest_building_distance_m": np.nan, within_col: False},
+                overwrite=overwrite,
+            )
 
         if len(building_files) == 1:
             self.logger.info("Single file country: using single-file optimization.")
@@ -1286,8 +691,7 @@ class PoiViewGenerator:
                     "nearest_building_distance_m": result.distances_m.replace(
                         np.inf, np.nan
                     ),
-                    f"building_within_{max_global_search}m": result.distances_m
-                    <= max_global_search,
+                    within_col: result.distances_m <= max_global_search,
                 }
             )
 
@@ -1296,16 +700,16 @@ class PoiViewGenerator:
                 f"Single file search complete. Found {found_count}/{len(result_df)} POIs."
             )
 
-            self._update_view(result_df)
-            return self.view
+            return self._update_view(result_df, overwrite=overwrite)
 
         self.logger.info(
             f"Partitioned country: progressive expansion up to {max_global_search}m"
         )
 
         radii = [350, 1000, 2500, 5000, max_global_search]
-        remaining_poi_ids = set(self.points_gdf.poi_id)
-        global_results = pd.Series(np.inf, index=self.points_gdf.poi_id, dtype=float)
+        points_gdf = self.points_gdf
+        remaining_poi_ids = set(points_gdf.poi_id)
+        global_results = pd.Series(np.inf, index=points_gdf.poi_id, dtype=float)
         processed_tiles = set()
 
         for radius in radii:
@@ -1318,7 +722,7 @@ class PoiViewGenerator:
             )
 
             jobs = GoogleMSBuildingsEngine.create_partitioned_jobs_for_pois(
-                self.points_gdf,
+                points_gdf,
                 building_files,
                 search_radius_m=radius,
             )
@@ -1332,7 +736,7 @@ class PoiViewGenerator:
             temp_result = GoogleMSBuildingsEngine.nearest_buildings_to_pois(
                 handler=handler,
                 building_files=[f for f, _ in new_jobs],
-                pois_gdf=self.points_gdf,
+                pois_gdf=points_gdf,
                 search_radius_m=radius,
                 logger=self.logger,
             )
@@ -1359,8 +763,7 @@ class PoiViewGenerator:
             {
                 "poi_id": global_results.index,
                 "nearest_building_distance_m": global_results.replace(np.inf, np.nan),
-                f"building_within_{max_global_search}m": global_results
-                <= max_global_search,
+                within_col: global_results <= max_global_search,
             }
         )
 
@@ -1369,37 +772,4 @@ class PoiViewGenerator:
             f"Global search complete. Found buildings for {found_count}/{len(result_df)} POIs."
         )
 
-        self._update_view(result_df)
-        return self.view
-
-    @staticmethod
-    def _ensure_tif_list(obj) -> List["TifProcessor"]:
-        """
-        Normalize handler.load_data output into a flat list of TifProcessor.
-
-        - If obj is a single TifProcessor, wrap it in a list.
-        - If obj is an iterable of TifProcessor, return list(obj).
-        - If obj is None or empty, return [].
-        """
-        if obj is None:
-            return []
-        if isinstance(obj, TifProcessor):
-            return [obj]
-        if isinstance(obj, Iterable):
-            items = list(obj)
-            if not items:
-                return []
-            if isinstance(items[0], TifProcessor):
-                return items
-            # Flatten one level if nested (rare but safe)
-            flat: List[TifProcessor] = []
-            for it in items:
-                if isinstance(it, TifProcessor):
-                    flat.append(it)
-                elif isinstance(it, Iterable):
-                    flat.extend(list(it))
-            return flat
-        raise TypeError(
-            f"Unexpected type from load_data: {type(obj).__name__}; "
-            f"expected TifProcessor or iterable of TifProcessor."
-        )
+        return self._update_view(result_df, overwrite=overwrite)

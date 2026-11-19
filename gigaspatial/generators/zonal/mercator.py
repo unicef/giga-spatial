@@ -73,6 +73,7 @@ class MercatorViewGenerator(ZonalViewGenerator[T]):
         config: Optional[ZonalViewGeneratorConfig] = None,
         data_store: Optional[DataStore] = None,
         logger: logging.Logger = None,
+        ensure_available: bool = True,
     ):
 
         super().__init__(
@@ -81,6 +82,7 @@ class MercatorViewGenerator(ZonalViewGenerator[T]):
             config=config,
             data_store=data_store,
             logger=logger,
+            ensure_available=ensure_available,
         )
         self.logger.info(f"Initialized MercatorViewGenerator")
 
