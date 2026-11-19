@@ -37,7 +37,7 @@ view = PoiViewGenerator(schools, poi_id_column="giga_id_school").map_wp_pop(
     country="RWA",
     map_radius_meters=1000,
 )
-print(view[["giga_id_school", "population"]].head())
+print(view[["poi_id", "population"]].head())
 ```
 
 For school-age or under-18 population, pass WorldPop options such as `school_age=True` or `under_18=True` to `map_wp_pop`. See [Points and nearest buildings](points-and-buildings.md) to also attach the nearest building footprint to each school.
