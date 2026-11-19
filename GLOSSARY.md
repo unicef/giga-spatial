@@ -81,12 +81,16 @@ An operation that maps datasets onto points of interest or zones.
 _Avoid_: view
 
 **View**:
-Points of interest or zones with attributes from datasets attached. That attachment is enrichment.
-_Avoid_: generator, a loaded dataset
+A table of points of interest or zones keyed by their identifier column, with attributes from datasets attached and without geometry until exported as geospatial data. That attachment is enrichment.
+_Avoid_: generator, a loaded dataset, a GeoDataFrame
 
 **Enrichment**:
 The attachment of dataset attributes to points of interest or zones. The result is a view.
 _Avoid_: the name of the library, a dataset that has only been loaded
+
+**`id_column`**:
+The canonical identifier column that keys every row of a view (`poi_id` for points of interest, `zone_id` for zones) and aligns enriched dataset attributes back to their places.
+_Avoid_: index, row number, raw source identifier column
 
 **Point of interest**:
 A location analysed in its own right, such as a school, clinic, or cell site. A view attaches dataset attributes to points of interest.
