@@ -70,6 +70,8 @@ from gigaspatial.fetchers import MLabConfig, GEEConfig
     options:
       show_source: false
       members:
+        - get_latest_release
+        - get_available_releases
         - fetch_locations
 
 ## UNICEF

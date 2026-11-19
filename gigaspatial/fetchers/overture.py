@@ -1,5 +1,5 @@
 """
-Overture Maps Places theme data handler.
+Overture Maps Places theme fetcher.
 
 This module provides specialized tools for querying Overture Maps datasets via
 DuckDB's spatial and S3 extensions. It facilitates:
@@ -10,16 +10,15 @@ DuckDB's spatial and S3 extensions. It facilitates:
 """
 
 import geopandas as gpd
-from typing import List, Optional, Union, ClassVar
+from typing import Any, ClassVar, Dict, List, Optional, Union
 from pydantic.dataclasses import dataclass, Field
 from pydantic import ConfigDict
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.strtree import STRtree
 from pathlib import Path
-from urllib.request import urlopen
-from urllib.error import URLError, HTTPError
-import json
+from urllib.parse import urlparse
 import pycountry
+import requests
 
 try:
     import duckdb
@@ -38,12 +37,13 @@ class OvertureAmenityFetcher:
     """
     Fetch and process amenity locations from the Overture Places theme.
 
-    This handler queries the Overture Places GeoParquet on S3, filters by a
+    This fetcher queries the Overture Places GeoParquet on S3, filters by a
     country boundary, and returns a GeoDataFrame of point locations for the
     requested amenity categories.
 
     Attributes:
-        release: Overture release version (e.g., "2024-11-13.1").
+        release: Overture release version (e.g., "2026-11-18.0"), or "latest" / None
+            for automatic STAC catalog resolution.
         base_url: S3 pattern for the Places theme.
         country: ISO 3166-1 alpha-2 or alpha-3 country code.
         amenity_types: List of primary categories to retrieve.
@@ -54,13 +54,14 @@ class OvertureAmenityFetcher:
 
     # constants
     _STAC_CATALOG_URL: ClassVar[str] = "https://stac.overturemaps.org/catalog.json"
-    _DEFAULT_RELEASE: ClassVar[str] = "2026-06-17.0"  # fallback if S3 listing fails
+    _RELEASE_CALENDAR_URL: ClassVar[str] = "https://docs.overturemaps.org/release-calendar"
+    _DEFAULT_BASE_URL: ClassVar[str] = (
+        "s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
+    )
 
     release: Optional[str] = "latest"  # "latest" triggers auto-detection
 
-    base_url: Optional[str] = (
-        "s3://overturemaps-us-west-2/release/{release}/theme=places/*/*"
-    )
+    base_url: Optional[str] = _DEFAULT_BASE_URL
 
     # user config
     country: str = Field(...)
@@ -92,15 +93,69 @@ class OvertureAmenityFetcher:
                 self.release = self.get_latest_release()
                 self.logger.info(f"Resolved latest Overture release: {self.release}")
             except RuntimeError as e:
-                self.logger.warning(
-                    f"Could not determine latest Overture release ({e}); "
-                    f"falling back to {self._DEFAULT_RELEASE}"
+                raise RuntimeError(
+                    f"Could not resolve the latest Overture release from the STAC catalog ({e}). "
+                    f"Pass an explicit release= (e.g., release='2026-11-18.0'); "
+                    f"see {self._RELEASE_CALENDAR_URL}."
+                ) from e
+        else:
+            normalized_release = self._normalize_release(self.release)
+            if not normalized_release:
+                raise ValueError(
+                    "release must not be empty. Pass an explicit release "
+                    "(e.g., release='2026-11-18.0') or 'latest'."
                 )
-                self.release = self._DEFAULT_RELEASE
+            self.release = normalized_release
+            if self.base_url == self._DEFAULT_BASE_URL:
+                self._validate_release()
 
         self.base_url = self.base_url.format(release=self.release)
 
         self.connection = self._set_connection()
+
+    @staticmethod
+    def _normalize_release(release: Any) -> str:
+        """Normalize a release tag by trimming whitespace and trailing slashes."""
+        if not isinstance(release, str):
+            return ""
+        return release.strip().rstrip("/")
+
+    def _validate_release(self) -> None:
+        """Validate an explicit release against the Overture STAC catalog."""
+        try:
+            available = self.get_available_releases()
+        except RuntimeError as e:
+            self.logger.warning(
+                f"Could not validate Overture release '{self.release}' against STAC catalog ({e}); "
+                f"proceeding with '{self.release}'"
+            )
+            return
+
+        if self.release not in available:
+            raise ValueError(
+                f"Overture release '{self.release}' is not listed in the STAC catalog. "
+                f"Available releases: {', '.join(available)}. "
+                f"Overture keeps releases for only ~60 days; see {self._RELEASE_CALENDAR_URL}."
+            )
+
+    @classmethod
+    def _fetch_stac_catalog(cls, timeout: int = 20) -> Dict[str, Any]:
+        """Fetch and parse the root Overture STAC catalog JSON."""
+        try:
+            response = requests.get(cls._STAC_CATALOG_URL, timeout=timeout)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            raise RuntimeError(f"Failed to fetch Overture STAC catalog: {e}") from e
+
+        try:
+            catalog = response.json()
+        except ValueError as e:
+            raise RuntimeError(f"Failed to parse Overture STAC catalog: {e}") from e
+
+        if not isinstance(catalog, dict):
+            raise RuntimeError("Overture STAC catalog did not return a JSON object")
+
+        return catalog
 
     @classmethod
     def get_latest_release(cls, timeout: int = 20) -> str:
@@ -111,27 +166,68 @@ class OvertureAmenityFetcher:
             timeout: Request timeout in seconds.
 
         Returns:
-            The latest release string, e.g. "2026-06-17.0".
+            The latest release string, e.g. "2026-11-18.0".
 
         Raises:
             RuntimeError: If the catalog can't be fetched, parsed, or does
                 not contain a "latest" release entry.
         """
-        try:
-            with urlopen(cls._STAC_CATALOG_URL, timeout=timeout) as response:
-                catalog = json.load(response)
-        except (URLError, HTTPError) as e:
-            raise RuntimeError(f"Failed to fetch Overture STAC catalog: {e}")
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Failed to parse Overture STAC catalog: {e}")
-
-        release = catalog.get("latest")
-        if not release:
+        catalog = cls._fetch_stac_catalog(timeout=timeout)
+        normalized = cls._normalize_release(catalog.get("latest"))
+        if not normalized:
             raise RuntimeError(
                 "Overture STAC catalog did not return a 'latest' release"
             )
 
-        return release.rstrip("/")
+        return normalized
+
+    @classmethod
+    def get_available_releases(cls, timeout: int = 20) -> List[str]:
+        """
+        Query the Overture STAC catalog for all currently available releases.
+
+        Args:
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Release strings sorted newest-first, e.g. ``["2026-11-18.0", "2026-10-21.0"]``.
+
+        Raises:
+            RuntimeError: If the catalog can't be fetched, parsed, or contains
+                no available releases.
+        """
+        catalog = cls._fetch_stac_catalog(timeout=timeout)
+        releases = set()
+
+        links = catalog.get("links")
+        if isinstance(links, list):
+            for link in links:
+                if not isinstance(link, dict) or link.get("rel") != "child":
+                    continue
+                href = link.get("href")
+                if not isinstance(href, str):
+                    continue
+                segments = [s for s in urlparse(href).path.split("/") if s and s != "."]
+                if not segments:
+                    continue
+                if segments[-1].endswith(".json"):
+                    raw_candidate = segments[-2] if len(segments) >= 2 else ""
+                else:
+                    raw_candidate = segments[-1]
+                candidate = cls._normalize_release(raw_candidate)
+                if candidate and candidate != ".." and not candidate.endswith(".json"):
+                    releases.add(candidate)
+
+        normalized_latest = cls._normalize_release(catalog.get("latest"))
+        if normalized_latest:
+            releases.add(normalized_latest)
+
+        if not releases:
+            raise RuntimeError(
+                "Overture STAC catalog did not list any available releases"
+            )
+
+        return sorted(releases, reverse=True)
 
     def _set_connection(self):
         """
