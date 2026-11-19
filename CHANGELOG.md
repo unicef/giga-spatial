@@ -19,7 +19,22 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
--   **Unified `map_*` return types, view semantics, and column contracts (`gigaspatial/generators/_base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
+-   **Breaking change — Unified `map_*` return contract, view semantics, and column rules (`gigaspatial/generators/_base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
+    -   **Breaking for users relying on old return values:** all `map_*` methods on `PoiViewGenerator` and `ZonalViewGenerator` (including `map_google_buildings` and `map_ms_buildings`) now update and return `self.view` (`pd.DataFrame`); on empty spatial data they fill expected columns with `0` (counts), `False` (boolean flags), or `NaN` (continuous/categorical stats, IDs, distances, areas) instead of returning early or returning other shapes (`dict`, detached `pd.DataFrame`, `gpd.GeoDataFrame`, or `None`).
+    -   **Migration:** stop passing `ZonalViewGenerator.map_points`/`map_polygons`/`map_rasters` outputs into `add_variable_to_view(...)`, read enriched columns from the returned `view` (calling `to_geodataframe()` if you need geometries), and check target columns for `0`/`False`/`NaN` instead of checking for `None` or an alternate return type:
+
+        ```python
+        # Before
+        counts = zones.map_points(schools)              # returned dict
+        zones.add_variable_to_view(counts, "schools")
+        bldg_gdf = zones.map_ms_buildings()             # returned GeoDataFrame
+
+        # After
+        view = zones.map_points(schools, output_column="schools")  # updates & returns zones.view
+        view = zones.map_ms_buildings()                            # updates & returns zones.view (0/NaN if empty)
+        bldg_gdf = zones.to_geodataframe()                         # attach geometries when needed
+        ```
+
     -   `ZonalViewGenerator.map_points`, `map_polygons`, and `map_rasters` now update `self._view` and return `self.view` (`pd.DataFrame`) instead of returning raw `dict` mappings (and `ZonalViewGenerator.map_ms_buildings` return type changed from `gpd.GeoDataFrame` to `pd.DataFrame`).
     -   `PoiViewGenerator.map_zonal_stats` and `PoiViewGenerator.map_nearest_points` now update `self._view` and return `self.view` (`pd.DataFrame`) instead of returning detached `pd.DataFrame` instances without updating `self.view`.
     -   `map_google_buildings` and `map_ms_buildings` on both `PoiViewGenerator` and `ZonalViewGenerator` now populate target columns (`0` for counts, `np.nan` for IDs, distances, and areas) and return `self.view` (`pd.DataFrame`) when loaded building data is empty, instead of returning `self.points_gdf.copy()`, `self._zone_gdf.copy()`, or an un-updated view.

@@ -1,6 +1,6 @@
 # Generators
 
-A generator maps datasets onto points of interest or zones. The result is a view: a geometry-free table keyed by `poi_id` or `zone_id` with dataset attributes attached. Call `.to_geodataframe()` when you want geometries re-attached.
+A generator maps datasets onto points of interest or zones. The result is a view: a geometry-free table keyed by `poi_id` or `zone_id` with dataset attributes attached. Every `map_*` method on `PoiViewGenerator` and `ZonalViewGenerator` (including `map_google_buildings` and `map_ms_buildings`) updates and returns `self.view`, filling expected columns with `0`, `False`, or `NaN` when loaded spatial data is empty. Call `.to_geodataframe()` when you want geometries re-attached.
 
 ```python
 from gigaspatial import (
