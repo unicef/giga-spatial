@@ -6,20 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
--   **Shared internal `BaseViewGenerator` and unified enrichment interface (`gigaspatial/generators/_base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
+-   **Shared internal `BaseViewGenerator` and unified enrichment interface (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
     -   Extracted internal `BaseViewGenerator` and `BaseViewGeneratorConfig` (not exported publicly) and migrated `PoiViewGenerator` and `ZonalViewGenerator` onto it.
     -   Made `map_points`, `map_polygons`, `map_rasters`, `map_wp_pop`, `map_ghsl`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_rwi`, `map_aqueduct_flood_hazard`, `add_variable_to_view`, `chain_operations`, and `validate_data_coverage` available uniformly on both `PoiViewGenerator` and `ZonalViewGenerator`.
     -   Added `ensure_available: bool = True` directly to generator constructors (`PoiViewGenerator`, `ZonalViewGenerator`, `AdminBoundariesViewGenerator`, `H3ViewGenerator`, `MercatorViewGenerator`, `S2ViewGenerator`) with per-call `ensure_available=` overrides on dataset `map_*` methods and `find_nearest_buildings`.
     -   Added `overwrite: bool = False` across all `map_*` methods and `add_variable_to_view`.
     -   Simplified `save_view(path, include_geometry=None, **kwargs)` to accept a destination file path directly, delegate format handling to `write_dataset`, and attach geometries automatically for `.geojson`, `.gpkg`, and `.shp` (or when `include_geometry=True`).
--   **Optional handler injection on view generators (`gigaspatial/generators/_base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
+-   **Optional handler injection on view generators (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
     -   Added an optional `handler=None` parameter to dataset `map_*` methods (`map_wp_pop`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_ghsl`, `map_buildings`, `map_rwi`, `map_aqueduct_flood_hazard`) and `PoiViewGenerator.find_nearest_buildings` without altering default behavior when `handler` is omitted.
 -   **Native polygon counting in `aggregate_polygons_to_zones` (`gigaspatial/processing/geo.py`)**
     -   Added support for `value_columns=None` with `aggregation="count"` (producing `"polygon_count"`, `output_suffix`, or an explicit `output_column`) across `intersects`, `within`, and `fractional` predicates.
 
 ### Changed
 
--   **Breaking change — Unified `map_*` return contract, view semantics, and column rules (`gigaspatial/generators/_base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
+-   **Breaking change — Unified `map_*` return contract, view semantics, and column rules (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
     -   **Breaking for users relying on old return values:** all `map_*` methods on `PoiViewGenerator` and `ZonalViewGenerator` (including `map_google_buildings` and `map_ms_buildings`) now update and return `self.view` (`pd.DataFrame`); on empty spatial data they fill expected columns with `0` (counts), `False` (boolean flags), or `NaN` (continuous/categorical stats, IDs, distances, areas) instead of returning early or returning other shapes (`dict`, detached `pd.DataFrame`, `gpd.GeoDataFrame`, or `None`).
     -   **Migration:** stop passing `ZonalViewGenerator.map_points`/`map_polygons`/`map_rasters` outputs into `add_variable_to_view(...)`, read enriched columns from the returned `view` (calling `to_geodataframe()` if you need geometries), and check target columns for `0`/`False`/`NaN` instead of checking for `None` or an alternate return type:
 
@@ -50,11 +50,11 @@ All notable changes to this project will be documented in this file.
 
 ### Deprecated
 
--   **`PoiViewGeneratorConfig` and `ZonalViewGeneratorConfig` (`gigaspatial/generators/_base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
+-   **`PoiViewGeneratorConfig` and `ZonalViewGeneratorConfig` (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
     -   Deprecated both config classes (now subclasses of `BaseViewGeneratorConfig`); passing `config=` to a generator emits `DeprecationWarning`. Pass `ensure_available=` to the generator constructor and pass a file path directly to `save_view(path)` instead.
--   **`dataset_year` and `dataset_resolution` on `map_built_s` and `map_smod` (`gigaspatial/generators/_base.py`)**
+-   **`dataset_year` and `dataset_resolution` on `map_built_s` and `map_smod` (`gigaspatial/generators/base.py`)**
     -   Deprecated `dataset_year` and `dataset_resolution` aliases in favor of `year` and `resolution` (emitting `DeprecationWarning`).
--   **Legacy `save_view` bare name and `output_format=` arguments (`gigaspatial/generators/_base.py`)**
+-   **Legacy `save_view` bare name and `output_format=` arguments (`gigaspatial/generators/base.py`)**
     -   Passing a bare name without suffix, `name=`, or `output_format=` to `save_view` emits `DeprecationWarning`; pass a target file path with extension instead.
 -   **`GeometryBasedZonalViewGenerator` (`gigaspatial/generators/zonal/geometry.py`)**
     -   Turned `GeometryBasedZonalViewGenerator` into a thin subclass of `ZonalViewGenerator` that emits `DeprecationWarning` on instantiation; it will be removed in a later minor release.
@@ -65,13 +65,13 @@ All notable changes to this project will be documented in this file.
     -   Fixed `PoiViewGenerator` silently auto-generating `poi_0..N` or misnaming columns when a custom `poi_id_column` is missing from input data; missing non-default `poi_id_column` values or collisions with an existing `"poi_id"` column now raise `ValueError`.
 -   **Projected `GeoDataFrame` coordinate extraction (`gigaspatial/generators/poi.py`)**
     -   Fixed `PoiViewGenerator` extracting `latitude` and `longitude` from projected geometries before reprojecting to `EPSG:4326`, and now requires input `GeoDataFrame`s to have a CRS set.
--   **`save_view` GeoJSON and geospatial export (`gigaspatial/generators/_base.py`)**
+-   **`save_view` GeoJSON and geospatial export (`gigaspatial/generators/base.py`)**
     -   Fixed `save_view` failing on geospatial formats (`.geojson`, `.gpkg`) by delegating to `to_geodataframe()` rather than merging a plain `pd.DataFrame`.
 -   **`map_zonal_stats` default column rename (`gigaspatial/generators/poi.py`)**
     -   Fixed `PoiViewGenerator.map_zonal_stats` skipping column renaming when `output_column="zonal_stat"` on point and polygon `GeoDataFrame` inputs.
 -   **Non-mutating polygon counting and empty polygon outputs (`gigaspatial/processing/geo.py`)**
     -   Fixed `map_polygons` / `aggregate_polygons_to_zones` mutating caller polygon `GeoDataFrame`s with temporary columns and failing to include expected `0`/`np.nan`-filled output columns when polygons are empty or have zero intersections.
--   **Deterministic `TifProcessor` temporary directory cleanup (`gigaspatial/generators/_base.py`)**
+-   **Deterministic `TifProcessor` temporary directory cleanup (`gigaspatial/generators/base.py`)**
     -   Wrapped internally constructed or handler-loaded `TifProcessor` instances in `try ... finally: cleanup()` across `map_rasters`, `map_ghsl`, `map_wp_pop`, and `map_aqueduct_flood_hazard` so temporary raster directories are removed promptly.
 -   **Grid generator `GeoDataFrame` source handling and `zone_id` validation (`gigaspatial/generators/zonal/`)**
     -   Fixed `H3ViewGenerator`, `S2ViewGenerator`, and `MercatorViewGenerator` misclassifying a `GeoDataFrame` `source` as an `Iterable` of string identifiers instead of resolving geometries spatially via `from_spatial`.

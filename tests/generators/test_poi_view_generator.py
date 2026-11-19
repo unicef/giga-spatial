@@ -210,7 +210,7 @@ def _make_poi_gen_in_raster(tmp_path) -> PoiViewGenerator:
 def test_poi_map_wp_pop_uses_injected_handler(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators._base as gen_base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
     monkeypatch.setattr(
         gen_base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler")
@@ -225,7 +225,7 @@ def test_poi_map_wp_pop_uses_injected_handler(
 def test_poi_map_built_s_uses_injected_handler(
     tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators._base as gen_base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
     monkeypatch.setattr(
         gen_base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler")
@@ -240,7 +240,7 @@ def test_poi_map_built_s_uses_injected_handler(
 def test_poi_map_smod_uses_injected_handler(
     tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators._base as gen_base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
     monkeypatch.setattr(
         gen_base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler")
@@ -788,7 +788,7 @@ def test_poi_inherits_internal_base_and_base_is_unexported(tmp_path):
     import gigaspatial
     import gigaspatial.generators as gens
     import gigaspatial.generators.zonal as zonal_gens
-    from gigaspatial.generators._base import BaseViewGenerator, BaseViewGeneratorConfig
+    from gigaspatial.generators.base import BaseViewGenerator, BaseViewGeneratorConfig
 
     assert issubclass(PoiViewGenerator, BaseViewGenerator)
     assert "BaseViewGenerator" not in gigaspatial.__all__

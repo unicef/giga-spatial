@@ -11,7 +11,7 @@ from scipy.spatial import cKDTree
 
 from gigaspatial.config import config as global_config
 from gigaspatial.core.io.data_store import DataStore
-from gigaspatial.generators._base import BaseViewGenerator, BaseViewGeneratorConfig
+from gigaspatial.generators.base import BaseViewGenerator, BaseViewGeneratorConfig
 from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
 from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
 from gigaspatial.processing.buildings_engine import GoogleMSBuildingsEngine

@@ -84,7 +84,7 @@ def _make_zone_gen_in_raster(tmp_path) -> ZonalViewGenerator:
 def test_zonal_map_wp_pop_uses_injected_handler(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators._base as gen_base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
     monkeypatch.setattr(
         gen_base_mod, "WPPopulationHandler", unexpected_ctor("WPPopulationHandler")
@@ -99,7 +99,7 @@ def test_zonal_map_wp_pop_uses_injected_handler(
 def test_zonal_map_built_s_and_smod_and_ghsl_use_injected_handler(
     tmp_path, make_ghsl_handler, unexpected_ctor, monkeypatch
 ):
-    import gigaspatial.generators._base as gen_base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
     monkeypatch.setattr(
         gen_base_mod, "GHSLDataHandler", unexpected_ctor("GHSLDataHandler")
@@ -176,7 +176,7 @@ def test_zonal_map_buildings_uses_injected_handler(
 
 def test_zonal_map_rwi_uses_injected_handler(tmp_path, unexpected_ctor, monkeypatch):
     from types import SimpleNamespace
-    import gigaspatial.generators._base as gen_base_mod
+    import gigaspatial.generators.base as gen_base_mod
 
     monkeypatch.setattr(gen_base_mod, "RWIHandler", unexpected_ctor("RWIHandler"))
     rwi_gdf = gpd.GeoDataFrame(
@@ -201,7 +201,7 @@ def test_zonal_subclasses_forward_injected_handlers(
     tmp_path, make_worldpop_handler, unexpected_ctor, monkeypatch, grid_kind
 ):
     from types import SimpleNamespace
-    import gigaspatial.generators._base as gen_base_mod
+    import gigaspatial.generators.base as gen_base_mod
     import gigaspatial.handlers.google_ms_combined_buildings as gms_mod
     from gigaspatial.generators.zonal.admin import AdminBoundariesViewGenerator
     from gigaspatial.generators.zonal.h3 import H3ViewGenerator
@@ -851,7 +851,7 @@ def test_zonal_id_uniqueness_and_custom_column_collision_validation(tmp_path):
 
 def test_zonal_inherits_base_and_preserves_projected_crs_on_to_geodataframe(tmp_path):
     import pandas as pd
-    from gigaspatial.generators._base import BaseViewGenerator, BaseViewGeneratorConfig
+    from gigaspatial.generators.base import BaseViewGenerator, BaseViewGeneratorConfig
 
     assert issubclass(ZonalViewGenerator, BaseViewGenerator)
     projected_zones = gpd.GeoDataFrame(
