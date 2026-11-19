@@ -30,6 +30,13 @@ Use `giga-spatial` in Python for humanitarian, development, connectivity, and cl
 - [Settlement](https://unicef.github.io/giga-spatial/latest/user-guide/settlement-characterization/)
 - [Infrastructure files](https://unicef.github.io/giga-spatial/latest/user-guide/infrastructure-normalization/)
 
+## Concepts
+
+- [Glossary](https://unicef.github.io/giga-spatial/latest/concepts/glossary/): domain language for handlers, fetchers, sources, data stores, generators, views, and spatial networks
+- [Handlers](https://unicef.github.io/giga-spatial/latest/concepts/handlers/): file-based dataset acquisition, handlers vs. fetchers, data stores, caching, and request scoping
+- [View generators](https://unicef.github.io/giga-spatial/latest/concepts/view-generators/): POI and zonal views, the enrichment contract, low-level primitives, and built-in dataset mappers
+- [Spatial networks](https://unicef.github.io/giga-spatial/latest/concepts/spatial-networks/): road networks, point insertion, shortest paths, and connection planning
+
 ## Reference
 
 - [API reference](https://unicef.github.io/giga-spatial/latest/api/): classes a caller imports
