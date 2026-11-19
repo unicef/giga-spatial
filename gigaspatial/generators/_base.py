@@ -458,10 +458,9 @@ class BaseViewGenerator:
         output_column: Optional[str],
         *,
         default_count_col: str,
-        require_count_when_no_values: bool = True,
     ) -> Dict[str, Any]:
         if value_columns is None:
-            if require_count_when_no_values and aggregation != "count":
+            if aggregation != "count":
                 raise ValueError(
                     "value_columns must be specified for aggregation methods other than 'count'"
                 )
@@ -502,16 +501,14 @@ class BaseViewGenerator:
             for col in cols
         }
 
-    def _aggregate_points(
+    def _prepare_point_mapping(
         self,
-        points: Union[pd.DataFrame, gpd.GeoDataFrame],
-        value_columns: Optional[Union[str, List[str]]] = None,
-        aggregation: Union[str, Dict[str, str]] = "count",
-        predicate: str = "within",
-        output_suffix: str = "",
-        output_column: Optional[str] = None,
-        map_radius_meters: Optional[float] = None,
-    ) -> pd.DataFrame:
+        value_columns: Optional[Union[str, List[str]]],
+        aggregation: Union[str, Dict[str, str]],
+        output_suffix: str,
+        output_column: Optional[str],
+        map_radius_meters: Optional[float],
+    ) -> tuple[Dict[str, Any], gpd.GeoDataFrame]:
         fill_values = self._resolve_spatial_output_schema(
             value_columns=value_columns,
             aggregation=aggregation,
@@ -522,6 +519,19 @@ class BaseViewGenerator:
         target_gdf = self._resolve_target_geometries(
             map_radius_meters, require_polygons=True
         )
+        return fill_values, target_gdf
+
+    def _compute_point_aggregation(
+        self,
+        points: Union[pd.DataFrame, gpd.GeoDataFrame],
+        target_gdf: gpd.GeoDataFrame,
+        output_cols: List[str],
+        value_columns: Optional[Union[str, List[str]]] = None,
+        aggregation: Union[str, Dict[str, str]] = "count",
+        predicate: str = "within",
+        output_suffix: str = "",
+        output_column: Optional[str] = None,
+    ) -> pd.DataFrame:
         result = aggregate_points_to_zones(
             points=points,
             zones=target_gdf,
@@ -544,7 +554,35 @@ class BaseViewGenerator:
                 src_col = f"{first_col}{output_suffix}"
             if src_col != output_column and src_col in result.columns:
                 result = result.rename(columns={src_col: output_column})
-        return result[[self.id_column, *fill_values.keys()]]
+        return result[[self.id_column, *output_cols]]
+
+    def _aggregate_points(
+        self,
+        points: Union[pd.DataFrame, gpd.GeoDataFrame],
+        value_columns: Optional[Union[str, List[str]]] = None,
+        aggregation: Union[str, Dict[str, str]] = "count",
+        predicate: str = "within",
+        output_suffix: str = "",
+        output_column: Optional[str] = None,
+        map_radius_meters: Optional[float] = None,
+    ) -> pd.DataFrame:
+        fill_values, target_gdf = self._prepare_point_mapping(
+            value_columns=value_columns,
+            aggregation=aggregation,
+            output_suffix=output_suffix,
+            output_column=output_column,
+            map_radius_meters=map_radius_meters,
+        )
+        return self._compute_point_aggregation(
+            points=points,
+            target_gdf=target_gdf,
+            output_cols=list(fill_values.keys()),
+            value_columns=value_columns,
+            aggregation=aggregation,
+            predicate=predicate,
+            output_suffix=output_suffix,
+            output_column=output_column,
+        )
 
     def map_points(
         self,
@@ -558,16 +596,14 @@ class BaseViewGenerator:
         overwrite: bool = False,
     ) -> pd.DataFrame:
         """Aggregate point data onto generator zones or POI buffers and update ``self.view``."""
-        fill_values = self._resolve_spatial_output_schema(
+        fill_values, target_gdf = self._prepare_point_mapping(
             value_columns=value_columns,
             aggregation=aggregation,
             output_suffix=output_suffix,
             output_column=output_column,
-            default_count_col="point_count",
+            map_radius_meters=map_radius_meters,
         )
         self._validate_output_columns(fill_values.keys(), overwrite=overwrite)
-        # Validate target geometries before empty shortcut so missing radius raises consistently
-        self._resolve_target_geometries(map_radius_meters, require_polygons=True)
 
         is_empty = (
             points is None
@@ -578,30 +614,27 @@ class BaseViewGenerator:
             self.logger.warning("Empty point data provided; filling empty output columns.")
             return self._fill_empty_columns(fill_values, overwrite=overwrite)
 
-        mapped = self._aggregate_points(
+        mapped = self._compute_point_aggregation(
             points=points,
+            target_gdf=target_gdf,
+            output_cols=list(fill_values.keys()),
             value_columns=value_columns,
             aggregation=aggregation,
             predicate=predicate,
             output_suffix=output_suffix,
             output_column=output_column,
-            map_radius_meters=map_radius_meters,
         )
         return self._update_view(mapped, overwrite=overwrite)
 
-    def _aggregate_polygons(
+    def _prepare_polygon_mapping(
         self,
-        polygons: Union[pd.DataFrame, gpd.GeoDataFrame],
-        value_columns: Optional[Union[str, List[str]]] = None,
-        aggregation: Union[str, Dict[str, str]] = "count",
-        predicate: Literal["intersects", "within", "fractional"] = "intersects",
-        output_suffix: str = "",
-        output_column: Optional[str] = None,
-        map_radius_meters: Optional[float] = None,
-    ) -> pd.DataFrame:
-        if value_columns is None:
-            aggregation = "count"
-
+        value_columns: Optional[Union[str, List[str]]],
+        aggregation: Union[str, Dict[str, str]],
+        predicate: Literal["intersects", "within", "fractional"],
+        output_suffix: str,
+        output_column: Optional[str],
+        map_radius_meters: Optional[float],
+    ) -> tuple[Dict[str, Any], gpd.GeoDataFrame]:
         if (
             self._is_point_generator
             and map_radius_meters is None
@@ -617,11 +650,23 @@ class BaseViewGenerator:
             output_suffix=output_suffix,
             output_column=output_column,
             default_count_col="polygon_count",
-            require_count_when_no_values=False,
         )
         target_gdf = self._resolve_target_geometries(
             map_radius_meters, require_polygons=False
         )
+        return fill_values, target_gdf
+
+    def _compute_polygon_aggregation(
+        self,
+        polygons: Union[pd.DataFrame, gpd.GeoDataFrame],
+        target_gdf: gpd.GeoDataFrame,
+        output_cols: List[str],
+        value_columns: Optional[Union[str, List[str]]] = None,
+        aggregation: Union[str, Dict[str, str]] = "count",
+        predicate: Literal["intersects", "within", "fractional"] = "intersects",
+        output_suffix: str = "",
+        output_column: Optional[str] = None,
+    ) -> pd.DataFrame:
         result = aggregate_polygons_to_zones(
             polygons=polygons,
             zones=target_gdf,
@@ -633,7 +678,36 @@ class BaseViewGenerator:
             drop_geometry=True,
             output_column=output_column,
         )
-        return result[[self.id_column, *fill_values.keys()]]
+        return result[[self.id_column, *output_cols]]
+
+    def _aggregate_polygons(
+        self,
+        polygons: Union[pd.DataFrame, gpd.GeoDataFrame],
+        value_columns: Optional[Union[str, List[str]]] = None,
+        aggregation: Union[str, Dict[str, str]] = "count",
+        predicate: Literal["intersects", "within", "fractional"] = "intersects",
+        output_suffix: str = "",
+        output_column: Optional[str] = None,
+        map_radius_meters: Optional[float] = None,
+    ) -> pd.DataFrame:
+        fill_values, target_gdf = self._prepare_polygon_mapping(
+            value_columns=value_columns,
+            aggregation=aggregation,
+            predicate=predicate,
+            output_suffix=output_suffix,
+            output_column=output_column,
+            map_radius_meters=map_radius_meters,
+        )
+        return self._compute_polygon_aggregation(
+            polygons=polygons,
+            target_gdf=target_gdf,
+            output_cols=list(fill_values.keys()),
+            value_columns=value_columns,
+            aggregation=aggregation,
+            predicate=predicate,
+            output_suffix=output_suffix,
+            output_column=output_column,
+        )
 
     def map_polygons(
         self,
@@ -648,28 +722,15 @@ class BaseViewGenerator:
         **kwargs,
     ) -> pd.DataFrame:
         """Aggregate polygon data onto generator zones or POIs/buffers and update ``self.view``."""
-        if value_columns is None:
-            aggregation = "count"
-
-        if (
-            self._is_point_generator
-            and map_radius_meters is None
-            and predicate in ("within", "fractional")
-        ):
-            raise ValueError(
-                f"map_radius_meters must be provided on PoiViewGenerator for predicate='{predicate}'."
-            )
-
-        fill_values = self._resolve_spatial_output_schema(
+        fill_values, target_gdf = self._prepare_polygon_mapping(
             value_columns=value_columns,
             aggregation=aggregation,
+            predicate=predicate,
             output_suffix=output_suffix,
             output_column=output_column,
-            default_count_col="polygon_count",
-            require_count_when_no_values=False,
+            map_radius_meters=map_radius_meters,
         )
         self._validate_output_columns(fill_values.keys(), overwrite=overwrite)
-        self._resolve_target_geometries(map_radius_meters, require_polygons=False)
 
         is_empty = (
             polygons is None
@@ -680,14 +741,15 @@ class BaseViewGenerator:
             self.logger.warning("Empty polygon data provided; filling empty output columns.")
             return self._fill_empty_columns(fill_values, overwrite=overwrite)
 
-        mapped = self._aggregate_polygons(
+        mapped = self._compute_polygon_aggregation(
             polygons=polygons,
+            target_gdf=target_gdf,
+            output_cols=list(fill_values.keys()),
             value_columns=value_columns,
             aggregation=aggregation,
             predicate=predicate,
             output_suffix=output_suffix,
             output_column=output_column,
-            map_radius_meters=map_radius_meters,
         )
         return self._update_view(mapped, overwrite=overwrite)
 
@@ -724,7 +786,7 @@ class BaseViewGenerator:
             if len(raster_data) > 1:
                 all_source_paths = [tp.dataset_path for tp in raster_data]
                 self.logger.info(
-                    f"Merging {len(all_source_paths)} rasters into a single TifProcessor for zonal statistics."
+                    f"Merging {len(all_source_paths)} rasters into a single TifProcessor for raster aggregation."
                 )
                 raster_processor = TifProcessor(
                     dataset_path=all_source_paths,

@@ -58,9 +58,6 @@ All notable changes to this project will be documented in this file.
     -   Fixed `map_polygons` / `aggregate_polygons_to_zones` mutating caller polygon `GeoDataFrame`s with temporary columns and failing to include expected `0`/`np.nan`-filled output columns when polygons are empty or have zero intersections.
 -   **Deterministic `TifProcessor` temporary directory cleanup (`gigaspatial/generators/_base.py`)**
     -   Wrapped internally constructed or handler-loaded `TifProcessor` instances in `try ... finally: cleanup()` across `map_rasters`, `map_ghsl`, `map_wp_pop`, and `map_aqueduct_flood_hazard` so temporary raster directories are removed promptly.
-
-### Fixed
-
 -   **Grid generator `GeoDataFrame` source handling and `zone_id` validation (`gigaspatial/generators/zonal/`)**
     -   Fixed `H3ViewGenerator`, `S2ViewGenerator`, and `MercatorViewGenerator` misclassifying a `GeoDataFrame` `source` as an `Iterable` of string identifiers instead of resolving geometries spatially via `from_spatial`.
     -   Added `zone_id` uniqueness and custom `zone_id_column` collision validation to `ZonalViewGenerator.__init__`, raising `ValueError` on duplicate zone IDs or when a custom `zone_id_column` collides with an existing `"zone_id"` column.

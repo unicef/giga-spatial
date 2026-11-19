@@ -908,7 +908,7 @@ def aggregate_polygons_to_zones(
     output_suffix: str = "",
     drop_geometry: bool = False,
     output_column: Optional[str] = None,
-) -> gpd.GeoDataFrame:
+) -> Union[gpd.GeoDataFrame, pd.DataFrame]:
     """
     Aggregates polygon data to zones based on a spatial relationship.
 
@@ -1096,6 +1096,17 @@ def aggregate_polygons_to_zones(
     return result
 
 
+def _empty_count_frame(
+    zones: gpd.GeoDataFrame, zone_id_column: str, count_col: str
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            zone_id_column: pd.Series(dtype=zones[zone_id_column].dtype),
+            count_col: pd.Series(dtype=int),
+        }
+    )
+
+
 def _count_polygons_per_zone(
     polygons_gdf: gpd.GeoDataFrame,
     zones: gpd.GeoDataFrame,
@@ -1117,12 +1128,7 @@ def _count_polygons_per_zone(
         overlayed = gpd.overlay(polygons_utm, zones_utm, how="intersection")
         if overlayed.empty:
             LOGGER.warning("No intersections found during fractional polygon counting")
-            return pd.DataFrame(
-                {
-                    zone_id_column: pd.Series(dtype=zones[zone_id_column].dtype),
-                    count_col: pd.Series(dtype=int),
-                }
-            )
+            return _empty_count_frame(zones, zone_id_column, count_col)
         return (
             overlayed.groupby(zone_id_column)["__poly_idx"]
             .nunique()
@@ -1133,13 +1139,8 @@ def _count_polygons_per_zone(
         polygons_gdf[["geometry"]], zones, how="inner", predicate=predicate
     )
     if joined.empty:
-        LOGGER.warning(f"No {predicate} relationships found during spatial join")
-        return pd.DataFrame(
-            {
-                zone_id_column: pd.Series(dtype=zones[zone_id_column].dtype),
-                count_col: pd.Series(dtype=int),
-            }
-        )
+        LOGGER.warning(f"No {predicate} relationships found during polygon counting")
+        return _empty_count_frame(zones, zone_id_column, count_col)
     return joined.groupby(zone_id_column).size().reset_index(name=count_col)
 
 

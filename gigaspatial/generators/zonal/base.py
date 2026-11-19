@@ -313,13 +313,13 @@ class ZonalViewGenerator(BaseViewGenerator, Generic[T]):
         )
         building_centroids = get_centroids(buildings_gdf)
 
+        count_df = self._aggregate_points(
+            points=building_centroids,
+            predicate="within",
+            output_column="ms_buildings_count",
+        )
         if not use_polygons:
             self.logger.info("Aggregating building data using points with attributes")
-            count_df = self._aggregate_points(
-                points=building_centroids,
-                predicate="within",
-                output_column="ms_buildings_count",
-            )
             area_df = self._aggregate_points(
                 points=building_centroids,
                 value_columns="area_in_meters",
@@ -327,7 +327,6 @@ class ZonalViewGenerator(BaseViewGenerator, Generic[T]):
                 predicate="within",
                 output_column="ms_buildings_area_in_meters",
             )
-            combined = count_df.merge(area_df, on="zone_id", how="left")
         else:
             self.logger.info(
                 "Calculating building areas with area-weighted aggregation"
@@ -339,14 +338,8 @@ class ZonalViewGenerator(BaseViewGenerator, Generic[T]):
                 predicate="fractional",
                 output_column="ms_buildings_area_in_meters",
             )
-            self.logger.info("Counting Microsoft buildings per zone")
-            count_df = self._aggregate_points(
-                points=building_centroids,
-                predicate="within",
-                output_column="ms_buildings_count",
-            )
-            combined = count_df.merge(area_df, on="zone_id", how="left")
 
+        combined = count_df.merge(area_df, on="zone_id", how="left")
         return self._update_view(combined, overwrite=overwrite)
 
     def map_buildings(

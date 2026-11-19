@@ -923,6 +923,8 @@ def test_zonal_spatial_primitives_update_view_and_enforce_overwrite(
     assert v_poly.set_index("zone_id").loc["z_ne", "poly_cnt"] == 0
     with pytest.raises(ValueError, match="already exist"):
         gen.map_polygons(polys, output_column="poly_cnt")
+    with pytest.raises(ValueError, match="value_columns"):
+        gen.map_polygons(polys, value_columns=None, aggregation="sum")
     gen.map_polygons(polys, output_column="poly_cnt", overwrite=True)
 
     # map_rasters -> updates and returns self.view

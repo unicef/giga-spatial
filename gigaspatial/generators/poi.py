@@ -539,6 +539,34 @@ class PoiViewGenerator(BaseViewGenerator):
             "data must be either a list of TifProcessor objects or a GeoDataFrame"
         )
 
+    def _resolve_building_files(
+        self,
+        country: str,
+        handler: Optional["GoogleMSBuildingsHandler"],
+        ensure_available: Optional[bool],
+        **kwargs,
+    ) -> tuple["GoogleMSBuildingsHandler", List[Path]]:
+        if handler is None:
+            from gigaspatial.handlers.google_ms_combined_buildings import (
+                GoogleMSBuildingsHandler,
+            )
+
+            handler = GoogleMSBuildingsHandler(
+                partition_strategy="s2_grid", data_store=self.data_store
+            )
+
+        eff_ensure = self._resolve_ensure_available(ensure_available)
+        if eff_ensure:
+            if not handler.ensure_data_available(country, **kwargs):
+                raise RuntimeError(
+                    f"Could not ensure Google/Microsoft building data availability for '{country}'."
+                )
+
+        building_files = handler.reader.resolve_source_paths(
+            country, **handler.select_options(kwargs, handler.config)
+        )
+        return handler, building_files
+
     def find_nearest_buildings(
         self,
         country: str,
@@ -578,24 +606,11 @@ class PoiViewGenerator(BaseViewGenerator):
             f"Mapping combined buildings data to POIs within {search_radius}m"
         )
 
-        if handler is None:
-            from gigaspatial.handlers.google_ms_combined_buildings import (
-                GoogleMSBuildingsHandler,
-            )
-
-            handler = GoogleMSBuildingsHandler(
-                partition_strategy="s2_grid", data_store=self.data_store
-            )
-
-        eff_ensure = self._resolve_ensure_available(ensure_available)
-        if eff_ensure:
-            if not handler.ensure_data_available(country, **kwargs):
-                raise RuntimeError(
-                    f"Could not ensure Google/Microsoft building data availability for '{country}'."
-                )
-
-        building_files = handler.reader.resolve_source_paths(
-            country, **handler.select_options(kwargs, handler.config)
+        handler, building_files = self._resolve_building_files(
+            country=country,
+            handler=handler,
+            ensure_available=ensure_available,
+            **kwargs,
         )
         if not building_files:
             self.logger.warning(
@@ -643,24 +658,11 @@ class PoiViewGenerator(BaseViewGenerator):
 
         self.logger.info("Starting global nearest building search...")
 
-        if handler is None:
-            from gigaspatial.handlers.google_ms_combined_buildings import (
-                GoogleMSBuildingsHandler,
-            )
-
-            handler = GoogleMSBuildingsHandler(
-                partition_strategy="s2_grid", data_store=self.data_store
-            )
-
-        eff_ensure = self._resolve_ensure_available(ensure_available)
-        if eff_ensure:
-            if not handler.ensure_data_available(country, **kwargs):
-                raise RuntimeError(
-                    f"Could not ensure Google/Microsoft building data availability for '{country}'."
-                )
-
-        building_files = handler.reader.resolve_source_paths(
-            country, **handler.select_options(kwargs, handler.config)
+        handler, building_files = self._resolve_building_files(
+            country=country,
+            handler=handler,
+            ensure_available=ensure_available,
+            **kwargs,
         )
         if not building_files:
             self.logger.warning(
