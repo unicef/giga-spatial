@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+-   **Overture release resolution and explicit release validation (`gigaspatial/fetchers/overture.py`)**
+    -   Removed the stale `_DEFAULT_RELEASE` fallback; when `release` is `None` or `"latest"` and the Overture STAC catalog lookup fails, `OvertureAmenityFetcher` now raises a `RuntimeError` advising the caller to pass an explicit `release=` (e.g. `"2026-11-18.0"`) and linking `https://docs.overturemaps.org/release-calendar`.
+    -   Added `OvertureAmenityFetcher.get_available_releases()` and switched STAC catalog lookups (`_fetch_stac_catalog`) to `requests.get(..., timeout=20)` with JSON-type validation.
+    -   Explicit `release=` values are validated against the Overture STAC catalog when using the default S3 `base_url`: unlisted releases raise `ValueError` listing available releases, noting Overture's ~60-day retention policy, and linking the release calendar; STAC catalog fetch/parse failures log a `WARNING` and proceed with the explicit release (and custom `base_url` values skip STAC validation).
+
 ## [v0.11.1] - 2026-11-17
 
 ### Added
