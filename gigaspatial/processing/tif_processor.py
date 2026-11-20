@@ -71,10 +71,9 @@ class TifProcessor:
         self._cache = {}
         self._temp_dir = tempfile.mkdtemp()
         # Only this instance, in this process, may delete _temp_dir: forked
-        # children inherit the object unchanged, and __setstate__ clears it
-        # on pickled and copy.copy/copy.deepcopy'd copies.
+        # children inherit the object unchanged.
         self._temp_dir_owner_pid = os.getpid()
-        self._cleaned_up_file_path = None
+        self._deleted_working_file = None
         self._merged_file_path = None
         self._reprojected_file_path = None
         self._clipped_file_path = None
@@ -140,12 +139,7 @@ class TifProcessor:
             FileNotFoundError: If this processor's merged, reprojected, or
                 clipped file was deleted by `cleanup()`.
         """
-        if self._cleaned_up_file_path:
-            raise FileNotFoundError(
-                f"This TifProcessor was cleaned up: its working file "
-                f"{self._cleaned_up_file_path} was deleted. Create a new "
-                f"TifProcessor to read the raster again."
-            )
+        self._raise_if_cleaned_up()
         if self._merged_file_path:
             with rasterio.open(self._merged_file_path) as src:
                 yield src
@@ -1180,6 +1174,8 @@ class TifProcessor:
         stat_func = stat if callable(stat) else getattr(np, stat)
         polygon_chunks = list(_chunk_list(polygon_list, batch_size))
 
+        # A worker initializer that raises makes the pool respawn workers forever.
+        self._raise_if_cleaned_up()
         with multiprocessing.Pool(
             initializer=self._initializer_worker, processes=n_workers
         ) as pool:
@@ -2316,6 +2312,14 @@ class TifProcessor:
     def _owns_temp_dir(self) -> bool:
         return getattr(self, "_temp_dir_owner_pid", None) == os.getpid()
 
+    def _raise_if_cleaned_up(self):
+        if self._deleted_working_file:
+            raise FileNotFoundError(
+                f"This TifProcessor was cleaned up: its working file "
+                f"{self._deleted_working_file} was deleted. Create a new "
+                f"TifProcessor to read the raster again."
+            )
+
     def __del__(self):
         """Clean up temporary files and directories."""
         try:
@@ -2340,7 +2344,7 @@ class TifProcessor:
         except FileNotFoundError:
             pass
         self._temp_dir_owner_pid = None
-        self._cleaned_up_file_path = (
+        self._deleted_working_file = (
             self._merged_file_path
             or self._reprojected_file_path
             or self._clipped_file_path

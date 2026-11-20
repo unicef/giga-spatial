@@ -5,6 +5,7 @@ Each test asserts the target behaviour from
 .scratch/tif-processor-hardening/spec.md and is marked ``xfail(strict=True)``
 with its defect ID and the ticket that fixes it. When a fix lands, its tests
 start passing; strict mode then fails the run until the marker is removed.
+Fixed defects keep their tests here, with related regression tests, unmarked.
 
 Batched-sampling tests run under a deadline: while a defect stands, a pool
 worker's setup can raise, and the pool then respawns workers forever.
@@ -179,6 +180,17 @@ def test_wrapped_errors_after_cleanup_carry_the_cause(local_rasters, derive):
 
     with pytest.raises(ValueError, match="cleaned up"):
         tp.to_dataframe()
+
+
+def test_batched_sampling_after_cleanup_says_it_was_cleaned_up(
+    local_rasters, start_method, deadline
+):
+    tp = merged(local_rasters)
+
+    tp.cleanup()
+
+    with pytest.raises(FileNotFoundError, match="cleaned up"), deadline(DEADLINE):
+        batched(tp)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
