@@ -30,7 +30,6 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
-M1_3 = breaks("M1-3 → 03", "to_dataframe_chunked calls a helper that does not exist")
 M1_4 = breaks(
     "M1-4 → 04", "the memory guard raises UnboundLocalError instead of warning"
 )
@@ -198,17 +197,23 @@ def test_batched_sampling_after_cleanup_says_it_was_cleaned_up(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M1_3
+@pytest.mark.parametrize("drop_nodata", [True, False])
+@pytest.mark.parametrize("chunk_size", [1, 3, None])
 @pytest.mark.parametrize("mode", ["rgb", "rgba", "multi"])
-def test_chunked_multi_band_conversion_matches_to_dataframe(local_rasters, mode):
+def test_chunked_multi_band_conversion_matches_to_dataframe(
+    local_rasters, mode, chunk_size, drop_nodata
+):
     data = BANDS_FOR_MODE[mode].copy()
     data[0, 1, 2] = DEFAULT_NODATA
-    path = local_rasters.put("a.tif", data)
+    descriptions = ["pop", None] if mode == "multi" else None
+    path = local_rasters.put("a.tif", data, descriptions=descriptions)
     tp = TifProcessor(path, data_store=local_rasters.store, mode=mode)
 
-    chunked = tp.to_dataframe_chunked(chunk_size=1)
+    chunked = tp.to_dataframe_chunked(chunk_size=chunk_size, drop_nodata=drop_nodata)
 
-    pd.testing.assert_frame_equal(chunked, tp.to_dataframe(), check_exact=False)
+    pd.testing.assert_frame_equal(
+        chunked, tp.to_dataframe(drop_nodata=drop_nodata), check_exact=False
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

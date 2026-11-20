@@ -1407,11 +1407,17 @@ class TifProcessor:
                     )
                     lons, lats = self._get_chunk_coordinates(window, src)
 
-                    # Build DataFrame using helper
-                    band_dict = {
-                        band_names[i]: stack_chunk[i] for i in range(self.count)
-                    }
-                    chunk_df = self._build_chunk_dataframe(lons, lats, band_dict, mask)
+                    keep = mask.flatten() if mask is not None else slice(None)
+                    chunk_df = pd.DataFrame(
+                        {
+                            "lon": lons[keep],
+                            "lat": lats[keep],
+                            **{
+                                band_names[i]: stack_chunk[i].flatten()[keep]
+                                for i in range(self.count)
+                            },
+                        }
+                    )
 
                     # RGBA: normalize alpha
                     if self.mode == "rgba" and "alpha" in chunk_df.columns:

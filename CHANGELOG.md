@@ -86,6 +86,8 @@ All notable changes to this project will be documented in this file.
     -   Fixed `sample_by_polygons_batched` deleting the merged, reprojected, or clipped working file of the processor it was called on, under both the `spawn` and `fork` start methods, so the next call on that processor failed. Copies of a processor (pickled worker copies, `copy.copy`, and `copy.deepcopy`) no longer delete the original's temporary files when they are dropped or cleaned up; only the processor that created its temporary directory, in the process that created it, deletes it.
     -   `cleanup()` and finalization at garbage collection are now idempotent and tolerate a temporary directory that is already gone.
     -   **Change in error type:** using a merged, reprojected, or clipped processor after `cleanup()` now raises `FileNotFoundError` from `open_dataset` saying the processor was cleaned up, instead of a rasterio I/O error surfacing as a misleading "mode mismatch" `ValueError`. Methods that already wrap errors in `ValueError` (such as `to_dataframe`) still raise `ValueError`, with that cause in the message. A processor opened on an original stored file stays readable after `cleanup()`.
+-   **`TifProcessor.to_dataframe_chunked` on multi-band rasters (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `to_dataframe_chunked` raising `AttributeError` on every `rgb`, `rgba`, and `multi` raster. It now returns the same columns (band names from descriptions, `band_N`, or the rgb and rgba names) and rows as `to_dataframe` with the same `drop_nodata`; like single-band chunked conversion, it still ignores `min_value` and `max_value`. Single-band chunked output is unchanged.
 
 ## [v0.11.1] - 2026-11-17
 
