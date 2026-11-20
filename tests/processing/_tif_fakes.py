@@ -20,6 +20,18 @@ from gigaspatial.core.io.data_store import DataStore
 DEFAULT_RASTER_DATA = np.arange(1, 17, dtype=np.float32).reshape(4, 4)
 DEFAULT_BOUNDS = (0.0, 0.0, 0.04, 0.04)
 DEFAULT_NODATA = -99999.0
+EAST_BOUNDS = (0.04, 0.0, 0.08, 0.04)
+
+
+def float32_bands(*bands) -> np.ndarray:
+    return np.stack(bands).astype(np.float32)
+
+
+BAND = DEFAULT_RASTER_DATA
+RGB = float32_bands(BAND, BAND + 100, BAND + 200)
+RGBA = float32_bands(BAND, BAND + 100, BAND + 200, np.full((4, 4), 255))
+TWO_BANDS = float32_bands(BAND, BAND * 10)
+BANDS_FOR_MODE = {"single": BAND, "rgb": RGB, "rgba": RGBA, "multi": TWO_BANDS}
 
 
 def write_raster_tif(
@@ -135,7 +147,10 @@ class InMemoryDataStore(DataStore):
         for key in self.files:
             if key.startswith(prefix):
                 head, _, rest = key[len(prefix) :].partition("/")
-                (dirs.add(head) if rest else files.append(head))
+                if rest:
+                    dirs.add(head)
+                else:
+                    files.append(head)
         return sorted(files), sorted(dirs)
 
     def list_files(self, path):

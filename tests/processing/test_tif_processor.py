@@ -11,26 +11,27 @@ All rasters are tiny synthetic GeoTIFFs; nothing touches the network.
 
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
+import rasterio
 from rasterio.coords import BoundingBox
+from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 from shapely.geometry import box
 
-from _tif_fakes import DEFAULT_BOUNDS, DEFAULT_RASTER_DATA
+from _tif_fakes import (
+    BAND,
+    BANDS_FOR_MODE,
+    DEFAULT_BOUNDS,
+    DEFAULT_NODATA,
+    EAST_BOUNDS,
+    RGB,
+    RGBA,
+    TWO_BANDS,
+)
 from gigaspatial.processing.tif_processor import TifProcessor
-
-
-def stack(*bands):
-    return np.stack(bands).astype(np.float32)
-
-
-BAND = DEFAULT_RASTER_DATA
-RGB = stack(BAND, BAND + 100, BAND + 200)
-RGBA = stack(BAND, BAND + 100, BAND + 200, np.full((4, 4), 255))
-MULTI = stack(BAND, BAND * 10)
-BANDS_FOR_MODE = {"single": BAND, "rgb": RGB, "rgba": RGBA, "multi": MULTI}
-EAST = (0.04, 0.0, 0.08, 0.04)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ def test_one_item_path_list_collapses_to_a_single_file(local_rasters):
 @pytest.mark.parametrize("method", ["first", "last", "min", "max", "mean"])
 def test_merges_two_adjacent_files(local_rasters, method):
     west = local_rasters.put("west.tif", BAND)
-    east = local_rasters.put("east.tif", BAND + 16, bounds=EAST)
+    east = local_rasters.put("east.tif", BAND + 16, bounds=EAST_BOUNDS)
 
     tp = TifProcessor([west, east], data_store=local_rasters.store, merge_method=method)
 
@@ -114,11 +115,9 @@ def test_merge_with_target_crs_reprojects_each_file(local_rasters):
 
 
 def test_merge_accepts_epsg_and_equivalent_wkt(local_rasters):
-    from rasterio.crs import CRS
-
     west = local_rasters.put("west.tif", BAND)
     east = local_rasters.put(
-        "east.tif", BAND, bounds=EAST, crs=CRS.from_epsg(4326).to_wkt()
+        "east.tif", BAND, bounds=EAST_BOUNDS, crs=CRS.from_epsg(4326).to_wkt()
     )
 
     tp = TifProcessor([west, east], data_store=local_rasters.store)
@@ -139,7 +138,13 @@ def test_target_crs_reprojects_at_construction(local_rasters):
 
 @pytest.mark.parametrize(
     "mode, bands",
-    [("single", BAND), ("rgb", RGB), ("rgba", RGBA), ("multi", MULTI), ("multi", RGB)],
+    [
+        ("single", BAND),
+        ("rgb", RGB),
+        ("rgba", RGBA),
+        ("multi", TWO_BANDS),
+        ("multi", RGB),
+    ],
 )
 def test_mode_accepts_its_band_count(local_rasters, mode, bands):
     path = local_rasters.put("a.tif", bands)
@@ -152,8 +157,8 @@ def test_mode_accepts_its_band_count(local_rasters, mode, bands):
 @pytest.mark.parametrize(
     "mode, bands, message",
     [
-        ("single", MULTI, "SINGLE mode requires a 1-band"),
-        ("rgb", MULTI, "RGB mode requires a 3-band"),
+        ("single", TWO_BANDS, "SINGLE mode requires a 1-band"),
+        ("rgb", TWO_BANDS, "RGB mode requires a 3-band"),
         ("rgba", RGB, "RGBA mode requires a 4-band"),
         ("multi", BAND, "Multi mode requires a TIF file with 2 or more bands"),
     ],
@@ -177,7 +182,7 @@ def test_metadata_of_a_single_file(local_rasters):
     assert tp.bounds == BoundingBox(*DEFAULT_BOUNDS)
     assert tp.transform == from_bounds(*DEFAULT_BOUNDS, width=4, height=4)
     assert tp.resolution == pytest.approx((0.01, 0.01))
-    assert (tp.count, tp.dtype, tp.nodata) == (1, "float32", -99999.0)
+    assert (tp.count, tp.dtype, tp.nodata) == (1, "float32", DEFAULT_NODATA)
     assert (tp.width, tp.height) == (4, 4)
     assert (tp.is_merged, tp.source_count) == (False, 1)
 
@@ -229,12 +234,12 @@ def test_single_band_dataframe_columns_and_pixel_centres(local_rasters):
 
 def test_single_band_drop_nodata(local_rasters):
     data = BAND.copy()
-    data[0, 0] = -99999.0
+    data[0, 0] = DEFAULT_NODATA
     tp = TifProcessor(local_rasters.put("a.tif", data), data_store=local_rasters.store)
 
     assert tp.to_dataframe()["pixel_value"].min() == 2.0
     assert len(tp.to_dataframe(drop_nodata=False)) == 16
-    assert tp.to_dataframe(drop_nodata=False)["pixel_value"].min() == -99999.0
+    assert tp.to_dataframe(drop_nodata=False)["pixel_value"].min() == DEFAULT_NODATA
 
 
 def test_single_band_value_thresholds_are_exclusive(local_rasters):
@@ -252,7 +257,7 @@ def test_single_band_string_band_name(local_rasters):
 
 
 def test_multi_band_names_come_from_descriptions_or_band_number(local_rasters):
-    path = local_rasters.put("a.tif", MULTI, descriptions=["pop", None])
+    path = local_rasters.put("a.tif", TWO_BANDS, descriptions=["pop", None])
     tp = TifProcessor(path, data_store=local_rasters.store, mode="multi")
 
     df = tp.to_dataframe()
@@ -262,7 +267,7 @@ def test_multi_band_names_come_from_descriptions_or_band_number(local_rasters):
 
 
 def test_multi_band_explicit_band_names(local_rasters):
-    path = local_rasters.put("a.tif", MULTI)
+    path = local_rasters.put("a.tif", TWO_BANDS)
     tp = TifProcessor(path, data_store=local_rasters.store, mode="multi")
 
     assert list(tp.to_dataframe(band_names=["a", "b"]).columns) == [
@@ -306,8 +311,6 @@ def test_rgba_dataframe_keeps_alpha_already_in_unit_range(local_rasters):
 
 
 def test_geodataframe_has_one_box_per_pixel_in_the_raster_crs(local_rasters):
-    from shapely.geometry import box
-
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
 
     gdf = tp.to_geodataframe()
@@ -319,10 +322,8 @@ def test_geodataframe_has_one_box_per_pixel_in_the_raster_crs(local_rasters):
 
 @pytest.mark.parametrize("chunk_size", [1, 3, None])
 def test_single_band_chunked_matches_to_dataframe(local_rasters, chunk_size):
-    import pandas as pd
-
     data = BAND.copy()
-    data[1, 2] = -99999.0
+    data[1, 2] = DEFAULT_NODATA
     tp = TifProcessor(local_rasters.put("a.tif", data), data_store=local_rasters.store)
 
     chunked = tp.to_dataframe_chunked(chunk_size=chunk_size)
@@ -358,8 +359,6 @@ def test_clip_to_bounds_returns_a_smaller_processor(local_rasters):
 
 
 def test_clip_to_bounds_reprojects_bounds_given_in_another_crs(local_rasters):
-    import geopandas as gpd
-
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
     metres = gpd.GeoSeries([SOUTH_WEST], crs="EPSG:4326").to_crs("EPSG:3857")
 
@@ -377,7 +376,7 @@ def test_clip_without_processor_returns_array_transform_and_metadata(local_raste
 
     np.testing.assert_array_equal(array, [[[9.0, 10.0], [13.0, 14.0]]])
     assert transform == from_bounds(0.0, 0.0, 0.02, 0.02, width=2, height=2)
-    assert (meta["width"], meta["height"], meta["nodata"]) == (2, 2, -99999.0)
+    assert (meta["width"], meta["height"], meta["nodata"]) == (2, 2, DEFAULT_NODATA)
 
 
 def test_clip_to_bounds_without_processor_returns_a_tuple(local_rasters):
@@ -401,8 +400,6 @@ def test_clip_to_a_non_overlapping_geometry_raises(local_rasters):
 
 
 def test_reproject_to_writes_a_file_in_the_target_crs(local_rasters):
-    import rasterio
-
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
 
     out = tp.reproject_to("EPSG:3857")
@@ -439,7 +436,9 @@ def test_sample_by_coordinates_single_band(local_rasters):
 
 def test_sample_by_coordinates_multi_band(local_rasters):
     tp = TifProcessor(
-        local_rasters.put("a.tif", MULTI), data_store=local_rasters.store, mode="multi"
+        local_rasters.put("a.tif", TWO_BANDS),
+        data_store=local_rasters.store,
+        mode="multi",
     )
 
     np.testing.assert_array_equal(
@@ -513,12 +512,15 @@ def test_sample_by_polygons_batched_matches_sample_by_polygons(
     local_rasters, start_method
 ):
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
+    expected = tp.sample_by_polygons(POLYGONS)
+    np.testing.assert_allclose(expected, [3.5, 13.5, np.nan, 8.5], equal_nan=True)
 
     batched = tp.sample_by_polygons_batched(
         POLYGONS, n_workers=2, batch_size=1, show_progress=False
     )
 
-    np.testing.assert_allclose(batched, [3.5, 13.5, np.nan, 8.5], equal_nan=True)
+    np.testing.assert_allclose(batched, expected, equal_nan=True)
+    assert tp.to_dataframe()["pixel_value"].tolist() == BAND.ravel().tolist()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -550,7 +552,7 @@ def test_sparse_pixel_graph(local_rasters, connectivity, edges):
 
 def test_pixel_graph_with_coordinates_skips_nodata(local_rasters):
     data = BAND.copy()
-    data[0, 1] = -99999.0
+    data[0, 1] = DEFAULT_NODATA
     tp = TifProcessor(local_rasters.put("a.tif", data), data_store=local_rasters.store)
 
     graph = tp.to_graph(include_coordinates=True)
@@ -592,7 +594,7 @@ def test_save_array_to_file_uses_the_processor_georeferencing(rasters):
 # Lifecycle
 #
 # The processor's temporary directory has no public handle; _temp_dir is the
-# narrowest one (spec, "Testing Decisions").
+# narrowest one.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -636,7 +638,7 @@ def test_cleanup_twice_does_not_raise(local_rasters):
 
 def test_opens_and_converts_through_either_store(rasters):
     tp = TifProcessor(
-        rasters.put("a.tif", MULTI), data_store=rasters.store, mode="multi"
+        rasters.put("a.tif", TWO_BANDS), data_store=rasters.store, mode="multi"
     )
 
     assert (tp.crs, tp.count, tp.bounds) == (
@@ -649,7 +651,7 @@ def test_opens_and_converts_through_either_store(rasters):
 
 def test_merges_through_either_store(rasters):
     west = rasters.put("west.tif", BAND)
-    east = rasters.put("east.tif", BAND + 16, bounds=EAST)
+    east = rasters.put("east.tif", BAND + 16, bounds=EAST_BOUNDS)
 
     tp = TifProcessor([west, east], data_store=rasters.store, merge_method="max")
 
@@ -674,3 +676,49 @@ def test_samples_through_either_store(rasters):
     np.testing.assert_allclose(
         tp.sample_by_polygons(POLYGONS), [3.5, 13.5, np.nan, 8.5], equal_nan=True
     )
+
+
+def test_batched_samples_through_either_store(rasters, start_method):
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
+
+    batched = tp.sample_by_polygons_batched(
+        POLYGONS, n_workers=2, batch_size=1, show_progress=False
+    )
+
+    np.testing.assert_allclose(batched, [3.5, 13.5, np.nan, 8.5], equal_nan=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Merged and clipped processors behave like one over a stored file
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def merged_west_east(rasters):
+    west = rasters.put("west.tif", BAND)
+    east = rasters.put("east.tif", BAND + 16, bounds=EAST_BOUNDS)
+    return TifProcessor([west, east], data_store=rasters.store)
+
+
+def clipped_south(rasters):
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
+    return tp.clip_to_geometry(box(0.001, 0.001, 0.039, 0.019))
+
+
+@pytest.mark.parametrize(
+    "derive, polygon_means, pixels",
+    [(merged_west_east, [3.5, 13.5], 32), (clipped_south, [np.nan, 13.5], 8)],
+)
+def test_derived_processor_samples_converts_and_saves(
+    rasters, derive, polygon_means, pixels
+):
+    tp = derive(rasters)
+
+    np.testing.assert_allclose(
+        tp.sample_by_polygons([NORTH_WEST, SOUTH_EAST]), polygon_means, equal_nan=True
+    )
+    assert tp.sample_by_coordinates([(0.035, 0.005)]).tolist() == [16.0]
+    assert len(tp.to_geodataframe()) == pixels
+    saved = TifProcessor(
+        str(tp.save_to_file(rasters.output("out.tif"))), data_store=rasters.store
+    )
+    assert saved.to_dataframe().equals(tp.to_dataframe())

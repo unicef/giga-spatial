@@ -15,10 +15,11 @@ import gc
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 from shapely.geometry import box
 
-from _tif_fakes import DEFAULT_RASTER_DATA
+from _tif_fakes import BAND, BANDS_FOR_MODE, DEFAULT_NODATA, EAST_BOUNDS, TWO_BANDS
 from gigaspatial.processing.tif_processor import TifProcessor
 
 
@@ -47,8 +48,7 @@ LATER_CLIPPED_WORKERS = breaks(
     "later", "batched worker setup ignores a clipped file on a non-local data store"
 )
 
-BAND = DEFAULT_RASTER_DATA
-EAST = (0.04, 0.0, 0.08, 0.04)
+SOUTH_WEST = box(0.001, 0.001, 0.019, 0.019)
 POLYGONS = [
     box(0.0, 0.02, 0.02, 0.04),
     box(0.02, 0.0, 0.04, 0.02),
@@ -57,10 +57,10 @@ POLYGONS = [
 DEADLINE = 10
 
 
-def merged(rasters, **kwargs):
+def merged(rasters):
     west = rasters.put("west.tif", BAND)
-    east = rasters.put("east.tif", BAND + 16, bounds=EAST)
-    return TifProcessor([west, east], data_store=rasters.store, **kwargs)
+    east = rasters.put("east.tif", BAND + 16, bounds=EAST_BOUNDS)
+    return TifProcessor([west, east], data_store=rasters.store)
 
 
 def batched(tp, polygons=POLYGONS):
@@ -116,7 +116,7 @@ def reprojected(rasters):
 
 def clipped(rasters):
     tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
-    return tp.clip_to_geometry(box(0.001, 0.001, 0.019, 0.019))
+    return tp.clip_to_geometry(SOUTH_WEST)
 
 
 @M1_2
@@ -137,20 +137,12 @@ def test_derived_processor_used_after_cleanup_says_it_was_cleaned_up(
 # M1-3: chunked conversion of multi-band rasters
 # ─────────────────────────────────────────────────────────────────────────────
 
-BANDS_FOR_MODE = {
-    "rgb": np.stack([BAND, BAND + 100, BAND + 200]),
-    "rgba": np.stack([BAND, BAND + 100, BAND + 200, np.full((4, 4), 255, np.float32)]),
-    "multi": np.stack([BAND, BAND * 10]),
-}
-
 
 @M1_3
 @pytest.mark.parametrize("mode", ["rgb", "rgba", "multi"])
 def test_chunked_multi_band_conversion_matches_to_dataframe(local_rasters, mode):
-    import pandas as pd
-
     data = BANDS_FOR_MODE[mode].copy()
-    data[0, 1, 2] = -99999.0
+    data[0, 1, 2] = DEFAULT_NODATA
     path = local_rasters.put("a.tif", data)
     tp = TifProcessor(path, data_store=local_rasters.store, mode=mode)
 
@@ -183,7 +175,9 @@ def test_batched_sampling_warns_on_low_memory_and_still_runs(
 
 @M1_5
 def test_sparse_graph_without_adjacent_valid_pixels_is_empty(local_rasters):
-    checkerboard = np.where(np.indices((4, 4)).sum(axis=0) % 2 == 0, BAND, -99999.0)
+    checkerboard = np.where(
+        np.indices((4, 4)).sum(axis=0) % 2 == 0, BAND, DEFAULT_NODATA
+    )
     path = local_rasters.put("a.tif", checkerboard.astype(np.float32))
     tp = TifProcessor(path, data_store=local_rasters.store)
 
@@ -194,7 +188,7 @@ def test_sparse_graph_without_adjacent_valid_pixels_is_empty(local_rasters):
 
 @M1_5
 def test_sparse_graph_without_valid_pixels_is_zero_by_zero(local_rasters):
-    path = local_rasters.put("a.tif", np.full((4, 4), -99999.0, np.float32))
+    path = local_rasters.put("a.tif", np.full((4, 4), DEFAULT_NODATA, np.float32))
     tp = TifProcessor(path, data_store=local_rasters.store)
 
     matrix = tp.to_graph(graph_type="sparse")
@@ -210,7 +204,7 @@ def test_sparse_graph_without_valid_pixels_is_zero_by_zero(local_rasters):
 @M1_6
 def test_mixed_crs_merge_without_target_crs_raises(local_rasters):
     west = local_rasters.put("west.tif", BAND)
-    east = local_rasters.put("east_3857.tif", BAND, bounds=EAST, crs="EPSG:3857")
+    east = local_rasters.put("east_3857.tif", BAND, bounds=EAST_BOUNDS, crs="EPSG:3857")
 
     with pytest.raises(ValueError) as error:
         TifProcessor([west, east], data_store=local_rasters.store)
@@ -264,7 +258,7 @@ def test_band_name_list_too_short_for_the_band_says_so(local_rasters):
 @LATER_POINT_NODATA
 def test_point_sample_at_a_nodata_pixel_is_nan(local_rasters):
     data = BAND.copy()
-    data[0, 0] = -99999.0
+    data[0, 0] = DEFAULT_NODATA
     tp = TifProcessor(local_rasters.put("a.tif", data), data_store=local_rasters.store)
 
     samples = tp.sample_by_coordinates([(0.005, 0.035), (0.015, 0.035)])
@@ -286,7 +280,7 @@ def test_drop_nodata_drops_nan_nodata_pixels(local_rasters):
 
 @LATER_POOLED_BANDS
 def test_multi_band_polygon_statistics_are_per_band(local_rasters):
-    path = local_rasters.put("a.tif", np.stack([BAND, BAND * 10]))
+    path = local_rasters.put("a.tif", TWO_BANDS)
     tp = TifProcessor(path, data_store=local_rasters.store, mode="multi")
 
     result = tp.sample_by_polygons(POLYGONS[:1])
