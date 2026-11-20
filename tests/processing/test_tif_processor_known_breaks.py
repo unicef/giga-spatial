@@ -12,6 +12,8 @@ worker's setup can raise, and the pool then respawns workers forever.
 
 import copy
 import gc
+import pickle
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -27,12 +29,6 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
-M1_1 = breaks(
-    "M1-1 → 02", "a copy of a processor deletes the original's temporary directory"
-)
-M1_2 = breaks(
-    "M1-2 → 02", "a cleaned-up derived processor fails with a misleading error"
-)
 M1_3 = breaks("M1-3 → 03", "to_dataframe_chunked calls a helper that does not exist")
 M1_4 = breaks(
     "M1-4 → 04", "the memory guard raises UnboundLocalError instead of warning"
@@ -63,52 +59,6 @@ def merged(rasters):
     return TifProcessor([west, east], data_store=rasters.store)
 
 
-def batched(tp, polygons=POLYGONS):
-    return tp.sample_by_polygons_batched(
-        polygons, n_workers=2, batch_size=1, show_progress=False
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# M1-1: data loss and ownership
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@M1_1
-def test_batched_sampling_leaves_a_merged_processor_intact(
-    local_rasters, start_method, deadline
-):
-    tp = merged(local_rasters)
-    expected = tp.sample_by_polygons(POLYGONS)
-
-    with deadline(DEADLINE):
-        first = batched(tp)
-    assert Path(tp._temp_dir).is_dir() and Path(tp.dataset_path).is_file()
-    with deadline(DEADLINE):
-        second = batched(tp)
-
-    np.testing.assert_allclose(first, expected)
-    np.testing.assert_allclose(second, expected)
-
-
-@M1_1
-@pytest.mark.parametrize("make_copy", [copy.copy, copy.deepcopy])
-def test_dropping_a_copy_leaves_the_original_intact(local_rasters, make_copy):
-    tp = merged(local_rasters)
-    duplicate = make_copy(tp)
-
-    del duplicate
-    gc.collect()
-
-    assert Path(tp._temp_dir).is_dir() and Path(tp.dataset_path).is_file()
-    assert len(tp.to_dataframe()) == 32
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# M1-2: use after cleanup
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def reprojected(rasters):
     path = rasters.put("a.tif")
     return TifProcessor(path, data_store=rasters.store, target_crs="EPSG:3857")
@@ -119,8 +69,96 @@ def clipped(rasters):
     return tp.clip_to_geometry(SOUTH_WEST)
 
 
-@M1_2
-@pytest.mark.parametrize("derive", [merged, reprojected, clipped])
+DERIVED = [merged, reprojected, clipped]
+
+
+def quarters(tp):
+    """The four quadrants of a processor's bounds, in its own CRS."""
+    left, bottom, right, top = tp.bounds
+    mid_x, mid_y = (left + right) / 2, (bottom + top) / 2
+    return [
+        box(left, mid_y, mid_x, top),
+        box(mid_x, mid_y, right, top),
+        box(left, bottom, mid_x, mid_y),
+        box(mid_x, bottom, right, mid_y),
+    ]
+
+
+def working_file_exists(tp):
+    return Path(tp._temp_dir).is_dir() and Path(tp.dataset_path).is_file()
+
+
+def batched(tp, polygons=POLYGONS):
+    return tp.sample_by_polygons_batched(
+        polygons, n_workers=2, batch_size=1, show_progress=False
+    )
+
+
+def pickled(tp):
+    return pickle.loads(pickle.dumps(tp))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M1-1: data loss and ownership
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("derive", DERIVED)
+def test_batched_sampling_leaves_a_derived_processor_intact(
+    local_rasters, start_method, deadline, derive
+):
+    tp = derive(local_rasters)
+    polygons = quarters(tp)
+    expected = tp.sample_by_polygons(polygons)
+
+    with deadline(DEADLINE):
+        first = batched(tp, polygons)
+    assert working_file_exists(tp)
+    with deadline(DEADLINE):
+        second = batched(tp, polygons)
+
+    np.testing.assert_allclose(first, expected)
+    np.testing.assert_allclose(second, expected)
+
+
+@pytest.mark.parametrize("make_copy", [copy.copy, copy.deepcopy, pickled])
+def test_dropping_a_copy_leaves_the_original_intact(local_rasters, make_copy):
+    tp = merged(local_rasters)
+    duplicate = make_copy(tp)
+
+    del duplicate
+    gc.collect()
+
+    assert working_file_exists(tp)
+    assert len(tp.to_dataframe()) == 32
+
+
+def test_cleanup_twice_then_collection_touches_no_other_processor(
+    local_rasters, monkeypatch
+):
+    unraisable = []
+    monkeypatch.setattr(sys, "unraisablehook", unraisable.append)
+    tp = merged(local_rasters)
+    other = merged(local_rasters)
+    duplicate_of_other = copy.deepcopy(other)
+
+    tp.cleanup()
+    tp.cleanup()
+    duplicate_of_other.cleanup()
+    del tp, duplicate_of_other
+    gc.collect()
+
+    assert not unraisable
+    assert working_file_exists(other)
+    assert len(other.to_dataframe()) == 32
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M1-2: use after cleanup
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("derive", DERIVED)
 def test_derived_processor_used_after_cleanup_says_it_was_cleaned_up(
     local_rasters, derive
 ):
@@ -131,6 +169,16 @@ def test_derived_processor_used_after_cleanup_says_it_was_cleaned_up(
     with pytest.raises(FileNotFoundError, match="cleaned up"):
         with tp.open_dataset():
             pass
+
+
+@pytest.mark.parametrize("derive", DERIVED)
+def test_wrapped_errors_after_cleanup_carry_the_cause(local_rasters, derive):
+    tp = derive(local_rasters)
+
+    tp.cleanup()
+
+    with pytest.raises(ValueError, match="cleaned up"):
+        tp.to_dataframe()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

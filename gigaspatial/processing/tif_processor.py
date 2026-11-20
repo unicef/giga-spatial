@@ -70,6 +70,11 @@ class TifProcessor:
         self.logger = config.get_logger(self.__class__.__name__)
         self._cache = {}
         self._temp_dir = tempfile.mkdtemp()
+        # Only this instance, in this process, may delete _temp_dir: forked
+        # children inherit the object unchanged, and __setstate__ clears it
+        # on pickled and copy.copy/copy.deepcopy'd copies.
+        self._temp_dir_owner_pid = os.getpid()
+        self._cleaned_up_file_path = None
         self._merged_file_path = None
         self._reprojected_file_path = None
         self._clipped_file_path = None
@@ -130,7 +135,17 @@ class TifProcessor:
 
         Yields:
             A rasterio.DatasetReader object.
+
+        Raises:
+            FileNotFoundError: If this processor's merged, reprojected, or
+                clipped file was deleted by `cleanup()`.
         """
+        if self._cleaned_up_file_path:
+            raise FileNotFoundError(
+                f"This TifProcessor was cleaned up: its working file "
+                f"{self._cleaned_up_file_path} was deleted. Create a new "
+                f"TifProcessor to read the raster again."
+            )
         if self._merged_file_path:
             with rasterio.open(self._merged_file_path) as src:
                 yield src
@@ -2294,20 +2309,46 @@ class TifProcessor:
     def __enter__(self):
         return self
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._temp_dir_owner_pid = None
+
+    def _owns_temp_dir(self) -> bool:
+        return getattr(self, "_temp_dir_owner_pid", None) == os.getpid()
+
     def __del__(self):
         """Clean up temporary files and directories."""
-        if (
-            hasattr(self, "_temp_dir")
-            and self._temp_dir
-            and os.path.exists(self._temp_dir)
-        ):
-            shutil.rmtree(self._temp_dir, ignore_errors=True)
+        try:
+            if self._owns_temp_dir():
+                shutil.rmtree(self._temp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
     def cleanup(self):
-        """Explicit cleanup method for better control."""
-        if hasattr(self, "_temp_dir") and os.path.exists(self._temp_dir):
+        """
+        Delete this processor's temporary files.
+
+        Only the processor that created them deletes them; on a copy, or when
+        called again, this does nothing. A merged, reprojected, or clipped
+        processor can't be read after cleanup; one over an original stored
+        file still can.
+        """
+        if not self._owns_temp_dir():
+            return
+        try:
             shutil.rmtree(self._temp_dir)
-            self.logger.info("Cleaned up temporary files")
+        except FileNotFoundError:
+            pass
+        self._temp_dir_owner_pid = None
+        self._cleaned_up_file_path = (
+            self._merged_file_path
+            or self._reprojected_file_path
+            or self._clipped_file_path
+        )
+        self._merged_file_path = None
+        self._reprojected_file_path = None
+        self._clipped_file_path = None
+        self.logger.info("Cleaned up temporary files")
 
     def __exit__(self, *args):
         """Proper context manager exit with cleanup."""
