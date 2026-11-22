@@ -1,6 +1,6 @@
 # Handlers
 
-A handler acquires a dataset published as files, stores the files, and loads them for a source. Construct the handler, then call `load_data`, `load_into_dataframe`, or the method named below. The shared machinery is documented in the [handler base](handler-base.md), not on these pages.
+A handler persists a dataset's files in a data store and loads them for a source. Construct the handler, then call `load_data`, `load_into_dataframe`, or the method named below. The shared machinery is documented in the [handler base](handler-base.md), not on these pages.
 
 ```python
 from gigaspatial import GHSLDataHandler, WPPopulationHandler

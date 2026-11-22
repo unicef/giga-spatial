@@ -4,7 +4,7 @@ A dataset is a named product the library can acquire, such as WorldPop populatio
 
 ## Handler
 
-A handler is a dataset published as files. It keeps those files in a data store and loads them for a source.
+A handler persists files in a data store and loads them for a source.
 
 A source is the place you load for, or an explicit list of stored files. A place is a country, a geometry, points, or a frame.
 
@@ -46,7 +46,7 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 
 ## Fetcher
 
-A fetcher is a dataset served as a query, from an API or a database. It returns records, or a road network. It does not store the dataset as files.
+A fetcher returns its result in memory and imposes no data-store layout. Publication as files or as a query does not decide this.
 
 ```python
 from gigaspatial import OSMLocationFetcher
@@ -60,7 +60,7 @@ clinics = OSMLocationFetcher(country="RWA", location_types=["clinic"]).fetch_loc
 
 Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.md) for method signatures.
 
-| Dataset | Fetcher | What it queries |
+| Dataset | Fetcher | What it reads |
 | --- | --- | --- |
 | OpenStreetMap places | `OSMLocationFetcher` | Points of interest (schools, clinics, hospitals, amenities) from the Overpass API |
 | OpenStreetMap roads | `OSMRoadsFetcher` | Road networks from the Overpass API, returned as a `SpatialNetwork` |

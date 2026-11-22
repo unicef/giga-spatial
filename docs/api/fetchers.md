@@ -1,6 +1,6 @@
 # Fetchers
 
-A fetcher queries an API or a database and returns records. It does not store the dataset as files.
+A fetcher returns its result in memory and imposes no data-store layout. Publication as files or as a query does not decide this. The result is records, a road network, or another in-memory dataset.
 
 ```python
 from gigaspatial import OSMLocationFetcher, OSMRoadsFetcher, GigaSchoolLocationFetcher

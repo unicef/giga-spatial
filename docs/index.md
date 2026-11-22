@@ -2,7 +2,7 @@
 
 # GigaSpatial
 
-GigaSpatial acquires published geospatial datasets into a data store you control, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. The result is a view: those places with attributes from the datasets attached.
+GigaSpatial acquires published geospatial datasets, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. The result is a view: those places with attributes from the datasets attached.
 
 [Tutorial](getting-started/quickstart.md){ .md-button .gs-button }
 [API reference](api/index.md){ .md-button }
@@ -19,7 +19,7 @@ print(view.head())
 
 <div class="grid cards" markdown>
 
--   <a class="gs-card-link" href="getting-started/datasets/"><span class="gs-card-title">Acquire a dataset</span>A handler stores a published dataset and loads it for a source. A fetcher queries an API or a database and returns records.</a>
+-   <a class="gs-card-link" href="getting-started/datasets/"><span class="gs-card-title">Acquire a dataset</span>A handler persists files in a data store and loads them for a source. A fetcher returns its result in memory and imposes no data-store layout.</a>
 
 -   <a class="gs-card-link" href="getting-started/quickstart/"><span class="gs-card-title">Map it onto places</span>A generator attaches a dataset to points of interest or zones. The result is a view.</a>
 
