@@ -51,7 +51,8 @@ class TifProcessor:
         data_store: DataStore instance for file access.
         mode: Processing mode ('single', 'rgb', 'rgba', 'multi').
         merge_method: Method for merging multiple rasters.
-        target_crs: Optional CRS to reproject to.
+        target_crs: Optional CRS to reproject to. Required when merging files
+            in different CRSs.
         resampling_method: Resampling algorithm to use.
         reprojection_resolution: Target pixel size for reprojection.
     """
@@ -70,6 +71,10 @@ class TifProcessor:
         self.logger = config.get_logger(self.__class__.__name__)
         self._cache = {}
         self._temp_dir = tempfile.mkdtemp()
+        # Only this instance, in this process, may delete _temp_dir: forked
+        # children inherit the object unchanged.
+        self._temp_dir_owner_pid = os.getpid()
+        self._deleted_working_file = None
         self._merged_file_path = None
         self._reprojected_file_path = None
         self._clipped_file_path = None
@@ -130,7 +135,12 @@ class TifProcessor:
 
         Yields:
             A rasterio.DatasetReader object.
+
+        Raises:
+            FileNotFoundError: If this processor's merged, reprojected, or
+                clipped file was deleted by `cleanup()`.
         """
+        self._raise_if_cleaned_up()
         if self._merged_file_path:
             with rasterio.open(self._merged_file_path) as src:
                 yield src
@@ -293,9 +303,10 @@ class TifProcessor:
                                 f"Dataset {i} has dtype {src.dtypes[0]}, expected {ref_dtype}"
                             )
                         if not self.target_crs and src.crs != ref_crs:
-                            self.logger.warning(
-                                f"Dataset {i} has CRS {src.crs}, expected {ref_crs}. "
-                                "Consider setting target_crs parameter for reprojection before merging."
+                            raise ValueError(
+                                f"Dataset {path} has CRS {src.crs}, but the first "
+                                f"dataset {self.dataset_paths[0]} has CRS {ref_crs}. "
+                                "Pass target_crs to reproject every file before merging."
                             )
                         if self.target_crs is None and not self._transforms_compatible(
                             src.transform, ref_transform
@@ -412,6 +423,7 @@ class TifProcessor:
                     "width": merged_array.shape[-1],
                     "transform": merged_transform,
                     "crs": self.target_crs if self.target_crs else ref_src.crs,
+                    "dtype": merged_array.dtype.name,
                 }
             )
 
@@ -499,7 +511,8 @@ class TifProcessor:
             where=count_array > 0,
         )
 
-        return mean_array.astype(src_files[0].dtypes[0]), merged_transform
+        mean_dtype = np.promote_types(src_files[0].dtypes[0], np.float32)
+        return mean_array.astype(mean_dtype), merged_transform
 
     def _load_metadata(self):
         """Load metadata from the TIF file if not already cached"""
@@ -606,18 +619,24 @@ class TifProcessor:
             A DataFrame with 'lon', 'lat', and band values.
 
         Raises:
-            ValueError: If processing fails due to mode mismatch or invalid data.
+            ValueError: If processing fails due to mode mismatch or invalid data,
+                or if a `band_names` list in single mode has no name for the
+                selected band.
         """
         # Memory guard check
         if check_memory:
             self._memory_guard("conversion", threshold_percent=80.0)
 
+        if self.mode == "single":
+            band_number = kwargs.get("band_number", 1)
+            band_name = self._single_band_name(kwargs.get("band_names"), band_number)
+
         try:
             if self.mode == "single":
                 return self._to_dataframe(
-                    band_number=kwargs.get("band_number", 1),
+                    band_number=band_number,
                     drop_nodata=drop_nodata,
-                    band_names=kwargs.get("band_names", None),
+                    band_names=band_name,
                     min_value=min_value,
                     max_value=max_value,
                 )
@@ -940,7 +959,7 @@ class TifProcessor:
                 G.add_weighted_edges_from(edges_to_add)
                 return G
             else:  # sparse matrix
-                edges_array = np.array(edges_to_add)
+                edges_array = np.array(edges_to_add).reshape(-1, 3)
                 row_indices = edges_array[:, 0]
                 col_indices = edges_array[:, 1]
                 weights = edges_array[:, 2]
@@ -1116,6 +1135,7 @@ class TifProcessor:
             Numpy array of statistics for each polygon.
         """
         import sys
+        import warnings
 
         # Memory guard check with n_workers consideration
         if check_memory:
@@ -1144,7 +1164,6 @@ class TifProcessor:
 
         # Platform check
         if sys.platform in ["win32", "darwin"]:
-            import warnings
             import multiprocessing as mp
 
             if mp.get_start_method(allow_none=True) != "fork":
@@ -1165,6 +1184,8 @@ class TifProcessor:
         stat_func = stat if callable(stat) else getattr(np, stat)
         polygon_chunks = list(_chunk_list(polygon_list, batch_size))
 
+        # A worker initializer that raises makes the pool respawn workers forever.
+        self._raise_if_cleaned_up()
         with multiprocessing.Pool(
             initializer=self._initializer_worker, processes=n_workers
         ) as pool:
@@ -1257,6 +1278,23 @@ class TifProcessor:
             for polygon in polygon_batch
         ]
 
+    @staticmethod
+    def _single_band_name(
+        band_names: Optional[Union[str, List[str]]], band_number: int
+    ) -> str:
+        """Value-column name for single mode; a list is indexed by the 1-based band."""
+        if isinstance(band_names, str):
+            return band_names
+        if isinstance(band_names, list):
+            if len(band_names) < band_number:
+                raise ValueError(
+                    f"band_names has {len(band_names)} item(s), so it has no name "
+                    f"for band {band_number}. Pass at least {band_number} names "
+                    f"or a single string."
+                )
+            return band_names[band_number - 1]
+        return "pixel_value"
+
     def _to_dataframe(
         self,
         band_number: Optional[int] = None,
@@ -1271,7 +1309,8 @@ class TifProcessor:
         Args:
             band_number: Specific band to read (1-indexed). If None, reads all bands.
             drop_nodata: Whether to drop nodata values
-            band_names: Custom names for bands (multi-band only)
+            band_names: Custom names for bands. In single-band mode, a string, or
+                a list indexed by the 1-based `band_number`.
             min_value: Minimum threshold for pixel values (exclusive)
             max_value: Maximum threshold for pixel values (exclusive)
 
@@ -1293,15 +1332,7 @@ class TifProcessor:
                 lons, lats = self._extract_coordinates_with_mask(mask)
                 values = np.extract(mask, band) if mask is not None else band.flatten()
 
-                band_name = (
-                    band_names
-                    if isinstance(band_names, str)
-                    else (
-                        band_names[band_number]
-                        if isinstance(band_names, list)
-                        else "pixel_value"
-                    )
-                )
+                band_name = self._single_band_name(band_names, band_number)
 
                 return pd.DataFrame({"lon": lons, "lat": lats, band_name: values})
             else:
@@ -1396,11 +1427,17 @@ class TifProcessor:
                     )
                     lons, lats = self._get_chunk_coordinates(window, src)
 
-                    # Build DataFrame using helper
-                    band_dict = {
-                        band_names[i]: stack_chunk[i] for i in range(self.count)
-                    }
-                    chunk_df = self._build_chunk_dataframe(lons, lats, band_dict, mask)
+                    keep = mask.flatten() if mask is not None else slice(None)
+                    chunk_df = pd.DataFrame(
+                        {
+                            "lon": lons[keep],
+                            "lat": lats[keep],
+                            **{
+                                band_names[i]: stack_chunk[i].flatten()[keep]
+                                for i in range(self.count)
+                            },
+                        }
+                    )
 
                     # RGBA: normalize alpha
                     if self.mode == "rgba" and "alpha" in chunk_df.columns:
@@ -2294,20 +2331,54 @@ class TifProcessor:
     def __enter__(self):
         return self
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._temp_dir_owner_pid = None
+
+    def _owns_temp_dir(self) -> bool:
+        return getattr(self, "_temp_dir_owner_pid", None) == os.getpid()
+
+    def _raise_if_cleaned_up(self):
+        if self._deleted_working_file:
+            raise FileNotFoundError(
+                f"This TifProcessor was cleaned up: its working file "
+                f"{self._deleted_working_file} was deleted. Create a new "
+                f"TifProcessor to read the raster again."
+            )
+
     def __del__(self):
         """Clean up temporary files and directories."""
-        if (
-            hasattr(self, "_temp_dir")
-            and self._temp_dir
-            and os.path.exists(self._temp_dir)
-        ):
-            shutil.rmtree(self._temp_dir, ignore_errors=True)
+        try:
+            if self._owns_temp_dir():
+                shutil.rmtree(self._temp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
     def cleanup(self):
-        """Explicit cleanup method for better control."""
-        if hasattr(self, "_temp_dir") and os.path.exists(self._temp_dir):
+        """
+        Delete this processor's temporary files.
+
+        Only the processor that created them deletes them; on a copy, or when
+        called again, this does nothing. A merged, reprojected, or clipped
+        processor can't be read after cleanup; one over an original stored
+        file still can.
+        """
+        if not self._owns_temp_dir():
+            return
+        try:
             shutil.rmtree(self._temp_dir)
-            self.logger.info("Cleaned up temporary files")
+        except FileNotFoundError:
+            pass
+        self._temp_dir_owner_pid = None
+        self._deleted_working_file = (
+            self._merged_file_path
+            or self._reprojected_file_path
+            or self._clipped_file_path
+        )
+        self._merged_file_path = None
+        self._reprojected_file_path = None
+        self._clipped_file_path = None
+        self.logger.info("Cleaned up temporary files")
 
     def __exit__(self, *args):
         """Proper context manager exit with cleanup."""
