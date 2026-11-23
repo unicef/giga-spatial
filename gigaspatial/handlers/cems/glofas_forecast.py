@@ -30,6 +30,17 @@ They are stored apart from the forecast runs and can be loaded on their own.
 They are not paired with ``version_2_1``, ``version_3_1``, or operational
 runs before 2023-07-26, which are the 0.1 degree grids.
 
+When a load contains both a v4 forecast and these maps, the reader copies
+upstream area and the GloFAS flood thresholds onto the forecast's native
+cells. Cell centres must already coincide. Nothing is interpolated. The
+flood thresholds are the GloFAS v4.0 files on the CEMS auxiliary-data page.
+The EFAS thresholds on that page belong to the European model and a
+different grid, so they are not applied to GloFAS discharge. A forecast
+that exceeds a threshold gains ``exceeded_return_period_years``: the
+highest listed return period the discharge exceeds, or 0 when it stays
+below the 1.5-year threshold. Missing discharge, the auxiliary fill value,
+and cells with no upstream area stay missing.
+
 On 2026-11-16 the public constraints showed:
 
 - ``operational`` / ``htessel_lisflood`` / river discharge: 2019-11-05 to 2021-05-25
@@ -98,6 +109,8 @@ DATA_FORMATS = ("netcdf", "grib2")
 V4_GRID_FROM = date(2023, 7, 26)
 V4_RESOLUTION_DEGREES = 0.05
 LEGACY_RESOLUTION_DEGREES = 0.1
+# NetCDF fill used by the published auxiliary maps.
+AUXILIARY_FILL = -3.402823e38
 AUXILIARY_VERSION = "4.0"
 AREA_MARGIN_DEGREES = 0.051
 CLUSTER_GAP_DEGREES = 2.0
@@ -1105,7 +1118,11 @@ class GlofasForecastReader(BaseHandlerReader):
         One series returns a Dataset. Several variables, products, or areas
         return nested dicts, collapsing any level that has a single entry.
         Forecast runs are stacked on their reference-time dimension. Auxiliary
-        maps stay separate from those runs.
+        maps stay available on their own. A v4 forecast loaded together with
+        those maps also receives them on its own cells, including
+        ``exceeded_return_period_years`` when river discharge and flood
+        thresholds are both present. A forecast on the older 0.1 degree grid
+        is left unchanged.
         """
         groups: Dict[str, Dict[str, Dict[str, List]]] = {}
         for raw in source_data_path:
@@ -1129,6 +1146,7 @@ class GlofasForecastReader(BaseHandlerReader):
             groups.setdefault(variable, {}).setdefault(product, {}).setdefault(area_id, []).append(loaded)
         if not groups:
             raise ValueError("No stored GloFAS forecast files were found.")
+        self._align_auxiliary(groups)
         assembled = {}
         for variable, products in groups.items():
             packed = {
@@ -1137,6 +1155,41 @@ class GlofasForecastReader(BaseHandlerReader):
             }
             assembled[variable] = _collapse(packed)
         return _collapse(assembled)
+
+    def _align_auxiliary(self, groups: Dict[str, Dict[str, Dict[str, List]]]) -> None:
+        """Copy v4 static maps onto forecast datasets that share their cells."""
+        static_by_area: Dict[str, Dict[str, object]] = {}
+        for variable, products in groups.items():
+            for area_id, parts in products.get("static", {}).items():
+                if len(parts) != 1:
+                    raise ValueError(
+                        f"{variable} for area {area_id} has {len(parts)} static files."
+                    )
+                static_by_area.setdefault(area_id, {})[variable] = parts[0]
+        if not static_by_area:
+            return
+        for variable, products in groups.items():
+            for product, areas in products.items():
+                if product == "static":
+                    continue
+                for area_id, parts in areas.items():
+                    maps = static_by_area.get(area_id)
+                    if not maps:
+                        raise ValueError(
+                            "GloFAS auxiliary maps were loaded, but none match "
+                            f"forecast area {area_id}."
+                        )
+                    if not all(_on_v4_grid(part) for part in parts):
+                        self.logger.warning(
+                            "GloFAS v4.0 auxiliary maps were not aligned onto %s %s %s. "
+                            "They apply to operational forecasts from %s on the 0.05 degree grid.",
+                            variable,
+                            product,
+                            area_id,
+                            V4_GRID_FROM.isoformat(),
+                        )
+                        continue
+                    areas[area_id] = [align_static_maps(part, maps) for part in parts]
 
 
 class GlofasForecastHandler(BaseHandler):
@@ -1445,6 +1498,195 @@ def _coordinate_name(dataset, names: Sequence[str]) -> str:
         if name in dataset.coords or name in dataset.dims or name in dataset.variables:
             return name
     raise ValueError(f"No coordinate named {names} in the file.")
+
+
+def align_static_maps(forecast, maps: Dict[str, object]):
+    """
+    Copy static maps onto the forecast's native cells.
+
+    Each map must use the same 0.05 degree cell centres. A centre that is
+    missing, or farther than half a cell away, raises ``ValueError``. Values
+    are not interpolated. The published fill value becomes missing. River
+    discharge then records the highest GloFAS flood-threshold return period
+    it exceeds.
+    """
+    if not _on_v4_grid(forecast):
+        raise ValueError(
+            "GloFAS v4.0 auxiliary maps apply from "
+            f"{V4_GRID_FROM.isoformat()} on the 0.05 degree grid."
+        )
+    aligned = forecast
+    discharge_name = _discharge_variable(aligned)
+    if discharge_name is not None:
+        masked = _mask_missing(aligned[discharge_name])
+        aligned = aligned.assign({discharge_name: masked})
+    thresholds = []
+    upstream = None
+    for name, static in maps.items():
+        piece = _reindex_native(static, aligned, name)
+        if name in aligned.data_vars:
+            raise ValueError(f"Forecast already has a variable named {name}.")
+        aligned = aligned.assign({name: piece})
+        if name.startswith("flood_threshold_rl_"):
+            thresholds.append((float(name[len("flood_threshold_rl_"):]), aligned[name]))
+        elif name == "upstream_area":
+            upstream = aligned[name]
+    if discharge_name is not None and thresholds:
+        exceeded = _exceeded_return_period(aligned[discharge_name], thresholds, upstream)
+        aligned = aligned.assign(exceeded_return_period_years=exceeded)
+    aligned.attrs["auxiliary_alignment"] = "native_cell"
+    aligned.attrs["auxiliary_version"] = AUXILIARY_VERSION
+    return aligned
+
+
+def _on_v4_grid(dataset) -> bool:
+    dates = _reference_dates(dataset)
+    if dates and min(dates) < V4_GRID_FROM:
+        return False
+    lat_name, _lon_name = _lat_lon_names(dataset)
+    step = _grid_step(np.asarray(dataset[lat_name].values, dtype=float))
+    return step is not None and abs(step - V4_RESOLUTION_DEGREES) <= 1e-4
+
+
+def _reference_dates(dataset) -> List[date]:
+    for name in REFERENCE_DIMS:
+        if name not in dataset.coords and name not in dataset.dims and name not in dataset.variables:
+            continue
+        found = []
+        for value in np.asarray(dataset[name].values).reshape(-1):
+            try:
+                found.append(pd.Timestamp(value).date())
+            except (ValueError, TypeError):
+                continue
+        if found:
+            return found
+    raw = dataset.attrs.get("gigaspatial_reference_date")
+    if raw:
+        return [date.fromisoformat(str(raw)[:10])]
+    return []
+
+
+def _discharge_variable(dataset) -> Optional[str]:
+    for name in ("dis24", "river_discharge_in_the_last_24_hours"):
+        if name in dataset.data_vars:
+            return name
+    return None
+
+
+def _reindex_native(static, forecast, name: str):
+    """Select the static cells whose centres match the forecast."""
+    flat, flon = _lat_lon_names(forecast)
+    slat, slon = _lat_lon_names(static)
+    forecast_lat = np.asarray(forecast[flat].values, dtype=float)
+    forecast_lon = np.asarray(forecast[flon].values, dtype=float)
+    step = _grid_step(forecast_lat) or V4_RESOLUTION_DEGREES
+    lat_index = _native_index(forecast_lat, np.asarray(static[slat].values, dtype=float), step)
+    lon_index = _native_index(forecast_lon, np.asarray(static[slon].values, dtype=float), step)
+    variable = _gridded_variable(static)
+    order = [slat, slon] + [dim for dim in variable.dims if dim not in (slat, slon)]
+    values = np.asarray(variable.transpose(*order).values)
+    selected = values[lat_index][:, lon_index, ...]
+    selected = _mask_array(selected, dict(variable.attrs))
+    piece = _xarray().DataArray(
+        selected,
+        dims=(flat, flon) + tuple(order[2:]),
+        coords={flat: forecast[flat], flon: forecast[flon]},
+        name=name,
+        attrs=dict(variable.attrs),
+    )
+    piece.attrs["alignment"] = "native_cell"
+    return piece
+
+
+def _gridded_variable(dataset):
+    lat_name, lon_name = _lat_lon_names(dataset)
+    gridded = [
+        variable
+        for variable in dataset.data_vars.values()
+        if lat_name in variable.dims and lon_name in variable.dims
+    ]
+    if len(gridded) != 1:
+        raise ValueError(
+            "An auxiliary map must contain one gridded field, "
+            f"found {len(gridded)}."
+        )
+    return gridded[0]
+
+
+def _native_index(target: np.ndarray, source: np.ndarray, step: float) -> np.ndarray:
+    order = np.argsort(source)
+    ordered = np.asarray(source, dtype=float)[order]
+    if ordered.size == 0:
+        raise ValueError("Auxiliary map has no coordinates.")
+    position = np.searchsorted(ordered, target, side="left")
+    position = np.clip(position, 0, ordered.size - 1)
+    previous = np.clip(position - 1, 0, ordered.size - 1)
+    choose_previous = np.abs(ordered[previous] - target) <= np.abs(ordered[position] - target)
+    nearest = np.where(choose_previous, previous, position)
+    delta = np.abs(ordered[nearest] - target)
+    if np.any(delta > (step / 2) + 1e-6):
+        raise ValueError(
+            "Forecast and auxiliary cells do not share the GloFAS grid. "
+            "Values were not interpolated."
+        )
+    return order[nearest]
+
+
+def _mask_missing(values):
+    if not np.issubdtype(values.dtype, np.floating):
+        return values
+    data = values.astype("float64")
+    invalid = ~np.isfinite(data) | (data < -1e30)
+    number = _fill_value(values.attrs)
+    if number is not None:
+        invalid = invalid | (np.abs(data - number) <= abs(number) * 1e-6)
+    masked = data.where(~invalid)
+    masked.attrs = dict(values.attrs)
+    return masked
+
+
+def _mask_array(values: np.ndarray, attrs: dict) -> np.ndarray:
+    if not np.issubdtype(values.dtype, np.floating):
+        return values
+    data = values.astype("float64")
+    invalid = ~np.isfinite(data) | (data < -1e30)
+    number = _fill_value(attrs)
+    if number is not None:
+        invalid = invalid | (np.abs(data - number) <= abs(number) * 1e-6)
+    return np.where(invalid, np.nan, data)
+
+
+def _fill_value(attrs: dict) -> Optional[float]:
+    fill = attrs.get("_FillValue", attrs.get("missing_value"))
+    if fill is None:
+        return None
+    try:
+        number = float(fill)
+    except (TypeError, ValueError):
+        return None
+    if abs(number) <= 1e30:
+        return None
+    return number
+
+
+def _exceeded_return_period(discharge, thresholds, upstream):
+    """Highest return period, in years, exceeded at each forecast cell."""
+    finite = np.isfinite(discharge)
+    exceeded = _xarray().full_like(discharge, np.nan, dtype="float64")
+    exceeded = exceeded.where(~finite, 0.0)
+    for years, threshold in sorted(thresholds):
+        above = finite & np.isfinite(threshold) & (discharge > threshold)
+        exceeded = exceeded.where(~above, float(years))
+    if upstream is not None:
+        river = np.isfinite(upstream) & (upstream > 0)
+        exceeded = exceeded.where(river)
+    exceeded.name = "exceeded_return_period_years"
+    exceeded.attrs["units"] = "years"
+    exceeded.attrs["long_name"] = (
+        "Highest GloFAS flood-threshold return period exceeded by the forecast discharge"
+    )
+    exceeded.attrs["below_lowest_threshold"] = 0.0
+    return exceeded
 
 
 def _stamp_run(dataset, day: date, leads: Sequence[int], open_tail: bool, catalogue_updated: Optional[str]) -> None:

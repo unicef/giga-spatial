@@ -36,6 +36,7 @@ from gigaspatial.handlers.cems.glofas_forecast import (
     GlofasForecastHandler,
     decode_payload,
     expected_resolution,
+    align_static_maps,
     extraction_areas,
     runs_to_fetch,
     subset_native,
@@ -756,6 +757,121 @@ def test_forecast_and_auxiliary_paths_stay_separate(tmp_path, monkeypatch):
     assert auxiliary_files
     assert all(path.is_relative_to(forecast_root) for path in forecast_files)
     assert all(path.is_relative_to(auxiliary_root) for path in auxiliary_files)
+
+
+def _static_map(name, values, latitude=None, longitude=None, fill=None):
+    latitude = LATITUDE if latitude is None else latitude
+    longitude = LONGITUDE if longitude is None else longitude
+    dataset = xr.Dataset(
+        {name: (("latitude", "longitude"), np.array(values, dtype="float32"))},
+        coords={"latitude": np.array(latitude, dtype=float), "longitude": np.array(longitude, dtype=float)},
+    )
+    if fill is not None:
+        dataset[name].attrs["_FillValue"] = fill
+    return dataset
+
+
+def test_v4_discharge_aligns_with_upstream_area_and_flood_thresholds():
+    discharge = np.array([[[[[10.0, 3.0], [module.AUXILIARY_FILL, 20.0]]]]], dtype="float32")
+    forecast = xr.Dataset(
+        {"dis24": (("time", "number", "step", "latitude", "longitude"), discharge)},
+        coords={
+            "time": [np.datetime64("2024-03-01", "ns")],
+            "number": np.array([0], dtype="int32"),
+            "step": np.array([24], dtype="int32"),
+            "latitude": LATITUDE,
+            "longitude": LONGITUDE,
+        },
+    )
+    forecast["dis24"].attrs["units"] = "m3 s-1"
+    # Static latitude is stored south-to-north reversed. Alignment follows the coordinate.
+    upstream = np.array([[3.0e6, module.AUXILIARY_FILL], [1.0e6, 2.0e6]], dtype="float32")
+    low = np.array([[8.0, 8.0], [5.0, 5.0]], dtype="float32")
+    high = np.array([[30.0, 30.0], [15.0, 15.0]], dtype="float32")
+    aligned = align_static_maps(
+        forecast,
+        {
+            "upstream_area": _static_map(
+                "uparea", upstream, latitude=LATITUDE[::-1], fill=module.AUXILIARY_FILL
+            ),
+            "flood_threshold_rl_1.5": _static_map("threshold", low, latitude=LATITUDE[::-1]),
+            "flood_threshold_rl_2.0": _static_map("threshold", high, latitude=LATITUDE[::-1]),
+        },
+    )
+    assert np.array_equal(aligned["latitude"].values, LATITUDE)
+    assert np.isnan(aligned["dis24"].values[0, 0, 0, 1, 0])
+    assert aligned["upstream_area"].values[0, 0] == pytest.approx(1.0e6)
+    assert aligned["upstream_area"].values[0, 1] == pytest.approx(2.0e6)
+    assert np.isnan(aligned["upstream_area"].values[1, 1])
+    period = aligned["exceeded_return_period_years"].values[0, 0, 0]
+    assert period[0, 0] == pytest.approx(1.5)
+    assert period[0, 1] == pytest.approx(0.0)
+    assert np.isnan(period[1, 0])
+    assert np.isnan(period[1, 1])
+    assert aligned["flood_threshold_rl_1.5"].dtype.kind == "f"
+    assert aligned.attrs["auxiliary_alignment"] == "native_cell"
+
+
+def test_auxiliary_cells_off_the_forecast_grid_are_rejected():
+    forecast = xr.Dataset(
+        {"dis24": (("latitude", "longitude"), np.ones((2, 2), dtype="float32"))},
+        coords={"latitude": LATITUDE, "longitude": LONGITUDE},
+    )
+    shifted = _static_map("uparea", np.ones((2, 2)), longitude=LONGITUDE + 0.04)
+    with pytest.raises(ValueError, match="were not interpolated"):
+        align_static_maps(forecast, {"upstream_area": shifted})
+
+
+def test_legacy_forecast_is_not_aligned_to_v4_maps(tmp_path, caplog):
+    area = "n0p000_w29p000_s0p000_e30p000"
+    forecast_dir = (
+        tmp_path / "forecast" / "RWA" / "operational" / "lisflood" / DISCHARGE / "control_forecast" / area
+    )
+    write_forecast(forecast_dir / "2024-03-01.nc", DAY_A, leads=(24,), step=0.1)
+    auxiliary = tmp_path / "auxiliary" / "RWA" / "upstream_area" / area / "static.nc"
+    auxiliary.parent.mkdir(parents=True)
+    _static_map("uparea", np.ones((2, 2), dtype="float32")).to_netcdf(auxiliary)
+    handler = GlofasForecastHandler(
+        base_path=tmp_path / "forecast",
+        auxiliary_base_path=tmp_path / "auxiliary",
+        api_key="not-used",
+    )
+    caplog.set_level(logging.WARNING, logger=handler.reader.logger.name)
+    loaded = handler.reader.load_from_paths(
+        [str(forecast_dir / "2024-03-01.nc"), str(auxiliary)],
+        handler.reader.options_type(),
+    )
+    assert "were not aligned" in caplog.text
+    assert "exceeded_return_period_years" not in loaded[DISCHARGE].data_vars
+    assert "upstream_area" in loaded
+
+
+def test_combined_load_keeps_separate_maps_and_the_aligned_forecast(tmp_path):
+    area = "n0p000_w29p000_s0p000_e30p000"
+    forecast_dir = (
+        tmp_path / "forecast" / "RWA" / "operational" / "lisflood" / DISCHARGE / "control_forecast" / area
+    )
+    write_forecast(forecast_dir / "2024-03-01.nc", DAY_A, leads=(24,), fill=12.0)
+    upstream = tmp_path / "auxiliary" / "RWA" / "upstream_area" / area / "static.nc"
+    threshold = tmp_path / "auxiliary" / "RWA" / "flood_threshold_rl_1.5" / area / "static.nc"
+    upstream.parent.mkdir(parents=True)
+    threshold.parent.mkdir(parents=True)
+    _static_map("uparea", np.full((2, 2), 1.0e6, dtype="float32")).to_netcdf(upstream)
+    _static_map("rl", np.full((2, 2), 5.0, dtype="float32")).to_netcdf(threshold)
+    handler = GlofasForecastHandler(
+        base_path=tmp_path / "forecast",
+        auxiliary_base_path=tmp_path / "auxiliary",
+        api_key="not-used",
+    )
+    loaded = handler.reader.load_from_paths(
+        [str(forecast_dir / "2024-03-01.nc"), str(upstream), str(threshold)],
+        handler.reader.options_type(),
+    )
+    discharge = loaded[DISCHARGE]
+    assert discharge["upstream_area"].values[0, 0] == pytest.approx(1.0e6)
+    assert discharge["exceeded_return_period_years"].values[0, 0, 0, 0, 0] == pytest.approx(1.5)
+    assert set(np.asarray(discharge["latitude"].values)) == set(np.asarray(loaded["upstream_area"]["latitude"].values))
+    assert "uparea" in loaded["upstream_area"].data_vars
 
 
 def test_handler_is_registered_and_flood_hazard_stays_separate():

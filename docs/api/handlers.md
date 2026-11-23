@@ -176,6 +176,10 @@ The v4.0 maps apply to operational forecasts from 26 July 2023 onward, including
 | `flood_threshold_rl_1.5` through `flood_threshold_rl_500.0` | Discharge thresholds for the 1.5, 2, 5, 10, 20, 50, 100, 200, and 500 year return periods |
 | `flood_threshold_mu`, `flood_threshold_sigma` | Parameters of the distribution used for those thresholds |
 
+The flood thresholds are the GloFAS v4.0 files. The EFAS thresholds listed on the same page describe the European model and do not share this grid, so a GloFAS forecast is not compared with them.
+
+A load that contains a 0.05° forecast and these maps copies each map onto the forecast cells. Matching uses the published cell centres. A centre more than half a cell away raises `ValueError` instead of interpolating. The auxiliary fill value and a non-finite sample become missing. On river discharge, `exceeded_return_period_years` is the highest return period the discharge exceeds, or 0 when it stays below the 1.5-year threshold. Cells with no upstream area, and forecast runs before 26 July 2023, are not given that comparison.
+
 ```python
 from gigaspatial import GlofasForecastHandler
 
