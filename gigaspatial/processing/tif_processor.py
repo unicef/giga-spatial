@@ -1125,6 +1125,7 @@ class TifProcessor:
             Numpy array of statistics for each polygon.
         """
         import sys
+        import warnings
 
         # Memory guard check with n_workers consideration
         if check_memory:
@@ -1153,7 +1154,6 @@ class TifProcessor:
 
         # Platform check
         if sys.platform in ["win32", "darwin"]:
-            import warnings
             import multiprocessing as mp
 
             if mp.get_start_method(allow_none=True) != "fork":

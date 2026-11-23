@@ -58,16 +58,30 @@ def start_method(request):
     multiprocessing.set_start_method(original, force=True)
 
 
-@pytest.fixture
-def low_memory(monkeypatch):
-    """Reports one byte of available system memory to anything asking psutil."""
+def _fake_virtual_memory(monkeypatch, available: int):
     import psutil
 
     total = 16 * 1024**3
     fake = SimpleNamespace(
-        total=total, available=1, used=total - 1, free=1, percent=99.9
+        total=total,
+        available=available,
+        used=total - available,
+        free=available,
+        percent=100.0 * (total - available) / total,
     )
     monkeypatch.setattr(psutil, "virtual_memory", lambda: fake)
+
+
+@pytest.fixture
+def low_memory(monkeypatch):
+    """Reports one byte of available system memory to anything asking psutil."""
+    _fake_virtual_memory(monkeypatch, available=1)
+
+
+@pytest.fixture
+def ample_memory(monkeypatch):
+    """Reports 8 GiB of 16 GiB system memory available to anything asking psutil."""
+    _fake_virtual_memory(monkeypatch, available=8 * 1024**3)
 
 
 @pytest.fixture

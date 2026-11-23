@@ -88,6 +88,8 @@ All notable changes to this project will be documented in this file.
     -   **Change in error type:** using a merged, reprojected, or clipped processor after `cleanup()` now raises `FileNotFoundError` from `open_dataset` saying the processor was cleaned up, instead of a rasterio I/O error surfacing as a misleading "mode mismatch" `ValueError`. Methods that already wrap errors in `ValueError` (such as `to_dataframe`) still raise `ValueError`, with that cause in the message. A processor opened on an original stored file stays readable after `cleanup()`.
 -   **`TifProcessor.to_dataframe_chunked` on multi-band rasters (`gigaspatial/processing/tif_processor.py`)**
     -   Fixed `to_dataframe_chunked` raising `AttributeError` on every `rgb`, `rgba`, and `multi` raster. It now returns the same columns (band names from descriptions, `band_N`, or the rgb and rgba names) and rows as `to_dataframe` with the same `drop_nodata`; like single-band chunked conversion, it still ignores `min_value` and `max_value`. Single-band chunked output is unchanged.
+-   **`TifProcessor.sample_by_polygons_batched` memory guard (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `sample_by_polygons_batched` raising `UnboundLocalError` whenever the memory guard found available memory insufficient. It now emits the intended `ResourceWarning` suggesting a smaller `n_workers`, then samples and returns results. Behaviour with sufficient memory, and the macOS/Windows start-method `RuntimeWarning`, are unchanged.
 
 ## [v0.11.1] - 2026-11-17
 

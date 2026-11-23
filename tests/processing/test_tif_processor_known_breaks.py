@@ -15,6 +15,7 @@ import copy
 import gc
 import pickle
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -30,9 +31,6 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
-M1_4 = breaks(
-    "M1-4 → 04", "the memory guard raises UnboundLocalError instead of warning"
-)
 M1_5 = breaks("M1-5 → 05", "a sparse pixel graph without edges raises IndexError")
 M1_6 = breaks("M1-6 → 06", "a mixed-CRS merge without target_crs only logs a warning")
 M1_7 = breaks("M1-7 → 07", "a mean merge casts the mean back to the source dtype")
@@ -221,9 +219,8 @@ def test_chunked_multi_band_conversion_matches_to_dataframe(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M1_4
 def test_batched_sampling_warns_on_low_memory_and_still_runs(
-    local_rasters, low_memory, deadline
+    local_rasters, start_method, low_memory, deadline
 ):
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
 
@@ -231,6 +228,36 @@ def test_batched_sampling_warns_on_low_memory_and_still_runs(
         result = batched(tp, POLYGONS[:2])
 
     np.testing.assert_allclose(result, [3.5, 13.5])
+
+
+def test_batched_sampling_with_enough_memory_emits_no_resource_warning(
+    local_rasters, start_method, ample_memory, deadline
+):
+    tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
+
+    with warnings.catch_warnings(record=True) as caught, deadline(DEADLINE):
+        warnings.simplefilter("always")
+        result = batched(tp, POLYGONS[:2])
+
+    np.testing.assert_allclose(result, [3.5, 13.5])
+    assert not [w for w in caught if issubclass(w.category, ResourceWarning)]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_batched_sampling_on_macos_or_windows_warns_unless_forking(
+    local_rasters, start_method, ample_memory, monkeypatch, platform
+):
+    tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
+    monkeypatch.setattr(sys, "platform", platform)
+
+    # No polygons: returns after the platform check, before any pool starts.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        batched(tp, [])
+
+    warned = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    expected = 0 if start_method == "fork" else 1
+    assert len(warned) == expected
 
 
 # ─────────────────────────────────────────────────────────────────────────────
