@@ -31,7 +31,6 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
-M1_5 = breaks("M1-5 → 05", "a sparse pixel graph without edges raises IndexError")
 M1_6 = breaks("M1-6 → 06", "a mixed-CRS merge without target_crs only logs a warning")
 M1_7 = breaks("M1-7 → 07", "a mean merge casts the mean back to the source dtype")
 M1_8 = breaks("M1-8 → 07", "a band_names list is indexed by the 1-based band number")
@@ -261,31 +260,58 @@ def test_batched_sampling_on_macos_or_windows_warns_unless_forking(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# M1-5: sparse pixel graphs without edges
+# M1-5: pixel graphs without edges
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M1_5
-def test_sparse_graph_without_adjacent_valid_pixels_is_empty(local_rasters):
+def isolated_pixels(rasters):
     checkerboard = np.where(
         np.indices((4, 4)).sum(axis=0) % 2 == 0, BAND, DEFAULT_NODATA
     )
-    path = local_rasters.put("a.tif", checkerboard.astype(np.float32))
-    tp = TifProcessor(path, data_store=local_rasters.store)
+    path = rasters.put("a.tif", checkerboard.astype(np.float32))
+    return TifProcessor(path, data_store=rasters.store)
+
+
+def no_valid_pixels(rasters):
+    path = rasters.put("a.tif", np.full((4, 4), DEFAULT_NODATA, np.float32))
+    return TifProcessor(path, data_store=rasters.store)
+
+
+def test_sparse_graph_without_adjacent_valid_pixels_is_empty(local_rasters):
+    tp = isolated_pixels(local_rasters)
 
     matrix = tp.to_graph(connectivity=4, graph_type="sparse")
 
     assert matrix.shape == (8, 8) and matrix.nnz == 0
+    assert matrix.format == "csr"
 
 
-@M1_5
 def test_sparse_graph_without_valid_pixels_is_zero_by_zero(local_rasters):
-    path = local_rasters.put("a.tif", np.full((4, 4), DEFAULT_NODATA, np.float32))
-    tp = TifProcessor(path, data_store=local_rasters.store)
+    tp = no_valid_pixels(local_rasters)
 
     matrix = tp.to_graph(graph_type="sparse")
 
     assert matrix.shape == (0, 0)
+    assert matrix.format == "csr"
+
+
+def test_networkx_graph_without_adjacent_valid_pixels_has_isolated_nodes(
+    local_rasters,
+):
+    tp = isolated_pixels(local_rasters)
+
+    graph = tp.to_graph(connectivity=4)
+
+    assert (graph.number_of_nodes(), graph.number_of_edges()) == (8, 0)
+    assert graph.nodes[0] == {"value": 1.0}
+
+
+def test_networkx_graph_without_valid_pixels_is_empty(local_rasters):
+    tp = no_valid_pixels(local_rasters)
+
+    graph = tp.to_graph()
+
+    assert (graph.number_of_nodes(), graph.number_of_edges()) == (0, 0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

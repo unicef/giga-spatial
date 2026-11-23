@@ -90,6 +90,8 @@ All notable changes to this project will be documented in this file.
     -   Fixed `to_dataframe_chunked` raising `AttributeError` on every `rgb`, `rgba`, and `multi` raster. It now returns the same columns (band names from descriptions, `band_N`, or the rgb and rgba names) and rows as `to_dataframe` with the same `drop_nodata`; like single-band chunked conversion, it still ignores `min_value` and `max_value`. Single-band chunked output is unchanged.
 -   **`TifProcessor.sample_by_polygons_batched` memory guard (`gigaspatial/processing/tif_processor.py`)**
     -   Fixed `sample_by_polygons_batched` raising `UnboundLocalError` whenever the memory guard found available memory insufficient. It now emits the intended `ResourceWarning` suggesting a smaller `n_workers`, then samples and returns results. Behaviour with sufficient memory, and the macOS/Windows start-method `RuntimeWarning`, are unchanged.
+-   **`TifProcessor.to_graph` sparse output without edges (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `to_graph(graph_type="sparse")` raising `IndexError` when no two valid pixels are adjacent, such as scattered flood pixels, or when no pixel is valid. It now returns an n×n CSR matrix with no stored entries, where n is the number of valid pixels (0×0 when none are valid). The `networkx` output, and sparse output for rasters with adjacent valid pixels, are unchanged.
 
 ## [v0.11.1] - 2026-11-17
 

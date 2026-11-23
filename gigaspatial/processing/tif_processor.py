@@ -949,7 +949,7 @@ class TifProcessor:
                 G.add_weighted_edges_from(edges_to_add)
                 return G
             else:  # sparse matrix
-                edges_array = np.array(edges_to_add)
+                edges_array = np.array(edges_to_add).reshape(-1, 3)
                 row_indices = edges_array[:, 0]
                 col_indices = edges_array[:, 1]
                 weights = edges_array[:, 2]
