@@ -423,6 +423,7 @@ class TifProcessor:
                     "width": merged_array.shape[-1],
                     "transform": merged_transform,
                     "crs": self.target_crs if self.target_crs else ref_src.crs,
+                    "dtype": merged_array.dtype.name,
                 }
             )
 
@@ -510,7 +511,8 @@ class TifProcessor:
             where=count_array > 0,
         )
 
-        return mean_array.astype(src_files[0].dtypes[0]), merged_transform
+        mean_dtype = np.promote_types(src_files[0].dtypes[0], np.float32)
+        return mean_array.astype(mean_dtype), merged_transform
 
     def _load_metadata(self):
         """Load metadata from the TIF file if not already cached"""
@@ -617,18 +619,24 @@ class TifProcessor:
             A DataFrame with 'lon', 'lat', and band values.
 
         Raises:
-            ValueError: If processing fails due to mode mismatch or invalid data.
+            ValueError: If processing fails due to mode mismatch or invalid data,
+                or if a `band_names` list in single mode has no name for the
+                selected band.
         """
         # Memory guard check
         if check_memory:
             self._memory_guard("conversion", threshold_percent=80.0)
 
+        if self.mode == "single":
+            band_number = kwargs.get("band_number", 1)
+            band_name = self._single_band_name(kwargs.get("band_names"), band_number)
+
         try:
             if self.mode == "single":
                 return self._to_dataframe(
-                    band_number=kwargs.get("band_number", 1),
+                    band_number=band_number,
                     drop_nodata=drop_nodata,
-                    band_names=kwargs.get("band_names", None),
+                    band_names=band_name,
                     min_value=min_value,
                     max_value=max_value,
                 )
@@ -1270,6 +1278,23 @@ class TifProcessor:
             for polygon in polygon_batch
         ]
 
+    @staticmethod
+    def _single_band_name(
+        band_names: Optional[Union[str, List[str]]], band_number: int
+    ) -> str:
+        """Value-column name for single mode; a list is indexed by the 1-based band."""
+        if isinstance(band_names, str):
+            return band_names
+        if isinstance(band_names, list):
+            if len(band_names) < band_number:
+                raise ValueError(
+                    f"band_names has {len(band_names)} item(s), so it has no name "
+                    f"for band {band_number}. Pass at least {band_number} names "
+                    f"or a single string."
+                )
+            return band_names[band_number - 1]
+        return "pixel_value"
+
     def _to_dataframe(
         self,
         band_number: Optional[int] = None,
@@ -1284,7 +1309,8 @@ class TifProcessor:
         Args:
             band_number: Specific band to read (1-indexed). If None, reads all bands.
             drop_nodata: Whether to drop nodata values
-            band_names: Custom names for bands (multi-band only)
+            band_names: Custom names for bands. In single-band mode, a string, or
+                a list indexed by the 1-based `band_number`.
             min_value: Minimum threshold for pixel values (exclusive)
             max_value: Maximum threshold for pixel values (exclusive)
 
@@ -1306,15 +1332,7 @@ class TifProcessor:
                 lons, lats = self._extract_coordinates_with_mask(mask)
                 values = np.extract(mask, band) if mask is not None else band.flatten()
 
-                band_name = (
-                    band_names
-                    if isinstance(band_names, str)
-                    else (
-                        band_names[band_number]
-                        if isinstance(band_names, list)
-                        else "pixel_value"
-                    )
-                )
+                band_name = self._single_band_name(band_names, band_number)
 
                 return pd.DataFrame({"lon": lons, "lat": lats, band_name: values})
             else:

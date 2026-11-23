@@ -95,6 +95,11 @@ All notable changes to this project will be documented in this file.
 -   **Mixed-CRS `TifProcessor` merges (`gigaspatial/processing/tif_processor.py`)**
     -   Fixed merging stored files in different CRSs without `target_crs` producing a wrong mosaic: it logged a warning, mosaicked the files as if they shared one CRS, and labelled the result with the first file's CRS, so metres could be read as degrees. Construction now raises `ValueError` naming the offending file, its CRS, and the first file's CRS. CRSs are compared semantically, so an EPSG code and the equivalent WKT still merge, and merges with `target_crs` set still reproject every file first.
     -   **Behaviour change:** the mixed-CRS warning is now a `ValueError`, also raised through `merge_rasters=True` on raster handlers and `map_rasters` with a list of processors. To migrate, pass `target_crs`.
+-   **Mean `TifProcessor` merges of integer rasters (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `merge_method="mean"` casting the mean back to the source dtype, so the mean of 1 and 2 on `uint8` was 1. The merged raster is now written in the source dtype promoted with `float32`: 8- and 16-bit integers become `float32`, 32- and 64-bit integers become `float64`, and floats keep their dtype. Nodata handling and the `first`, `last`, `min` and `max` merges are unchanged.
+    -   **Behaviour change:** for mean merges of integer rasters, `TifProcessor.dtype`, `get_raster_info()` and the value columns of converted tables now report the floating dtype instead of the source integer dtype.
+-   **`TifProcessor.to_dataframe` with a `band_names` list in single mode (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `to_dataframe(band_names=["pop"])` on a single-band raster indexing the list with the 1-based band number, which raised `IndexError` wrapped in a misleading "mode mismatch" `ValueError`. The list is now indexed by the selected band, so the example produces a `pop` column. A list too short for the selected band raises `ValueError` naming `band_names` and the band. A string `band_names` is unchanged.
 
 ## [v0.11.1] - 2026-11-17
 

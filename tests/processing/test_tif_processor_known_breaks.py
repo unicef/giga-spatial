@@ -31,8 +31,6 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
-M1_7 = breaks("M1-7 → 07", "a mean merge casts the mean back to the source dtype")
-M1_8 = breaks("M1-8 → 07", "a band_names list is indexed by the 1-based band number")
 LATER_POINT_NODATA = breaks("later", "point samples return the raw nodata value")
 LATER_NAN_NODATA = breaks("later", "NaN nodata is never masked")
 LATER_POOLED_BANDS = breaks("later", "polygon statistics pool all bands into one value")
@@ -335,7 +333,6 @@ def test_mixed_crs_merge_without_target_crs_raises(local_rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M1_7
 def test_mean_merge_of_integers_keeps_the_fraction(local_rasters):
     ones = local_rasters.put("ones.tif", np.full((4, 4), 1, np.uint8), nodata=None)
     twos = local_rasters.put("twos.tif", np.full((4, 4), 2, np.uint8), nodata=None)
@@ -351,14 +348,12 @@ def test_mean_merge_of_integers_keeps_the_fraction(local_rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M1_8
 def test_single_band_name_list_names_the_value_column(local_rasters):
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
 
     assert list(tp.to_dataframe(band_names=["pop"]).columns) == ["lon", "lat", "pop"]
 
 
-@M1_8
 def test_band_name_list_too_short_for_the_band_says_so(local_rasters):
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
 
