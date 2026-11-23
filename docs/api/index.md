@@ -8,8 +8,8 @@ The [handler base](handler-base.md) is last. It is for adding a dataset to this 
 
 ## Callers
 
-- [Handlers](handlers.md): datasets published as files
-- [Fetchers](fetchers.md): datasets served as a query
+- [Handlers](handlers.md): files kept in a data store and loaded for a source
+- [Fetchers](fetchers.md): a result returned in memory, with no data-store layout
 - [Generators](generators.md)
 - [Grids](grid.md)
 - [Data stores](data-stores.md)

@@ -1,6 +1,6 @@
 # GigaSpatial
 
-GigaSpatial acquires published geospatial datasets into a data store you control, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. That mapping is one use of the data, not the purpose of the library.
+GigaSpatial acquires published geospatial datasets, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. That mapping is one use of the data, not the purpose of the library.
 
 ## Language
 
@@ -21,11 +21,11 @@ A connection used to query a database, a warehouse, or a web API. A fetcher or a
 _Avoid_: data store, fetcher
 
 **Handler**:
-A dataset published as files. Its files are kept in a data store and loaded for a source.
+The persisted acquisition of a dataset: files kept in a data store and loaded for a source.
 _Avoid_: fetcher, downloader
 
 **Fetcher**:
-A dataset served as a query, from an API or a database. The result is records, or a road network.
+The in-memory acquisition of a dataset: it returns the result and imposes no data-store layout. Publication as files or as a query does not decide this.
 _Avoid_: handler
 
 **Spatial network**:
@@ -138,5 +138,5 @@ The geometry of a request's area of interest, used to crop loaded data. Always a
 _Avoid_: search key, bounding box (unless it is one)
 
 **Stored file**:
-A file as it exists in the data store after fetching, as opposed to the remote file it came from. One data unit may produce several stored files, for example when an archive is extracted.
+A file a handler has written in the data store, as opposed to the remote file it came from. One data unit may produce several stored files, for example when an archive is extracted.
 _Avoid_: downloaded file, cache file

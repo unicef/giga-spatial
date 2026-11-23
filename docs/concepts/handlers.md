@@ -1,6 +1,6 @@
 # Handlers
 
-A **handler** acquires a published geospatial dataset as files into a **data store** you control and loads those files for a **source**. It is the library's main abstraction for working with file-based geospatial products such as WorldPop rasters, GHSL products, building footprint archives, or Geofabrik OpenStreetMap extracts.
+A **handler** persists a dataset's files in a **data store** you control and loads those files for a **source**. It is how the library keeps products such as WorldPop rasters, GHSL products, building footprint archives, and Geofabrik OpenStreetMap extracts.
 
 This page explains why handlers exist, how they differ from **fetchers**, how data stores and lazy caching work, and how requests are scoped and cropped. It is written for data scientists who know Python, pandas, and geopandas. For the full catalog of built-in datasets, see [Datasets](../getting-started/datasets.md). For method signatures and dataset-specific options, see the [Handlers API](../api/handlers.md) and [Fetchers API](../api/fetchers.md).
 
@@ -30,20 +30,20 @@ frame = population.load_into_dataframe("RWA", crop_to_source=True)
 
 ## Handlers vs. fetchers
 
-GigaSpatial separates datasets published as files from datasets served as live queries:
+A handler and a fetcher are two ways to acquire a dataset. They differ by what comes back, and by whether the library imposes a data-store layout.
 
-- A **handler** manages a dataset published as files. It acquires **data units** (such as tiles, country files, or extracts) into a data store you control and loads those **stored files** for a source. Because the files remain in your data store, runs are reproducible, shareable across a team, and work offline once acquired.
-- A **fetcher** queries a live API or database on demand (using a **client** such as `BigQueryClient` when querying a warehouse). It returns records (typically a `DataFrame` or `GeoDataFrame`) or a `SpatialNetwork`, and does not store the dataset as files in a data store.
+- A **handler** persists files in a data store and loads them for a source. It acquires **data units** (tiles, country files, or extracts) and loads those **stored files**. The files stay in the data store, so a later run can reload them offline with `ensure_available=False`.
+- A **fetcher** returns its result in memory and imposes no data-store layout. The result may be records (a `DataFrame` or `GeoDataFrame`), a `SpatialNetwork`, or another in-memory dataset. A **client** such as `BigQueryClient` is how a fetcher reaches a warehouse. Publication as files or as a query does not decide this: `OvertureAmenityFetcher` reads remote GeoParquet in place and does not mirror it.
 
 | Aspect | Handler | Fetcher |
 | --- | --- | --- |
-| How the dataset is published | Downloadable files (rasters, GeoParquet, CSVs, extracts) | Live API endpoint or database query |
-| Stored in a data store | Yes, lazily cached as stored files | No, queried on demand |
-| Offline reuse and reproducibility | High, reload stored files with `ensure_available=False` | Depends on live service availability and state |
-| Typical return value | `TifProcessor`, `GeoDataFrame`, `DataFrame`, or `SpatialNetwork` | `GeoDataFrame`, `DataFrame`, or `SpatialNetwork` |
+| What comes back | Stored files, loaded for a source | The result in memory, with no data-store layout |
+| Kept in a data store | Yes, as stored files | No |
+| Offline reuse | Reload stored files with `ensure_available=False` | Depends on the service the call reaches |
+| Typical return value | `TifProcessor`, `GeoDataFrame`, `DataFrame`, or `SpatialNetwork` | `GeoDataFrame`, `DataFrame`, `SpatialNetwork`, or another in-memory dataset |
 | Examples | `WPPopulationHandler`, `GHSLDataHandler`, `GoogleMSBuildingsHandler`, `RWIHandler`, `OSMRoadsHandler` | `OSMLocationFetcher`, `OSMRoadsFetcher`, `GigaSchoolLocationFetcher`, `OvertureAmenityFetcher`, `MLabFetcher` |
 
-OpenStreetMap roads illustrate the difference cleanly. `OSMRoadsHandler` downloads dated Geofabrik extracts into your data store and builds repeatable, country-scale road networks from those stored files. `OSMRoadsFetcher` queries the Overpass API on demand for smaller areas without storing an extract. Both return the same `SpatialNetwork`.
+OpenStreetMap roads is two acquisitions of related data. `OSMRoadsHandler` persists dated Geofabrik extracts and loads them for a source. `OSMRoadsFetcher` returns a `SpatialNetwork` from Overpass and saves nothing. A handler and a fetcher need not share a call.
 
 A third, narrower category is the **image downloader** (such as `MapboxImageDownloader` or `MaxarImageDownloader`): it saves imagery from an API into a data store as image files, with no source-loading step.
 
