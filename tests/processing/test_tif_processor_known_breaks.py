@@ -31,7 +31,6 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
-M1_6 = breaks("M1-6 → 06", "a mixed-CRS merge without target_crs only logs a warning")
 M1_7 = breaks("M1-7 → 07", "a mean merge casts the mean back to the source dtype")
 M1_8 = breaks("M1-8 → 07", "a band_names list is indexed by the 1-based band number")
 LATER_POINT_NODATA = breaks("later", "point samples return the raw nodata value")
@@ -319,7 +318,6 @@ def test_networkx_graph_without_valid_pixels_is_empty(local_rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M1_6
 def test_mixed_crs_merge_without_target_crs_raises(local_rasters):
     west = local_rasters.put("west.tif", BAND)
     east = local_rasters.put("east_3857.tif", BAND, bounds=EAST_BOUNDS, crs="EPSG:3857")

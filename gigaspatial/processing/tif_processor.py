@@ -51,7 +51,8 @@ class TifProcessor:
         data_store: DataStore instance for file access.
         mode: Processing mode ('single', 'rgb', 'rgba', 'multi').
         merge_method: Method for merging multiple rasters.
-        target_crs: Optional CRS to reproject to.
+        target_crs: Optional CRS to reproject to. Required when merging files
+            in different CRSs.
         resampling_method: Resampling algorithm to use.
         reprojection_resolution: Target pixel size for reprojection.
     """
@@ -302,9 +303,10 @@ class TifProcessor:
                                 f"Dataset {i} has dtype {src.dtypes[0]}, expected {ref_dtype}"
                             )
                         if not self.target_crs and src.crs != ref_crs:
-                            self.logger.warning(
-                                f"Dataset {i} has CRS {src.crs}, expected {ref_crs}. "
-                                "Consider setting target_crs parameter for reprojection before merging."
+                            raise ValueError(
+                                f"Dataset {path} has CRS {src.crs}, but the first "
+                                f"dataset {self.dataset_paths[0]} has CRS {ref_crs}. "
+                                "Pass target_crs to reproject every file before merging."
                             )
                         if self.target_crs is None and not self._transforms_compatible(
                             src.transform, ref_transform

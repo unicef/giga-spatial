@@ -92,6 +92,9 @@ All notable changes to this project will be documented in this file.
     -   Fixed `sample_by_polygons_batched` raising `UnboundLocalError` whenever the memory guard found available memory insufficient. It now emits the intended `ResourceWarning` suggesting a smaller `n_workers`, then samples and returns results. Behaviour with sufficient memory, and the macOS/Windows start-method `RuntimeWarning`, are unchanged.
 -   **`TifProcessor.to_graph` sparse output without edges (`gigaspatial/processing/tif_processor.py`)**
     -   Fixed `to_graph(graph_type="sparse")` raising `IndexError` when no two valid pixels are adjacent, such as scattered flood pixels, or when no pixel is valid. It now returns an n×n CSR matrix with no stored entries, where n is the number of valid pixels (0×0 when none are valid). The `networkx` output, and sparse output for rasters with adjacent valid pixels, are unchanged.
+-   **Mixed-CRS `TifProcessor` merges (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed merging stored files in different CRSs without `target_crs` producing a wrong mosaic: it logged a warning, mosaicked the files as if they shared one CRS, and labelled the result with the first file's CRS, so metres could be read as degrees. Construction now raises `ValueError` naming the offending file, its CRS, and the first file's CRS. CRSs are compared semantically, so an EPSG code and the equivalent WKT still merge, and merges with `target_crs` set still reproject every file first.
+    -   **Behaviour change:** the mixed-CRS warning is now a `ValueError`, also raised through `merge_rasters=True` on raster handlers and `map_rasters` with a list of processors. To migrate, pass `target_crs`.
 
 ## [v0.11.1] - 2026-11-17
 
