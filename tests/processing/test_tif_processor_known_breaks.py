@@ -18,12 +18,16 @@ import sys
 import warnings
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+from rasterio.crs import CRS
+from rasterio.enums import Resampling
 from shapely.geometry import box
 
 from _tif_fakes import BAND, BANDS_FOR_MODE, DEFAULT_NODATA, EAST_BOUNDS, TWO_BANDS
+from gigaspatial import ZonalViewGenerator
 from gigaspatial.processing.tif_processor import TifProcessor
 
 
@@ -31,12 +35,17 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
+M2_1 = breaks("M2-1 → 10", "a clip reports its clipped file as its only source")
+M2_3 = breaks("M2-3 → 09", "every open reads the whole stored file again")
+M2_4 = breaks("M2-4 → 10", "a clip takes default settings except mode and data_store")
+M2_5 = breaks("M2-5 → 09", "map_rasters merges a processor list with default settings")
+M2_6 = breaks("M2-6 → 10", "there is no to_crs")
+M2_7 = breaks(
+    "M2-7 → 09", "batched worker setup ignores a clipped file on a non-local data store"
+)
 LATER_POINT_NODATA = breaks("later", "point samples return the raw nodata value")
 LATER_NAN_NODATA = breaks("later", "NaN nodata is never masked")
 LATER_POOLED_BANDS = breaks("later", "polygon statistics pool all bands into one value")
-LATER_CLIPPED_WORKERS = breaks(
-    "later", "batched worker setup ignores a clipped file on a non-local data store"
-)
 
 SOUTH_WEST = box(0.001, 0.001, 0.019, 0.019)
 POLYGONS = [
@@ -316,12 +325,12 @@ def test_networkx_graph_without_valid_pixels_is_empty(local_rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_mixed_crs_merge_without_target_crs_raises(local_rasters):
-    west = local_rasters.put("west.tif", BAND)
-    east = local_rasters.put("east_3857.tif", BAND, bounds=EAST_BOUNDS, crs="EPSG:3857")
+def test_mixed_crs_merge_without_target_crs_raises(rasters):
+    west = rasters.put("west.tif", BAND)
+    east = rasters.put("east_3857.tif", BAND, bounds=EAST_BOUNDS, crs="EPSG:3857")
 
     with pytest.raises(ValueError) as error:
-        TifProcessor([west, east], data_store=local_rasters.store)
+        TifProcessor([west, east], data_store=rasters.store)
 
     message = str(error.value)
     for part in ("east_3857.tif", "EPSG:4326", "EPSG:3857", "target_crs"):
@@ -362,7 +371,157 @@ def test_band_name_list_too_short_for_the_band_says_so(local_rasters):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Later: tracked, not fixed in Milestone 1
+# M2-1: lineage of a clip
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@M2_1
+def test_clip_of_a_merged_processor_reports_the_original_stored_files(rasters):
+    tp = merged(rasters)
+
+    clip = tp.clip_to_geometry(SOUTH_WEST)
+
+    assert [Path(p).name for p in clip.dataset_paths] == ["west.tif", "east.tif"]
+    assert (clip.is_merged, clip.source_count) == (True, 2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M2-3: one read of a stored file
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@M2_3
+def test_a_stored_file_is_read_at_most_once(memory_rasters):
+    path = memory_rasters.put("a.tif")
+    tp = TifProcessor(path, data_store=memory_rasters.store)
+
+    tp.to_dataframe()
+    tp.sample_by_polygons(POLYGONS)
+    tp.get_raster_info(include_statistics=True)
+    tp.clip_to_geometry(SOUTH_WEST)
+
+    assert memory_rasters.store.reads[path] <= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M2-4: settings of a clip
+# ─────────────────────────────────────────────────────────────────────────────
+
+SETTINGS = (
+    "mode",
+    "merge_method",
+    "resampling_method",
+    "reprojection_resolution",
+    "data_store",
+    "target_crs",
+)
+
+
+def settings(tp):
+    return {name: getattr(tp, name) for name in SETTINGS}
+
+
+@M2_4
+def test_clip_carries_its_parents_settings(rasters):
+    tp = TifProcessor(
+        rasters.put("a.tif"),
+        data_store=rasters.store,
+        merge_method="max",
+        target_crs="EPSG:4326",
+        resampling_method=Resampling.bilinear,
+        reprojection_resolution=(0.01, 0.01),
+    )
+
+    clip = tp.clip_to_geometry(SOUTH_WEST)
+
+    assert settings(clip) == settings(tp)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M2-5: map_rasters inherits a processor list's settings
+# ─────────────────────────────────────────────────────────────────────────────
+
+ZONES = gpd.GeoDataFrame(
+    {
+        "zone_id": ["nw", "se"],
+        "geometry": [
+            box(0.002, 0.022, 0.018, 0.038),  # pixels 1, 2, 5, 6
+            box(0.022, 0.002, 0.038, 0.018),  # pixels 11, 12, 15, 16
+        ],
+    },
+    crs="EPSG:4326",
+)
+
+
+def zone_means(rasters, processors, **kwargs):
+    generator = ZonalViewGenerator(ZONES, data_store=rasters.store)
+    view = generator.map_rasters(processors, output_column="value", **kwargs)
+    return view.set_index("zone_id")["value"].tolist()
+
+
+@M2_5
+def test_map_rasters_merges_with_the_first_processors_merge_method(local_rasters):
+    processors = [
+        TifProcessor(
+            local_rasters.put(name, data),
+            data_store=local_rasters.store,
+            merge_method="max",
+        )
+        for name, data in [("low.tif", BAND), ("high.tif", BAND + 100)]
+    ]
+
+    overridden = zone_means(local_rasters, processors, merge_method="first")
+    inherited = zone_means(local_rasters, processors)
+
+    assert overridden == [3.5, 13.5]
+    assert inherited == [103.5, 113.5]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M2-6: to_crs
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@M2_6
+@pytest.mark.parametrize("cleaned", ["original", "result"])
+@pytest.mark.parametrize(
+    "target", ["EPSG:3857", CRS.from_epsg(4326).to_wkt()], ids=["other", "equal"]
+)
+def test_to_crs_returns_an_independent_processor(rasters, target, cleaned):
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
+
+    result = tp.to_crs(target)
+
+    assert isinstance(result, TifProcessor) and result is not tp
+    assert result.crs == CRS.from_user_input(target)
+    gone, kept = (tp, result) if cleaned == "original" else (result, tp)
+    gone.cleanup()
+    assert not kept.to_dataframe().empty
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M2-7: batched sampling of a clip on a non-local data store
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@M2_7
+def test_batched_sampling_of_a_clipped_processor_on_a_non_local_store(
+    memory_rasters, deadline
+):
+    tp = TifProcessor(memory_rasters.put("a.tif"), data_store=memory_rasters.store)
+    south = tp.clip_to_geometry(box(0.001, 0.001, 0.039, 0.019))
+    polygons = [box(0.0, 0.0, 0.02, 0.02), box(0.02, 0.0, 0.04, 0.02)]
+    expected = south.sample_by_polygons(polygons)
+    np.testing.assert_allclose(expected, [11.5, 13.5])
+
+    with deadline(DEADLINE):
+        result = batched(south, polygons)
+
+    np.testing.assert_allclose(result, expected)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Later: tracked, not fixed in Milestone 1 or 2
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -397,19 +556,3 @@ def test_multi_band_polygon_statistics_are_per_band(local_rasters):
     result = tp.sample_by_polygons(POLYGONS[:1])
 
     np.testing.assert_allclose(np.asarray(result[0], dtype=float), [3.5, 35.0])
-
-
-@LATER_CLIPPED_WORKERS
-def test_batched_sampling_of_a_clipped_processor_on_a_non_local_store(
-    memory_rasters, deadline
-):
-    tp = TifProcessor(memory_rasters.put("a.tif"), data_store=memory_rasters.store)
-    south = tp.clip_to_geometry(box(0.001, 0.001, 0.039, 0.019))
-    polygons = [box(0.0, 0.0, 0.02, 0.02), box(0.02, 0.0, 0.04, 0.02)]
-    expected = south.sample_by_polygons(polygons)
-    np.testing.assert_allclose(expected, [11.5, 13.5])
-
-    with deadline(DEADLINE):
-        result = batched(south, polygons)
-
-    np.testing.assert_allclose(result, expected)

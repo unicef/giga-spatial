@@ -1,10 +1,18 @@
+import sys
+from pathlib import Path
+
 import geopandas as gpd
 import numpy as np
 import pytest
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
 
 from gigaspatial import ZonalViewGenerator
 from gigaspatial.core.io.local_data_store import LocalDataStore
+from gigaspatial.processing.tif_processor import TifProcessor
+
+# The TifProcessor suite's in-memory data store lives with that suite.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "processing"))
+from _tif_fakes import InMemoryDataStore, StoredRasters  # noqa: E402
 
 
 def _make_generator(tmp_path) -> ZonalViewGenerator:
@@ -1291,9 +1299,34 @@ def test_zonal_google_and_ms_buildings_non_empty_use_polygons_and_overwrite(tmp_
     assert v_msp.set_index("zone_id").loc["z1", "ms_buildings_count"] == 1
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Known breaks (.scratch/tif-processor-hardening/spec.md, Milestone 2)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="[M2-2 → 09] map_rasters opens clipped files through the generator's data store",
+)
+def test_zonal_map_rasters_merges_clipped_processors_on_a_non_local_store(tmp_path):
+    rasters = StoredRasters(InMemoryDataStore(), tmp_path)
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
+    clips = [
+        tp.clip_to_geometry(box(0.001, 0.001, 0.019, 0.019)),  # pixels 9, 10, 13, 14
+        tp.clip_to_geometry(box(0.021, 0.001, 0.039, 0.019)),  # pixels 11, 12, 15, 16
+    ]
+    zones = gpd.GeoDataFrame(
+        {
+            "zone_id": ["sw", "se"],
+            "geometry": [
+                box(0.002, 0.002, 0.018, 0.018),
+                box(0.022, 0.002, 0.038, 0.018),
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    gen = ZonalViewGenerator(zones, data_store=rasters.store)
 
+    view = gen.map_rasters(clips, stat="mean", output_column="value")
 
-
-
+    assert view.set_index("zone_id")["value"].tolist() == [11.5, 13.5]

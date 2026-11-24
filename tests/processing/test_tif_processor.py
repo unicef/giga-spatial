@@ -9,6 +9,7 @@ test_tif_processor_known_breaks.py.
 All rasters are tiny synthetic GeoTIFFs; nothing touches the network.
 """
 
+import copy
 from pathlib import Path
 
 import geopandas as gpd
@@ -616,19 +617,23 @@ def test_context_manager_cleans_up_on_exit(local_rasters):
     assert not temp_dir.exists()
 
 
-def test_processor_over_a_stored_file_stays_readable_after_cleanup(local_rasters):
-    tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
+def test_processor_over_a_stored_file_stays_readable_after_cleanup(rasters):
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
 
+    tp.cleanup()
+    assert tp.to_dataframe()["pixel_value"].tolist() == BAND.ravel().tolist()
     tp.cleanup()
 
     assert tp.to_dataframe()["pixel_value"].tolist() == BAND.ravel().tolist()
 
 
-def test_cleanup_twice_does_not_raise(local_rasters):
-    tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
+def test_deepcopy_stays_readable_after_the_original_is_cleaned_up(rasters):
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
+    duplicate = copy.deepcopy(tp)
 
     tp.cleanup()
-    tp.cleanup()
+
+    assert duplicate.to_dataframe()["pixel_value"].tolist() == BAND.ravel().tolist()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

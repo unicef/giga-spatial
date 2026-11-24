@@ -7,6 +7,7 @@ with ``spawn`` can unpickle the data store.
 
 import io
 import posixpath
+from collections import Counter
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
@@ -108,10 +109,15 @@ class _WriteOnClose(io.BytesIO):
 
 
 class InMemoryDataStore(DataStore):
-    """A non-local data store: files are bytes in a dict, directories are implied by paths."""
+    """
+    A non-local data store: files are bytes in a dict, directories are implied by paths.
+
+    ``reads`` counts every read and open-for-reading of a stored file, by path.
+    """
 
     def __init__(self):
         self.files = {}
+        self.reads = Counter()
 
     @staticmethod
     def _key(path) -> str:
@@ -124,8 +130,13 @@ class InMemoryDataStore(DataStore):
             raise FileNotFoundError(f"No such file in memory store: {path}")
         return key
 
+    def _read(self, path) -> bytes:
+        key = self._require(path)
+        self.reads[key] += 1
+        return self.files[key]
+
     def read_file(self, path, encoding=None):
-        data = self.files[self._require(path)]
+        data = self._read(path)
         return data.decode(encoding) if encoding else data
 
     def write_file(self, path, data, encoding=None):
@@ -166,7 +177,7 @@ class InMemoryDataStore(DataStore):
     def open(self, file, mode="r", encoding=None):
         encoding = encoding or self.DEFAULT_ENCODING
         if mode in ("r", "rb"):
-            data = self.files[self._require(file)]
+            data = self._read(file)
             return (
                 io.BytesIO(data) if mode == "rb" else io.StringIO(data.decode(encoding))
             )
@@ -193,4 +204,4 @@ class InMemoryDataStore(DataStore):
             del self.files[key]
 
     def copy_file(self, src, dst):
-        self.files[self._key(dst)] = self.files[self._require(src)]
+        self.files[self._key(dst)] = self._read(src)
