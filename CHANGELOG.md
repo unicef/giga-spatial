@@ -51,6 +51,12 @@ All notable changes to this project will be documented in this file.
 -   **Collapsed zonal view generator hierarchy (`gigaspatial/generators/zonal/`)**
     -   Merged the abstract `ZonalViewGenerator` base class and `GeometryBasedZonalViewGenerator` into one concrete `ZonalViewGenerator` in `gigaspatial/generators/zonal/base.py`, exported from `gigaspatial`, `gigaspatial.generators`, and `gigaspatial.generators.zonal`.
     -   Moved `self._country` default resolution in `map_wp_pop`, `map_rwi`, and `map_buildings` onto `ZonalViewGenerator` and removed the duplicated pass-through overrides from `AdminBoundariesViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, and `MercatorViewGenerator`.
+-   **`TifProcessor` downloads a non-local stored file once (`gigaspatial/processing/tif_processor.py`)**
+    -   A processor over a stored file in a non-local data store, such as ADLS, now downloads it once into a local copy in its temporary directory and reads that copy until `cleanup()`. Previously every open read the whole file into memory again, including in each batched-sampling worker; workers now open the local file by path. `cleanup()` and garbage collection delete the copy, and copies of a processor never do. A processor over a stored file stays readable after `cleanup()` and makes a fresh copy on its next read.
+    -   Merges of stored files read them from local disk, and copies made for a merge are deleted once the merged file is written.
+    -   A relative stored path in a `LocalDataStore` with a `base_path` is now opened relative to that `base_path`, as merges already were, instead of the working directory.
+-   **`map_rasters` merges of a processor list inherit the first processor's settings (`gigaspatial/generators/base.py`)**
+    -   `map_rasters`'s merge of a processor list now uses the first processor's `merge_method`, `resampling_method`, `reprojection_resolution` and `mode` unless the call overrides them, instead of the defaults. `target_crs` is not inherited: processors in different CRSs still raise `ValueError` unless the call passes it.
 
 ### Deprecated
 
@@ -104,6 +110,10 @@ All notable changes to this project will be documented in this file.
     -   **Behaviour change:** for mean merges of integer rasters, `TifProcessor.dtype`, `get_raster_info()` and the value columns of converted tables now report the floating dtype instead of the source integer dtype.
 -   **`TifProcessor.to_dataframe` with a `band_names` list in single mode (`gigaspatial/processing/tif_processor.py`)**
     -   Fixed `to_dataframe(band_names=["pop"])` on a single-band raster indexing the list with the 1-based band number, which raised `IndexError` wrapped in a misleading "mode mismatch" `ValueError`. The list is now indexed by the selected band, so the example produces a `pop` column. A list too short for the selected band raises `ValueError` naming `band_names` and the band. A string `band_names` is unchanged.
+-   **`map_rasters` on clipped processors over a non-local data store (`gigaspatial/generators/base.py`, `gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `map_rasters` on a list of clipped processors over a non-local data store raising `FileNotFoundError`. The generator re-read each processor's `dataset_path` through its own data store, and after a clip those are derived files on local disk. It now merges the processors' own working files.
+-   **Batched sampling of a clipped processor over a non-local data store (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `sample_by_polygons_batched` on a clipped processor over a non-local data store returning NaN for every polygon, because worker setup looked for the clipped file in the data store. Workers now open the processor's local working file, so results match `sample_by_polygons` under both the `spawn` and `fork` start methods.
 
 ## [v0.11.1] - 2026-11-17
 

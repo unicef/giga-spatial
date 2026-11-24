@@ -20,7 +20,7 @@ from gigaspatial.processing.geo import (
     aggregate_polygons_to_zones,
     buffer_geodataframe,
 )
-from gigaspatial.processing.tif_processor import TifProcessor
+from gigaspatial.processing.tif_processor import TifProcessor, _merge_processors
 
 _GEO_SUFFIXES = frozenset({".geojson", ".gpkg", ".shp"})
 _TIF_INIT_KEYS = frozenset(
@@ -784,15 +784,10 @@ class BaseViewGenerator:
                 )
 
             if len(raster_data) > 1:
-                all_source_paths = [tp.dataset_path for tp in raster_data]
                 self.logger.info(
-                    f"Merging {len(all_source_paths)} rasters into a single TifProcessor for raster aggregation."
+                    f"Merging {len(raster_data)} rasters into a single TifProcessor for raster aggregation."
                 )
-                raster_processor = TifProcessor(
-                    dataset_path=all_source_paths,
-                    data_store=self.data_store,
-                    **tif_kwargs,
-                )
+                raster_processor = _merge_processors(raster_data, **tif_kwargs)
                 owned_processor = True
             else:
                 raster_processor = raster_data[0]

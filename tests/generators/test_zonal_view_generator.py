@@ -1304,10 +1304,6 @@ def test_zonal_google_and_ms_buildings_non_empty_use_polygons_and_overwrite(tmp_
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="[M2-2 → 09] map_rasters opens clipped files through the generator's data store",
-)
 def test_zonal_map_rasters_merges_clipped_processors_on_a_non_local_store(tmp_path):
     rasters = StoredRasters(InMemoryDataStore(), tmp_path)
     tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)

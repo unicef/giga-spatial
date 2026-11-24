@@ -36,13 +36,8 @@ def breaks(defect: str, reason: str):
 
 
 M2_1 = breaks("M2-1 → 10", "a clip reports its clipped file as its only source")
-M2_3 = breaks("M2-3 → 09", "every open reads the whole stored file again")
 M2_4 = breaks("M2-4 → 10", "a clip takes default settings except mode and data_store")
-M2_5 = breaks("M2-5 → 09", "map_rasters merges a processor list with default settings")
 M2_6 = breaks("M2-6 → 10", "there is no to_crs")
-M2_7 = breaks(
-    "M2-7 → 09", "batched worker setup ignores a clipped file on a non-local data store"
-)
 LATER_POINT_NODATA = breaks("later", "point samples return the raw nodata value")
 LATER_NAN_NODATA = breaks("later", "NaN nodata is never masked")
 LATER_POOLED_BANDS = breaks("later", "polygon statistics pool all bands into one value")
@@ -390,7 +385,6 @@ def test_clip_of_a_merged_processor_reports_the_original_stored_files(rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M2_3
 def test_a_stored_file_is_read_at_most_once(memory_rasters):
     path = memory_rasters.put("a.tif")
     tp = TifProcessor(path, data_store=memory_rasters.store)
@@ -401,6 +395,27 @@ def test_a_stored_file_is_read_at_most_once(memory_rasters):
     tp.clip_to_geometry(SOUTH_WEST)
 
     assert memory_rasters.store.reads[path] <= 1
+
+
+@pytest.mark.parametrize("make_copy", [copy.copy, copy.deepcopy, pickled])
+def test_only_the_owner_deletes_its_local_copy_of_a_stored_file(
+    memory_rasters, make_copy
+):
+    path = memory_rasters.put("a.tif")
+    tp = TifProcessor(path, data_store=memory_rasters.store)
+    temp_dir = Path(tp._temp_dir)
+    duplicate = make_copy(tp)
+
+    assert len(duplicate.to_dataframe()) == 16
+    duplicate.cleanup()
+    del duplicate
+    gc.collect()
+
+    assert memory_rasters.store.reads[path] == 1
+    assert len(tp.to_dataframe()) == 16
+    assert memory_rasters.store.reads[path] == 1
+    tp.cleanup()
+    assert not temp_dir.exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -453,13 +468,12 @@ ZONES = gpd.GeoDataFrame(
 )
 
 
-def zone_means(rasters, processors, **kwargs):
-    generator = ZonalViewGenerator(ZONES, data_store=rasters.store)
+def zone_means(rasters, processors, zones=ZONES, **kwargs):
+    generator = ZonalViewGenerator(zones, data_store=rasters.store)
     view = generator.map_rasters(processors, output_column="value", **kwargs)
     return view.set_index("zone_id")["value"].tolist()
 
 
-@M2_5
 def test_map_rasters_merges_with_the_first_processors_merge_method(local_rasters):
     processors = [
         TifProcessor(
@@ -475,6 +489,84 @@ def test_map_rasters_merges_with_the_first_processors_merge_method(local_rasters
 
     assert overridden == [3.5, 13.5]
     assert inherited == [103.5, 113.5]
+
+
+def test_map_rasters_merges_with_the_first_processors_resampling_method(
+    local_rasters,
+):
+    fine = np.arange(1, 65, dtype=np.float32).reshape(8, 8)
+    processors = [
+        TifProcessor(
+            local_rasters.put("coarse.tif", BAND),
+            data_store=local_rasters.store,
+            resampling_method=Resampling.average,
+        ),
+        TifProcessor(
+            local_rasters.put("fine.tif", fine, bounds=EAST_BOUNDS),
+            data_store=local_rasters.store,
+        ),
+    ]
+    # One merged pixel over fine pixels 1, 2, 9 and 10.
+    zone = gpd.GeoDataFrame(
+        {"zone_id": ["ne"], "geometry": [box(0.042, 0.032, 0.048, 0.038)]},
+        crs="EPSG:4326",
+    )
+
+    overridden = zone_means(
+        local_rasters, processors, zone, resampling_method=Resampling.nearest
+    )
+    inherited = zone_means(local_rasters, processors, zone)
+
+    assert overridden == [10.0]
+    assert inherited == [5.5]
+
+
+HALF_RASTER_M = 2226.389816
+QUARTER_RASTER_M = HALF_RASTER_M / 2
+
+
+def test_map_rasters_merges_with_the_first_processors_reprojection_resolution(
+    local_rasters,
+):
+    processors = [
+        TifProcessor(
+            local_rasters.put("west.tif", BAND),
+            data_store=local_rasters.store,
+            reprojection_resolution=(HALF_RASTER_M, HALF_RASTER_M),
+        ),
+        TifProcessor(
+            local_rasters.put("east.tif", BAND + 16, bounds=EAST_BOUNDS),
+            data_store=local_rasters.store,
+        ),
+    ]
+    whole_rasters = gpd.GeoDataFrame(
+        {
+            "zone_id": ["w", "e"],
+            "geometry": [
+                box(0.002, 0.002, 0.038, 0.038),
+                box(0.042, 0.002, 0.078, 0.038),
+            ],
+        },
+        crs="EPSG:4326",
+    )
+
+    def pixel_counts(**kwargs):
+        return zone_means(
+            local_rasters,
+            processors,
+            whole_rasters,
+            stat="count",
+            target_crs="EPSG:3857",
+            **kwargs,
+        )
+
+    overridden = pixel_counts(
+        reprojection_resolution=(QUARTER_RASTER_M, QUARTER_RASTER_M)
+    )
+    inherited = pixel_counts()
+
+    assert overridden == [16, 16]
+    assert inherited == [4, 4]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -504,9 +596,8 @@ def test_to_crs_returns_an_independent_processor(rasters, target, cleaned):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M2_7
 def test_batched_sampling_of_a_clipped_processor_on_a_non_local_store(
-    memory_rasters, deadline
+    memory_rasters, start_method, deadline
 ):
     tp = TifProcessor(memory_rasters.put("a.tif"), data_store=memory_rasters.store)
     south = tp.clip_to_geometry(box(0.001, 0.001, 0.039, 0.019))
