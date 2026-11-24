@@ -67,6 +67,7 @@ Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.m
 | OpenStreetMap roads | `OSMRoadsFetcher` | Road networks from the Overpass API, returned as a `SpatialNetwork` |
 | Giga schools | `GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher` | School locations, profiles, connectivity measurements, and country metadata from the Giga API |
 | Healthsites.io | `HealthSitesFetcher` | Health facility locations and attributes |
+| PeeringDB | `PeeringDBFetcher` | Facility locations and attributes from the PeeringDB API |
 | Overture Maps | `OvertureAmenityFetcher` | Amenity places from Overture Maps |
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |
