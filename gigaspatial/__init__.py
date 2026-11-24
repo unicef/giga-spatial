@@ -37,7 +37,6 @@ __getattr__, __dir__, _exports = attach(
             "GlofasFloodHazardHandler",
         ],
         "gigaspatial.handlers.cems.glofas_historical": ["GlofasHistoricalHandler"],
-        "gigaspatial.handlers.cems.glofas_forecast": ["GlofasForecastHandler"],
         "gigaspatial.handlers.rwi": ["RWIHandler"],
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
@@ -54,6 +53,7 @@ __getattr__, __dir__, _exports = attach(
         ],
         "gigaspatial.fetchers.giga.countries": ["GigaCountriesFetcher"],
         "gigaspatial.fetchers.unicef.sdg": ["UnicefDataFetcher"],
+        "gigaspatial.fetchers.cems.glofas_forecast": ["GlofasForecastFetcher"],
         "gigaspatial.fetchers.mlab": ["MLabFetcher"],
         "gigaspatial.fetchers.gee.profiler": ["GEEProfiler"],
         # image downloaders
@@ -121,7 +121,6 @@ if TYPE_CHECKING:
         GlofasFloodHazardHandler,
     )
     from gigaspatial.handlers.cems.glofas_historical import GlofasHistoricalHandler
-    from gigaspatial.handlers.cems.glofas_forecast import GlofasForecastHandler
     from gigaspatial.handlers.rwi import RWIHandler
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
@@ -137,6 +136,7 @@ if TYPE_CHECKING:
     )
     from gigaspatial.fetchers.giga.countries import GigaCountriesFetcher
     from gigaspatial.fetchers.unicef.sdg import UnicefDataFetcher
+    from gigaspatial.fetchers.cems.glofas_forecast import GlofasForecastFetcher
     from gigaspatial.fetchers.mlab import MLabFetcher
     from gigaspatial.fetchers.gee.profiler import GEEProfiler
     from gigaspatial.image_downloaders.mapbox_image import MapboxImageDownloader

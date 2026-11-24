@@ -16,6 +16,7 @@ __getattr__, __dir__, __all__ = attach(
         ],
         "gigaspatial.fetchers.giga.countries": ["GigaCountriesFetcher"],
         "gigaspatial.fetchers.unicef.sdg": ["UnicefDataFetcher"],
+        "gigaspatial.fetchers.cems.glofas_forecast": ["GlofasForecastFetcher"],
         "gigaspatial.fetchers.mlab": ["MLabConfig", "MLabFetcher"],
         "gigaspatial.fetchers.gee.profiler": ["GEEProfiler"],
         "gigaspatial.fetchers.gee.config": ["GEEConfig"],
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     )
     from gigaspatial.fetchers.giga.countries import GigaCountriesFetcher
     from gigaspatial.fetchers.unicef.sdg import UnicefDataFetcher
+    from gigaspatial.fetchers.cems.glofas_forecast import GlofasForecastFetcher
     from gigaspatial.fetchers.mlab import MLabConfig, MLabFetcher
     from gigaspatial.fetchers.gee.profiler import GEEProfiler
     from gigaspatial.fetchers.gee.config import GEEConfig

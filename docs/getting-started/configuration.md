@@ -39,7 +39,7 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, and Ookl
 | Variable | Default | Used by |
 | --- | --- | --- |
 | `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | OpenStreetMap road networks. Set a mirror when the main server is down. |
-| `EWDS_API_URL` | `https://ewds.climate.copernicus.eu/api` | CEMS Early Warning Data Store API used by `GlofasHistoricalHandler` and `GlofasForecastHandler`. |
+| `EWDS_API_URL` | `https://ewds.climate.copernicus.eu/api` | CEMS Early Warning Data Store API used by `GlofasHistoricalHandler` and `GlofasForecastFetcher`. |
 | `HDX_USER_AGENT` | `giga-spatial/1.0` | Humanitarian Data Exchange (HDX) API requests. |
 
 ## Data stores

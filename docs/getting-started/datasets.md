@@ -42,7 +42,6 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
 | GloFAS historical | `GlofasHistoricalHandler` | Daily river discharge, runoff, snow water equivalent, and soil wetness for a country |
-| GloFAS forecast | `GlofasForecastHandler` | Country-level operational river discharge, runoff, snow water equivalent, and soil wetness, plus v4.0 auxiliary maps |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 
@@ -72,6 +71,7 @@ Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.m
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |
 | Google Earth Engine | `GEEProfiler` | Raster and vector collections in Google Earth Engine |
+| GloFAS forecast | `GlofasForecastFetcher` | Operational river discharge, runoff, snow water equivalent, and soil wetness for a country, plus v4.0 auxiliary maps |
 
 ## Data store
 
