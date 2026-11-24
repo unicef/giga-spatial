@@ -175,6 +175,18 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
       show_source: false
       members: false
 
+## Global Power Plant Database
+
+::: gigaspatial.handlers.wri.global_power_plant.GlobalPowerPlantHandler
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - load_data
+        - download_and_load
+        - ensure_data_available
+        - get_available_data_info
+
 ## WRI Aqueduct
 
 ::: gigaspatial.handlers.wri.aqueduct_flood.AqueductFloodHandler

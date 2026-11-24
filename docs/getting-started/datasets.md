@@ -42,6 +42,7 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
+| Global Power Plant Database | `GlobalPowerPlantHandler` | Grid-scale power plants worldwide, one WRI release at a time |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 
 ## Fetcher

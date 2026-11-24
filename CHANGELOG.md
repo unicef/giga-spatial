@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
+    -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **Shared internal `BaseViewGenerator` and unified enrichment interface (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
     -   Extracted internal `BaseViewGenerator` and `BaseViewGeneratorConfig` (not exported publicly) and migrated `PoiViewGenerator` and `ZonalViewGenerator` onto it.
     -   Made `map_points`, `map_polygons`, `map_rasters`, `map_wp_pop`, `map_ghsl`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_rwi`, `map_aqueduct_flood_hazard`, `add_variable_to_view`, `chain_operations`, and `validate_data_coverage` available uniformly on both `PoiViewGenerator` and `ZonalViewGenerator`.
