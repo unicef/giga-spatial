@@ -11,6 +11,7 @@ Run with:
 
 from __future__ import annotations
 
+import gc
 import io
 import zipfile
 
@@ -107,6 +108,28 @@ def test_another_return_period_reuses_the_archive(fetcher, stub_download):
     fetcher.fetch(return_period=50)
 
     assert stub_download == [(ARCHIVE_URL, ARCHIVE_MD5)]
+
+
+def test_context_manager_removes_the_temp_dir(stub_download):
+    with STORMFetcher(show_progress=False) as fetcher:
+        root = fetcher._root
+        data = fetcher.fetch()
+
+    assert not root.exists()
+    with data.open_dataset() as dataset:
+        assert dataset.width == 20
+
+
+def test_collected_fetcher_removes_the_temp_dir(stub_download):
+    fetcher = STORMFetcher(show_progress=False)
+    root = fetcher._root
+    data = fetcher.fetch()
+    del fetcher
+    gc.collect()
+
+    assert not root.exists()
+    with data.open_dataset() as dataset:
+        assert dataset.width == 20
 
 
 def test_result_survives_close(fetcher, stub_download):

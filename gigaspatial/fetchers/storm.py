@@ -9,11 +9,12 @@ Each GeoTIFF is maximum wind speed in m/s at 10 km resolution.
 ``constant`` is the present-day baseline. The other models are 2050 under
 RCP8.5.
 
-``fetch`` returns a ``TifProcessor``. The Zenodo zip is about 1.1 GB. It is
-downloaded into a temporary directory owned by the fetcher, and later maps
-are extracted from that copy. Nothing is written to a data store. ``close``
-removes the temporary archive. The returned processor keeps its own copy of
-the GeoTIFF.
+``fetch`` returns a ``TifProcessor``. Keep one fetcher and ask it for each
+map. The Zenodo zip is about 1.1 GB. It is downloaded into a temporary
+directory owned by that fetcher, and later maps are extracted from that copy.
+Nothing is written to a data store. A ``with`` block removes the temporary
+directory when it ends. The returned processor keeps its own copy of the
+GeoTIFF.
 """
 
 from __future__ import annotations
@@ -98,18 +99,22 @@ class STORMFetcher:
     source to clip the global map to that place. With no source, the result
     is the global raster.
 
-    The Zenodo zip (about 1.1 GB) is kept in a temporary directory for the
-    life of this fetcher so later models and return periods skip the
-    download. It is not written to a data store. ``close`` deletes that
-    directory. Licence: CC0. DOI: https://doi.org/10.5281/zenodo.10931452
+    Keep one instance for every model and return period. The Zenodo zip
+    (about 1.1 GB) is kept in a temporary directory for the life of this
+    fetcher, and later maps are extracted from it. It is not written to a
+    data store. A ``with`` block calls ``close`` at the end, which deletes
+    that directory. If ``close`` is not called, the fetcher deletes it when
+    the instance is collected. Licence: CC0.
+    DOI: https://doi.org/10.5281/zenodo.10931452
 
     Attributes:
         show_progress: If True, shows a byte progress bar while downloading.
         timeout: Seconds to wait for the server between bytes.
 
     Examples:
-        >>> winds = STORMFetcher().fetch()
-        >>> kenya = STORMFetcher().fetch("KEN", model="HadGEM3-GC31-HM", return_period=500)
+        >>> with STORMFetcher() as storm:
+        ...     present = storm.fetch()
+        ...     future = storm.fetch("KEN", model="HadGEM3-GC31-HM", return_period=500)
     """
 
     show_progress: bool = True
@@ -179,6 +184,13 @@ class STORMFetcher:
 
     def __exit__(self, *args) -> None:
         self.close()
+
+    def __del__(self) -> None:
+        """Remove the temporary archive if ``close`` was not called."""
+        try:
+            self.close()
+        except Exception:
+            return
 
     def _check_open(self) -> None:
         if self._closed:
@@ -252,10 +264,13 @@ class STORMFetcher:
         return destination
 
     def _processor(self, extracted: Path) -> TifProcessor:
-        """A processor that owns a copy of the extracted GeoTIFF."""
-        processor = TifProcessor(dataset_path=extracted)
-        owned = Path(processor._working_file.derived_path(extracted.name))
-        shutil.copyfile(extracted, owned)
-        processor._working_file.adopt(str(owned))
-        processor.dataset_path = owned
-        return processor
+        """A processor that owns a copy of the extracted GeoTIFF.
+
+        ``to_crs`` with the raster's own CRS copies it into a file the new
+        processor owns, so the result stays readable after this fetcher's
+        temporary directory is removed.
+        """
+        source = TifProcessor(dataset_path=extracted)
+        owned = source.to_crs(source.crs)
+        source.cleanup()
+        return owned
