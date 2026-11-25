@@ -21,7 +21,7 @@ All notable changes to this project will be documented in this file.
 -   **Native polygon counting in `aggregate_polygons_to_zones` (`gigaspatial/processing/geo.py`)**
     -   Added support for `value_columns=None` with `aggregation="count"` (producing `"polygon_count"`, `output_suffix`, or an explicit `output_column`) across `intersects`, `within`, and `fractional` predicates.
 -   **`TifProcessor.to_crs` (`gigaspatial/processing/tif_processor.py`)**
-    -   Added `to_crs(target_crs, resampling_method=None, resolution=None)`, which returns a new `TifProcessor` in `target_crs`, the way `clip_to_geometry` returns a clipped one. Unset arguments default to the processor's `resampling_method` and `reprojection_resolution`. CRSs are compared semantically, and when the CRS is already equal and no resolution applies, the result reads its own copy of the raster. Every result is independent: cleaning up either processor leaves the other readable.
+    -   Added `to_crs(target_crs, resampling_method=None, resolution=None)`, which returns a new `TifProcessor` in `target_crs`, the way `clip_to_geometry` returns a clipped one. Unset arguments default to the processor's `resampling_method` and `reprojection_resolution`. CRSs are compared semantically, and when the CRS is already equal and no `resolution` is passed, the result reads its own copy of the raster, even if the processor has a `reprojection_resolution`. Every result is independent: cleaning up either processor leaves the other readable.
 
 ### Changed
 

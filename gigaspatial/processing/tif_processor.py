@@ -366,17 +366,13 @@ class TifProcessor:
             resampling_method: Resampling algorithm. Defaults to this
                 processor's `resampling_method`.
             resolution: Target pixel resolution (x, y). Defaults to this
-                processor's `reprojection_resolution`.
+                processor's `reprojection_resolution` when the CRS differs.
 
         Returns:
             A new TifProcessor in `target_crs`. If the raster is already in an
-            equal CRS and no resolution applies, it reads a copy of this
+            equal CRS and no `resolution` is passed, it reads a copy of this
             processor's raster.
         """
-        if resampling_method is None:
-            resampling_method = self.resampling_method
-        if resolution is None:
-            resolution = self.reprojection_resolution
         settings = {**self._settings(), "target_crs": target_crs}
         working_path = self._working_file.local_path()
 
@@ -391,6 +387,10 @@ class TifProcessor:
                 lambda _, dst_path: shutil.copyfile(working_path, dst_path),
             )
 
+        if resampling_method is None:
+            resampling_method = self.resampling_method
+        if resolution is None:
+            resolution = self.reprojection_resolution
         self.logger.info(f"Reprojecting raster to {target_crs}...")
         return self._derive(
             settings,

@@ -423,7 +423,9 @@ def test_to_crs_to_the_same_crs_returns_an_independent_copy(local_rasters):
     assert Path(path).is_file()
 
 
-def test_to_crs_defaults_to_the_processors_reprojection_resolution(local_rasters):
+def test_to_crs_to_another_crs_defaults_to_the_processors_reprojection_resolution(
+    local_rasters,
+):
     tp = TifProcessor(
         local_rasters.put("a.tif"),
         data_store=local_rasters.store,
@@ -435,6 +437,23 @@ def test_to_crs_defaults_to_the_processors_reprojection_resolution(local_rasters
 
     assert inherited.resolution == pytest.approx((2000.0, 2000.0))
     assert overridden.resolution == pytest.approx((500.0, 500.0))
+
+
+def test_to_crs_to_the_same_crs_resamples_only_to_a_requested_resolution(
+    local_rasters,
+):
+    tp = TifProcessor(
+        local_rasters.put("a.tif"),
+        data_store=local_rasters.store,
+        reprojection_resolution=(0.02, 0.02),
+    )
+
+    copied = tp.to_crs("EPSG:4326")
+    resampled = tp.to_crs("EPSG:4326", resolution=(0.02, 0.02))
+
+    assert copied.resolution == pytest.approx((0.01, 0.01))
+    pd.testing.assert_frame_equal(copied.to_dataframe(), tp.to_dataframe())
+    assert resampled.resolution == pytest.approx((0.02, 0.02))
 
 
 def test_reproject_to_is_removed():
