@@ -15,7 +15,7 @@ from pathlib import Path
 import geopandas as gpd
 import pytest
 import requests
-from shapely.geometry import Point, box
+from shapely.geometry import Point, Polygon, box
 
 from gigaspatial.handlers.gshm import ARCHIVE_URL, GSHMHandler
 import gigaspatial.handlers.gshm as module
@@ -28,10 +28,16 @@ def handler(tmp_path):
     return GSHMHandler(base_path=tmp_path / "gshm", n_workers=1)
 
 
-def _sample_bytes() -> bytes:
+def _sample_bytes(points=None) -> bytes:
+    if points is None:
+        points = [(0.5, 0.5, 0.1), (5.0, 5.0, 0.9)]
     frame = gpd.GeoDataFrame(
-        {"lon": [0.5, 5.0], "lat": [0.5, 5.0], "pga": [0.1, 0.9]},
-        geometry=[Point(0.5, 0.5), Point(5.0, 5.0)],
+        {
+            "lon": [lon for lon, _, _ in points],
+            "lat": [lat for _, lat, _ in points],
+            "pga": [pga for _, _, pga in points],
+        },
+        geometry=[Point(lon, lat) for lon, lat, _ in points],
         crs="EPSG:4326",
     )
     fd, tmp = tempfile.mkstemp(suffix=".gpkg")
@@ -77,6 +83,32 @@ def test_load_data_downloads_and_crops(handler, stub_download):
     assert stub_download == [ARCHIVE_URL]
     assert len(data) == 1
     assert data.iloc[0]["pga"] == pytest.approx(0.1)
+
+
+def test_polygon_crop_drops_a_point_inside_the_bounds(handler, monkeypatch):
+    """A point in the bounds but outside the polygon must not survive the crop."""
+    inside = (0.3, 0.3, 0.1)
+    inside_bounds_only = (0.5, 0.5, 0.4)
+    outside = (5.0, 5.0, 0.9)
+    triangle = Polygon([(0.2, 0.2), (0.55, 0.2), (0.2, 0.55)])
+
+    assert triangle.contains(Point(inside[0], inside[1]))
+    assert box(*triangle.bounds).contains(Point(*inside_bounds_only[:2]))
+    assert not triangle.intersects(Point(*inside_bounds_only[:2]))
+
+    def fake_extract(url, dest_dir, store, pattern=None, **kwargs):
+        path = Path(dest_dir) / "gem_gshm_v2026.1.gpkg"
+        store.write_file(
+            str(path),
+            _sample_bytes([inside, inside_bounds_only, outside]),
+        )
+        return [path]
+
+    monkeypatch.setattr(module, "extract_zip_to_store", fake_extract)
+
+    data = handler.load_data(triangle, crop_to_source=True, show_progress=False)
+
+    assert list(data["pga"]) == pytest.approx([0.1])
 
 
 def test_stored_units_are_not_downloaded_again(handler, stub_download):
