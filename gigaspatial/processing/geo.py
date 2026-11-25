@@ -548,7 +548,8 @@ def map_points_within_polygons(base_points_gdf, polygon_gdf):
         polygon_gdf: GeoDataFrame containing polygons.
 
     Returns:
-        The `base_points_gdf` with an additional `is_within` boolean column.
+        A new GeoDataFrame copied from `base_points_gdf` with an additional
+        `is_within` boolean column.
 
     Raises:
         ValueError: If geometries are invalid or match is impossible (CRS mismatch).
@@ -564,17 +565,19 @@ def map_points_within_polygons(base_points_gdf, polygon_gdf):
     if not base_points_gdf.crs == polygon_gdf.crs:
         raise ValueError("CRS of `base_points_gdf` and `polygon_gdf` must match.")
 
+    result = base_points_gdf.copy()
+
     # Perform spatial join to check if points fall within any polygon
     joined_gdf = gpd.sjoin(
-        base_points_gdf, polygon_gdf[["geometry"]], how="left", predicate="within"
+        result, polygon_gdf[["geometry"]], how="left", predicate="within"
     )
 
-    # Add `is_within` column to base_points_gdf
-    base_points_gdf["is_within"] = base_points_gdf.index.isin(
+    # Add `is_within` column to the copied GeoDataFrame
+    result["is_within"] = result.index.isin(
         set(joined_gdf.index[~joined_gdf.index_right.isna()])
     )
 
-    return base_points_gdf
+    return result
 
 
 def calculate_distance(lat1, lon1, lat2, lon2, R=6371e3):
@@ -779,7 +782,15 @@ def annotate_with_admin_regions(
     Annotate a GeoDataFrame with administrative region information.
 
     Performs a spatial join between the input points and administrative boundaries
-    at levels 1 and 2, resolving conflicts when points intersect multiple regions.
+    at levels 1 and 2, returning a new GeoDataFrame with one row per input point
+    in the original row order and with the original index. The input GeoDataFrame
+    is not mutated.
+
+    When a point intersects multiple administrative polygons (for example on a
+    shared border or overlapping boundary), ties are resolved deterministically
+    by sorting candidate matches ascending by
+    ``(admin1_id<suffix>, admin2_id<suffix>)`` with missing IDs sorted last and
+    keeping the first match.
 
     Args:
         gdf: GeoDataFrame containing points to annotate.
@@ -788,7 +799,9 @@ def annotate_with_admin_regions(
         admin_id_column_suffix: Optional suffix for admin ID columns.
 
     Returns:
-        GeoDataFrame with added administrative region columns (admin1, admin2, etc.).
+        A new GeoDataFrame with added administrative region columns
+        (admin1, admin2, and their ID columns), preserving the input order and
+        index.
 
     Raises:
         TypeError: If gdf is not a GeoDataFrame.
@@ -800,7 +813,10 @@ def annotate_with_admin_regions(
 
     if gdf.empty:
         LOGGER.warning("Empty GeoDataFrame provided, returning as-is")
-        return gdf
+        return gdf.copy()
+
+    admin1_id_col = f"admin1_id{admin_id_column_suffix}"
+    admin2_id_col = f"admin2_id{admin_id_column_suffix}"
 
     # read country admin data
     admin1_data = AdminBoundaries.create(
@@ -808,12 +824,10 @@ def annotate_with_admin_regions(
     ).to_geodataframe()
 
     admin1_data.rename(
-        columns={"boundary_id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"},
+        columns={"boundary_id": admin1_id_col, "name": "admin1"},
         inplace=True,
     )
-    admin1_data = admin1_data[
-        [f"admin1_id{admin_id_column_suffix}", "admin1", "geometry"]
-    ]
+    admin1_data = admin1_data[[admin1_id_col, "admin1", "geometry"]]
 
     admin2_data = AdminBoundaries.create(
         country_code=country_code, admin_level=2, data_store=data_store
@@ -821,26 +835,26 @@ def annotate_with_admin_regions(
 
     admin2_data.rename(
         columns={
-            "boundary_id": f"admin2_id{admin_id_column_suffix}",
-            "parent_id": f"admin1_id{admin_id_column_suffix}",
+            "boundary_id": admin2_id_col,
+            "parent_id": admin1_id_col,
             "name": "admin2",
         },
         inplace=True,
     )
     admin2_data = admin2_data[
         [
-            f"admin2_id{admin_id_column_suffix}",
+            admin2_id_col,
             "admin2",
-            f"admin1_id{admin_id_column_suffix}",
+            admin1_id_col,
             "geometry",
         ]
     ]
 
-    # Join dataframes based on 'admin1_id_giga'
+    # Join dataframes based on admin1_id
     admin_data = admin2_data.merge(
         admin1_data,
-        left_on=f"admin1_id{admin_id_column_suffix}",
-        right_on=f"admin1_id{admin_id_column_suffix}",
+        left_on=admin1_id_col,
+        right_on=admin1_id_col,
         how="outer",
     )
 
@@ -854,46 +868,57 @@ def annotate_with_admin_regions(
         crs=4326,
     )
 
-    # admin_data["admin2"].fillna("Unknown", inplace=True)
-    admin_data[f"admin2_id{admin_id_column_suffix}"] = admin_data[
-        f"admin2_id{admin_id_column_suffix}"
-    ].replace({np.nan: None})
+    admin_data[admin2_id_col] = admin_data[admin2_id_col].replace({np.nan: None})
 
-    if gdf.crs is None:
+    # Work on a copy so caller's GeoDataFrame (including CRS) is never mutated
+    orig_index = gdf.index.copy()
+    work_gdf = gdf.copy()
+
+    if work_gdf.crs is None:
         LOGGER.warning("Input GeoDataFrame has no CRS, assuming EPSG:4326")
-        gdf.set_crs(epsg=4326, inplace=True)
-    elif gdf.crs != "EPSG:4326":
-        LOGGER.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
-        gdf = gdf.to_crs(epsg=4326)
+        work_gdf = work_gdf.set_crs(epsg=4326)
+    elif work_gdf.crs != "EPSG:4326":
+        LOGGER.info(f"Reprojecting from {work_gdf.crs} to EPSG:4326")
+        work_gdf = work_gdf.to_crs(epsg=4326)
+
+    # Use a monotonic positional index during the join so non-default or
+    # duplicate caller indices remain aligned and in input order.
+    work_gdf = work_gdf.reset_index(drop=True)
 
     # spatial join gdf to admins
-    gdf_w_admins = gdf.copy().sjoin(
+    gdf_w_admins = work_gdf.sjoin(
         admin_data,
         how="left",
         predicate="intersects",
     )
 
     # Check for duplicates caused by points intersecting multiple polygons
-    if len(gdf_w_admins) != len(gdf):
+    if len(gdf_w_admins) != len(work_gdf):
         LOGGER.warning(
             "Some points intersect multiple administrative boundaries. Resolving conflicts..."
         )
-
-        # Group by original index and select the closest admin area for ties
-        gdf_w_admins["distance"] = gdf_w_admins.apply(
-            lambda row: row.geometry.distance(
-                admin_data.loc[row.index_right, "geometry"].centroid
-            ),
-            axis=1,
+        sort_frame = pd.DataFrame(
+            {
+                "pos": gdf_w_admins.index.to_numpy(),
+                "a1": gdf_w_admins[admin1_id_col].to_numpy(),
+                "a2": gdf_w_admins[admin2_id_col].to_numpy(),
+            }
         )
+        keep_ilocs = (
+            sort_frame.sort_values(
+                by=["pos", "a1", "a2"],
+                ascending=True,
+                na_position="last",
+                kind="mergesort",
+            )
+            .drop_duplicates(subset=["pos"], keep="first")
+            .index.to_numpy()
+        )
+        gdf_w_admins = gdf_w_admins.iloc[keep_ilocs]
 
-        # For points with multiple matches, keep the closest polygon
-        gdf_w_admins = gdf_w_admins.loc[
-            gdf_w_admins.groupby(gdf.index)["distance"].idxmin()
-        ].drop(columns="distance")
-
-    # Drop unnecessary columns and reset the index
-    gdf_w_admins = gdf_w_admins.drop(columns="index_right").reset_index(drop=True)
+    # Drop join helper column and restore caller's index
+    gdf_w_admins = gdf_w_admins.drop(columns="index_right")
+    gdf_w_admins.index = orig_index
 
     return gdf_w_admins
 

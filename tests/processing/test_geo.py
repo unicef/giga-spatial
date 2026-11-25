@@ -6,6 +6,8 @@ from shapely.geometry import Point, Polygon
 from gigaspatial.processing.geo import (
     aggregate_points_to_zones,
     aggregate_polygons_to_zones,
+    annotate_with_admin_regions,
+    map_points_within_polygons,
 )
 
 
@@ -260,5 +262,190 @@ def test_aggregate_polygons_to_zones_empty_and_non_overlapping_preserve_columns(
             )
             assert list(val_sum.columns) == ["zone_id", "zone_tag", "val_sum"]
             assert val_sum["val_sum"].isna().all()
+
+
+def test_map_points_within_polygons_does_not_mutate_input():
+    polygons = _make_zones()
+    points = gpd.GeoDataFrame(
+        {
+            "pid": ["p_out", "p_in"],
+            "geometry": [Point(5.0, 5.0), Point(0.5, 0.5)],
+        },
+        index=["row_b", "row_a"],
+        crs="EPSG:4326",
+    )
+    original_columns = list(points.columns)
+    original_index = points.index.copy()
+    original_crs = points.crs
+    original_snapshot = points.copy(deep=True)
+
+    result = map_points_within_polygons(points, polygons)
+
+    assert result is not points
+    assert list(points.columns) == original_columns
+    assert "is_within" not in points.columns
+    assert points.index.equals(original_index)
+    assert points.crs == original_crs
+    assert points.equals(original_snapshot)
+
+    assert list(result.index) == ["row_b", "row_a"]
+    assert list(result["pid"]) == ["p_out", "p_in"]
+    assert list(result["is_within"]) == [False, True]
+    assert result.crs == original_crs
+
+
+class _FakeAdminBoundaries:
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        self._gdf = gdf
+
+    def to_geodataframe(self) -> gpd.GeoDataFrame:
+        return self._gdf.copy()
+
+
+def _make_admin_fixtures(reverse_order: bool = False):
+    admin1_rows = [
+        {
+            "boundary_id": "ADM1_B",
+            "name": "Region B",
+            "geometry": Polygon([(0, 0), (0, 2), (1, 2), (1, 0)]),
+        },
+        {
+            "boundary_id": "ADM1_A",
+            "name": "Region A",
+            "geometry": Polygon([(1, 0), (1, 2), (2, 2), (2, 0)]),
+        },
+    ]
+    admin2_rows = [
+        {
+            "boundary_id": "ADM2_B",
+            "parent_id": "ADM1_B",
+            "name": "District B",
+            "geometry": Polygon([(0, 0), (0, 2), (1, 2), (1, 0)]),
+        },
+        {
+            "boundary_id": "ADM2_A",
+            "parent_id": "ADM1_A",
+            "name": "District A",
+            "geometry": Polygon([(1, 0), (1, 2), (2, 2), (2, 0)]),
+        },
+    ]
+    if reverse_order:
+        admin1_rows = list(reversed(admin1_rows))
+        admin2_rows = list(reversed(admin2_rows))
+
+    admin1_gdf = gpd.GeoDataFrame(admin1_rows, crs="EPSG:4326")
+    admin2_gdf = gpd.GeoDataFrame(admin2_rows, crs="EPSG:4326")
+    return admin1_gdf, admin2_gdf
+
+
+@pytest.mark.parametrize("input_crs", [None, "EPSG:4326"])
+def test_annotate_with_admin_regions_does_not_mutate_input_and_preserves_index(
+    monkeypatch, input_crs
+):
+    from gigaspatial.handlers.boundaries import AdminBoundaries
+
+    admin1_gdf, admin2_gdf = _make_admin_fixtures()
+
+    def _fake_create(country_code, admin_level, data_store=None):
+        return _FakeAdminBoundaries(admin1_gdf if admin_level == 1 else admin2_gdf)
+
+    monkeypatch.setattr(AdminBoundaries, "create", staticmethod(_fake_create))
+
+    points = gpd.GeoDataFrame(
+        {
+            "pid": ["p_second", "p_first", "p_outside"],
+            "geometry": [Point(1.5, 1.0), Point(0.5, 1.0), Point(5.0, 5.0)],
+        },
+        index=["idx_b", "idx_a", "idx_c"],
+        crs=input_crs,
+    )
+    original_columns = list(points.columns)
+    original_index = points.index.copy()
+    original_crs = points.crs
+    original_snapshot = points.copy(deep=True)
+
+    result = annotate_with_admin_regions(points, country_code="RWA")
+
+    assert result is not points
+    assert list(points.columns) == original_columns
+    assert points.index.equals(original_index)
+    assert points.crs == original_crs
+    assert points.equals(original_snapshot)
+
+    assert list(result.index) == ["idx_b", "idx_a", "idx_c"]
+    assert list(result["pid"]) == ["p_second", "p_first", "p_outside"]
+    assert list(result.columns) == [
+        "pid",
+        "geometry",
+        "admin2_id",
+        "admin2",
+        "admin1_id",
+        "admin1",
+    ]
+    assert result.loc["idx_b", "admin1_id"] == "ADM1_A"
+    assert result.loc["idx_b", "admin2_id"] == "ADM2_A"
+    assert result.loc["idx_a", "admin1_id"] == "ADM1_B"
+    assert result.loc["idx_a", "admin2_id"] == "ADM2_B"
+    assert result.loc["idx_c", "admin1_id"] is None or np.isnan(
+        result.loc["idx_c", "admin1_id"]
+    )
+    assert result.loc["idx_c", "admin2_id"] is None or np.isnan(
+        result.loc["idx_c", "admin2_id"]
+    )
+
+
+def test_annotate_with_admin_regions_shared_border_deterministic_and_preserves_order(
+    monkeypatch,
+):
+    from gigaspatial.handlers.boundaries import AdminBoundaries
+
+    points = gpd.GeoDataFrame(
+        {
+            "pid": ["in_b", "border", "outside", "in_a"],
+            "geometry": [
+                Point(0.5, 1.0),
+                Point(1.0, 1.0),
+                Point(10.0, 10.0),
+                Point(1.5, 1.0),
+            ],
+        },
+        index=[30, 10, 40, 20],
+        crs="EPSG:4326",
+    )
+    original_snapshot = points.copy(deep=True)
+
+    results = []
+    for reverse_order in (False, True):
+        admin1_gdf, admin2_gdf = _make_admin_fixtures(reverse_order=reverse_order)
+
+        def _fake_create(country_code, admin_level, data_store=None, a1=admin1_gdf, a2=admin2_gdf):
+            return _FakeAdminBoundaries(a1 if admin_level == 1 else a2)
+
+        monkeypatch.setattr(AdminBoundaries, "create", staticmethod(_fake_create))
+        results.append(annotate_with_admin_regions(points, country_code="RWA"))
+
+    assert points.equals(original_snapshot)
+    assert points.crs == original_snapshot.crs
+
+    for result in results:
+        assert len(result) == len(points)
+        assert list(result.index) == [30, 10, 40, 20]
+        assert list(result["pid"]) == ["in_b", "border", "outside", "in_a"]
+        assert result.loc[30, "admin1_id"] == "ADM1_B"
+        assert result.loc[30, "admin2_id"] == "ADM2_B"
+        # Shared border tie-break deterministically picks smallest (admin1_id, admin2_id)
+        assert result.loc[10, "admin1_id"] == "ADM1_A"
+        assert result.loc[10, "admin2_id"] == "ADM2_A"
+        assert result.loc[10, "admin1"] == "Region A"
+        assert result.loc[10, "admin2"] == "District A"
+        assert result.loc[20, "admin1_id"] == "ADM1_A"
+        assert result.loc[20, "admin2_id"] == "ADM2_A"
+        assert result.loc[40, "admin1_id"] is None or np.isnan(
+            result.loc[40, "admin1_id"]
+        )
+
+    assert results[0].equals(results[1])
+
+
 
 
