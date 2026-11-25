@@ -400,22 +400,45 @@ def test_clip_to_a_non_overlapping_geometry_raises(local_rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_reproject_to_writes_a_file_in_the_target_crs(local_rasters):
+def test_to_crs_returns_a_processor_in_the_target_crs(local_rasters):
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
 
-    out = tp.reproject_to("EPSG:3857")
+    result = tp.to_crs("EPSG:3857")
 
-    assert isinstance(out, Path) and out.exists()
-    with rasterio.open(out) as src:
-        assert src.crs.to_string() == "EPSG:3857"
-        assert src.bounds.right == pytest.approx(4452.78, abs=0.01)
+    assert isinstance(result, TifProcessor)
+    assert result.crs == "EPSG:3857"
+    assert result.bounds.right == pytest.approx(4452.78, abs=0.01)
+    assert tp.crs == "EPSG:4326"
 
 
-def test_reproject_to_the_same_crs_returns_the_current_path(local_rasters):
+def test_to_crs_to_the_same_crs_returns_an_independent_copy(local_rasters):
     path = local_rasters.put("a.tif")
     tp = TifProcessor(path, data_store=local_rasters.store)
 
-    assert tp.reproject_to("EPSG:4326") == path
+    result = tp.to_crs("EPSG:4326")
+
+    assert result is not tp and result.dataset_path != path
+    pd.testing.assert_frame_equal(result.to_dataframe(), tp.to_dataframe())
+    result.cleanup()
+    assert Path(path).is_file()
+
+
+def test_to_crs_defaults_to_the_processors_reprojection_resolution(local_rasters):
+    tp = TifProcessor(
+        local_rasters.put("a.tif"),
+        data_store=local_rasters.store,
+        reprojection_resolution=(2000.0, 2000.0),
+    )
+
+    inherited = tp.to_crs("EPSG:3857")
+    overridden = tp.to_crs("EPSG:3857", resolution=(500.0, 500.0))
+
+    assert inherited.resolution == pytest.approx((2000.0, 2000.0))
+    assert overridden.resolution == pytest.approx((500.0, 500.0))
+
+
+def test_reproject_to_is_removed():
+    assert not hasattr(TifProcessor, "reproject_to")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

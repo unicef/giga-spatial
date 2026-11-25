@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from shapely.geometry import box, Polygon, MultiPolygon, MultiPoint
 from pathlib import Path
 import rasterio
+from rasterio.crs import CRS
 from rasterio.mask import mask
 from rasterio.merge import merge
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -219,7 +220,14 @@ class TifProcessor:
         self.data_store = self.data_store or LocalDataStore()
         self.logger = config.get_logger(self.__class__.__name__)
         self._cache = {}
+        # A processor from `_derive` arrives with its derived file written.
+        if not hasattr(self, "_working_file"):
+            self._set_up_working_file()
+        self._load_metadata()
+        self._validate_mode_band_compatibility()
 
+    def _set_up_working_file(self):
+        """Open the stored file, merging or reprojecting it into a derived file if asked."""
         # Handle multiple dataset paths
         if isinstance(self.dataset_path, list):
             self.dataset_paths = [Path(p) for p in self.dataset_path]
@@ -227,9 +235,10 @@ class TifProcessor:
             with _WorkingFile.local_stored_files(
                 self.data_store, self.dataset_paths
             ) as local_paths:
-                self._validate_multiple_datasets(local_paths)
-                self._working_file.adopt(self._merge_rasters(local_paths))
-            self.dataset_path = self._working_file.path
+                self._write_derived(
+                    "merged_raster.tif",
+                    partial(self._merge_rasters, local_paths, self.dataset_paths),
+                )
         else:
             self.dataset_paths = [Path(self.dataset_path)]
             # For absolute paths with LocalDataStore, check file existence directly
@@ -247,15 +256,63 @@ class TifProcessor:
             if self.target_crs:
                 self.logger.info(f"Reprojecting single raster to {self.target_crs}...")
                 with self._working_file.borrowed_local_path() as stored_path:
-                    with rasterio.open(stored_path) as src:
-                        reprojected_path = self._reproject_to_temp_file(
-                            src, self.target_crs
-                        )
-                self._working_file.adopt(reprojected_path)
-                self.dataset_path = self._working_file.path
+                    self._write_derived(
+                        f"reprojected_temp_{os.urandom(8).hex()}.tif",
+                        partial(
+                            self._write_reprojection,
+                            stored_path,
+                            self.target_crs,
+                            self.resampling_method,
+                            self.reprojection_resolution,
+                        ),
+                    )
 
-        self._load_metadata()
-        self._validate_mode_band_compatibility()
+    def _settings(self) -> Dict[str, Any]:
+        """The constructor fields a derived processor carries: all but `dataset_path`."""
+        return {
+            "mode": self.mode,
+            "merge_method": self.merge_method,
+            "target_crs": self.target_crs,
+            "resampling_method": self.resampling_method,
+            "reprojection_resolution": self.reprojection_resolution,
+            "data_store": self.data_store,
+        }
+
+    def _write_derived(self, name: str, write: Callable[[str], None]):
+        """
+        Write a derived file into this processor's temporary directory with
+        `write(path)`, and make it the working file.
+        """
+        derived_path = self._working_file.derived_path(name)
+        write(derived_path)
+        self._working_file.adopt(derived_path)
+        self.dataset_path = self._working_file.path
+
+    @classmethod
+    def _derive(
+        cls,
+        settings: Dict[str, Any],
+        dataset_paths: List[Path],
+        name: str,
+        write: Callable[["TifProcessor", str], None],
+    ) -> "TifProcessor":
+        """
+        A new processor that owns the derived file `write(processor, path)`
+        writes, without running construction-time merging or reprojection.
+
+        `settings` are the constructor fields other than `dataset_path`;
+        `target_crs` among them is metadata only. `dataset_paths` are the
+        original stored files.
+        """
+        derived = object.__new__(cls)
+        for field, value in settings.items():
+            setattr(derived, field, value)
+        derived.logger = config.get_logger(cls.__name__)
+        derived.dataset_paths = list(dataset_paths)
+        derived._working_file = _WorkingFile(derived.data_store)
+        derived._write_derived(name, partial(write, derived))
+        derived.__post_init__()
+        return derived
 
     @field_validator("dataset_path")
     def validate_dataset_path(cls, value):
@@ -290,66 +347,59 @@ class TifProcessor:
         with self._working_file.open() as src:
             yield src
 
-    def reproject_to(
+    def to_crs(
         self,
         target_crs: str,
-        output_path: Optional[Union[str, Path]] = None,
         resampling_method: Optional[Resampling] = None,
         resolution: Optional[Tuple[float, float]] = None,
-    ):
+    ) -> "TifProcessor":
         """
-        Reproject the current raster to a new CRS.
+        Reproject the raster to a new CRS as a new processor.
+
+        The new processor owns its reprojected file, so cleaning up either
+        processor leaves the other readable. It carries this processor's
+        settings and stored files, with `target_crs` set to the requested CRS.
+        Save it with `save_to_file`.
 
         Args:
             target_crs: The destination CRS (e.g., "EPSG:4326").
-            output_path: Optional path to save the result. If None, saves to temp.
-            resampling_method: Optional override for resampling.
-            resolution: Optional target pixel resolution (x, y).
+            resampling_method: Resampling algorithm. Defaults to this
+                processor's `resampling_method`.
+            resolution: Target pixel resolution (x, y). Defaults to this
+                processor's `reprojection_resolution`.
 
         Returns:
-            Path to the reprojected file.
+            A new TifProcessor in `target_crs`. If the raster is already in an
+            equal CRS and no resolution applies, it reads a copy of this
+            processor's raster.
         """
-        self.logger.info(f"Reprojecting raster to {target_crs}...")
+        if resampling_method is None:
+            resampling_method = self.resampling_method
+        if resolution is None:
+            resolution = self.reprojection_resolution
+        settings = {**self._settings(), "target_crs": target_crs}
+        working_path = self._working_file.local_path()
 
-        # Use provided or default values
-        resampling_method = resampling_method or self.resampling_method
-        resolution = resolution or self.reprojection_resolution
-
-        with self.open_dataset() as src:
-            if src.crs.to_string() == target_crs:
-                self.logger.info(
-                    "Raster is already in the target CRS. No reprojection needed."
-                )
-                # If output_path is specified, copy the file
-                if output_path:
-                    self.data_store.copy_file(
-                        str(self._working_file.path), output_path
-                    )
-                return self._working_file.path
-
-            dst_path = output_path or self._working_file.derived_path(
-                f"reprojected_single_{os.urandom(8).hex()}.tif"
+        with rasterio.open(working_path) as src:
+            same_crs = src.crs == CRS.from_user_input(target_crs)
+        if same_crs and resolution is None:
+            self.logger.info("Raster is already in the target CRS. Copying it.")
+            return self._derive(
+                settings,
+                self.dataset_paths,
+                f"copied_{os.urandom(8).hex()}.tif",
+                lambda _, dst_path: shutil.copyfile(working_path, dst_path),
             )
 
-            with rasterio.open(
-                dst_path,
-                "w",
-                **self._get_reprojection_profile(src, target_crs, resolution),
-            ) as dst:
-                for band_idx in range(1, src.count + 1):
-                    reproject(
-                        source=rasterio.band(src, band_idx),
-                        destination=rasterio.band(dst, band_idx),
-                        src_transform=src.transform,
-                        src_crs=src.crs,
-                        dst_transform=dst.transform,
-                        dst_crs=dst.crs,
-                        resampling=resampling_method,
-                        num_threads=multiprocessing.cpu_count(),
-                    )
-
-            self.logger.info(f"Reprojection complete. Output saved to {dst_path}")
-            return Path(dst_path)
+        self.logger.info(f"Reprojecting raster to {target_crs}...")
+        return self._derive(
+            settings,
+            self.dataset_paths,
+            f"reprojected_{os.urandom(8).hex()}.tif",
+            lambda _, dst_path: self._write_reprojection(
+                working_path, target_crs, resampling_method, resolution, dst_path
+            ),
+        )
 
     def get_raster_info(
         self,
@@ -385,33 +435,35 @@ class TifProcessor:
 
         return info
 
-    def _reproject_to_temp_file(
-        self, src: rasterio.DatasetReader, target_crs: str
-    ) -> str:
-        """Helper to reproject a raster and save it to a temporary file."""
-        dst_path = self._working_file.derived_path(
-            f"reprojected_temp_{os.urandom(8).hex()}.tif"
-        )
-        profile = self._get_reprojection_profile(
-            src, target_crs, self.reprojection_resolution
-        )
+    def _write_reprojection(
+        self,
+        src_path: str,
+        target_crs: str,
+        resampling_method: Resampling,
+        resolution: Optional[Tuple[float, float]],
+        dst_path: str,
+    ):
+        """Reproject the raster at `src_path` into a new file at `dst_path`."""
+        with rasterio.open(src_path) as src:
+            profile = self._get_reprojection_profile(src, target_crs, resolution)
+            with rasterio.open(dst_path, "w", **profile) as dst:
+                for band_idx in range(1, src.count + 1):
+                    reproject(
+                        source=rasterio.band(src, band_idx),
+                        destination=rasterio.band(dst, band_idx),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=dst.transform,
+                        dst_crs=dst.crs,
+                        resampling=resampling_method,
+                        num_threads=multiprocessing.cpu_count(),
+                    )
 
-        with rasterio.open(dst_path, "w", **profile) as dst:
-            for band_idx in range(1, src.count + 1):
-                reproject(
-                    source=rasterio.band(src, band_idx),
-                    destination=rasterio.band(dst, band_idx),
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    dst_transform=dst.transform,
-                    dst_crs=dst.crs,
-                    resampling=self.resampling_method,
-                )
-        return dst_path
-
-    def _validate_multiple_datasets(self, local_paths: List[str]):
+    def _validate_multiple_datasets(
+        self, local_paths: List[str], labels: List[Union[Path, str]]
+    ):
         """Validate that all datasets exist and have compatible properties."""
-        if len(self.dataset_paths) < 2:
+        if len(local_paths) < 2:
             raise ValueError("Multiple dataset paths required for merging")
 
         with rasterio.open(local_paths[0]) as ref_src:
@@ -421,9 +473,7 @@ class TifProcessor:
             ref_transform = ref_src.transform
             ref_nodata = ref_src.nodata
 
-        for i, (path, local_path) in enumerate(
-            zip(self.dataset_paths[1:], local_paths[1:]), 1
-        ):
+        for i, (path, local_path) in enumerate(zip(labels[1:], local_paths[1:]), 1):
             with rasterio.open(local_path) as src:
                 if src.count != ref_count:
                     raise ValueError(
@@ -436,7 +486,7 @@ class TifProcessor:
                 if not self.target_crs and src.crs != ref_crs:
                     raise ValueError(
                         f"Dataset {path} has CRS {src.crs}, but the first "
-                        f"dataset {self.dataset_paths[0]} has CRS {ref_crs}. "
+                        f"dataset {labels[0]} has CRS {ref_crs}. "
                         "Pass target_crs to reproject every file before merging."
                     )
                 if self.target_crs is None and not self._transforms_compatible(
@@ -497,29 +547,49 @@ class TifProcessor:
             and abs(transform1.e - transform2.e) < tolerance
         )
 
-    def _merge_rasters(self, local_paths: List[str]) -> str:
-        """Merge multiple rasters into a single raster and return its path."""
-        self.logger.info(f"Merging {len(self.dataset_paths)} rasters...")
+    def _merge_rasters(
+        self,
+        local_paths: List[str],
+        labels: List[Union[Path, str]],
+        merged_file_path: str,
+    ):
+        """
+        Merge the rasters at `local_paths` into a new file at `merged_file_path`.
+
+        `labels` identify the rasters in log and error messages.
+
+        Raises:
+            ValueError: If the rasters are incompatible, including different
+                CRSs without `target_crs`.
+        """
+        self._validate_multiple_datasets(local_paths, labels)
+        self.logger.info(f"Merging {len(local_paths)} rasters...")
 
         # Open all datasets and handle reprojection if needed
         datasets_to_merge = []
         temp_reprojected_files = []
         try:
-            for path, local_path in zip(self.dataset_paths, local_paths):
+            for label, local_path in zip(labels, local_paths):
                 with rasterio.open(local_path) as src:
-                    if self.target_crs and src.crs != self.target_crs:
-                        self.logger.info(
-                            f"Reprojecting {path.name} to {self.target_crs} before merging."
-                        )
-                        reprojected_path = self._reproject_to_temp_file(
-                            src, self.target_crs
-                        )
-                        temp_reprojected_files.append(reprojected_path)
-                        datasets_to_merge.append(rasterio.open(reprojected_path))
-                    else:
-                        datasets_to_merge.append(rasterio.open(local_path))
-
-            merged_file_path = self._working_file.derived_path("merged_raster.tif")
+                    needs_reprojection = self.target_crs and src.crs != self.target_crs
+                if needs_reprojection:
+                    self.logger.info(
+                        f"Reprojecting {Path(str(label)).name} to {self.target_crs} before merging."
+                    )
+                    reprojected_path = self._working_file.derived_path(
+                        f"reprojected_temp_{os.urandom(8).hex()}.tif"
+                    )
+                    self._write_reprojection(
+                        local_path,
+                        self.target_crs,
+                        self.resampling_method,
+                        self.reprojection_resolution,
+                        reprojected_path,
+                    )
+                    temp_reprojected_files.append(reprojected_path)
+                    datasets_to_merge.append(rasterio.open(reprojected_path))
+                else:
+                    datasets_to_merge.append(rasterio.open(local_path))
 
             if self.merge_method == "mean":
                 merged_array, merged_transform = self._merge_with_mean(
@@ -560,7 +630,6 @@ class TifProcessor:
                     pass
 
         self.logger.info("Raster merging completed!")
-        return merged_file_path
 
     def _merge_with_mean(self, src_files):
         """Merge rasters using mean aggregation."""
@@ -1627,71 +1696,18 @@ class TifProcessor:
     def _create_clipped_processor(
         self, clipped_data: np.ndarray, clipped_meta: dict
     ) -> "TifProcessor":
-        """
-        Helper to create a new TifProcessor instance from clipped data.
-        Saves the clipped data to a temporary file and initializes a new TifProcessor.
-        """
-        # Create a temporary placeholder file to initialize the processor
-        # This allows us to get the processor's temp_dir
-        placeholder_dir = tempfile.mkdtemp()
-        placeholder_path = os.path.join(
-            placeholder_dir, f"placeholder_{os.urandom(8).hex()}.tif"
+        """A new processor over the clipped data, with this processor's settings and stored files."""
+
+        def write(_, dst_path: str):
+            with rasterio.open(dst_path, "w", **clipped_meta) as dst:
+                dst.write(clipped_data)
+
+        return self._derive(
+            self._settings(),
+            self.dataset_paths,
+            f"clipped_{os.urandom(8).hex()}.tif",
+            write,
         )
-
-        # Create a minimal valid TIF file as placeholder
-        placeholder_transform = rasterio.transform.from_bounds(0, 0, 1, 1, 1, 1)
-        with rasterio.open(
-            placeholder_path,
-            "w",
-            driver="GTiff",
-            width=1,
-            height=1,
-            count=1,
-            dtype="uint8",
-            crs="EPSG:4326",
-            transform=placeholder_transform,
-        ) as dst:
-            dst.write(np.zeros((1, 1, 1), dtype="uint8"))
-
-        # Create a new TifProcessor instance with the placeholder
-        # ALWAYS use LocalDataStore() for local temp paths, even if self.data_store is different
-        new_processor = TifProcessor(
-            dataset_path=placeholder_path,
-            data_store=LocalDataStore(),
-            mode=self.mode,
-        )
-
-        # Now save the clipped file directly to the new processor's temp directory
-        clipped_file_path = new_processor._working_file.derived_path(
-            f"clipped_{os.urandom(8).hex()}.tif"
-        )
-
-        with rasterio.open(clipped_file_path, "w", **clipped_meta) as dst:
-            dst.write(clipped_data)
-
-        # Verify file was created successfully
-        if not os.path.exists(clipped_file_path):
-            raise RuntimeError(f"Failed to create clipped file at {clipped_file_path}")
-
-        # Set the clipped file path and update processor attributes
-        new_processor._working_file.adopt(clipped_file_path)
-        new_processor.dataset_path = clipped_file_path
-        new_processor.dataset_paths = [Path(clipped_file_path)]
-
-        # Restore original data_store to the new processor
-        new_processor.data_store = self.data_store
-
-        # Clean up placeholder file and directory
-        try:
-            os.remove(placeholder_path)
-            os.rmdir(placeholder_dir)
-        except OSError:
-            pass
-
-        # Reload metadata since the path changed
-        new_processor._load_metadata()
-
-        return new_processor
 
     def _get_basic_statistics(self, approx_ok: bool = False) -> Dict[str, Any]:
         """
@@ -2469,31 +2485,35 @@ def _merge_processors(
 
     Settings left as None are taken from the first processor, as is its data
     store. `target_crs` is not inherited: processors in different CRSs raise
-    `ValueError` unless it is passed. Local copies made to read non-local
-    stored files are deleted once the merged file is written.
+    `ValueError` unless it is passed. The result's stored files are the
+    inputs' stored files, without duplicates. Local copies made to read
+    non-local stored files are deleted once the merged file is written.
     """
-    first = processors[0]
+    overrides = {
+        "mode": mode,
+        "merge_method": merge_method,
+        "resampling_method": resampling_method,
+        "reprojection_resolution": reprojection_resolution,
+    }
+    settings = {
+        **processors[0]._settings(),
+        **{name: value for name, value in overrides.items() if value is not None},
+        "target_crs": target_crs,
+    }
+    stored_files = list(
+        dict.fromkeys(path for tp in processors for path in tp.dataset_paths)
+    )
+    labels = [tp._working_file.path for tp in processors]
     with ExitStack() as stack:
         local_paths = [
             stack.enter_context(tp._working_file.borrowed_local_path())
             for tp in processors
         ]
-        merged = TifProcessor(
-            dataset_path=local_paths,
-            data_store=LocalDataStore(),
-            mode=first.mode if mode is None else mode,
-            merge_method=first.merge_method if merge_method is None else merge_method,
-            target_crs=target_crs,
-            resampling_method=(
-                first.resampling_method
-                if resampling_method is None
-                else resampling_method
-            ),
-            reprojection_resolution=(
-                first.reprojection_resolution
-                if reprojection_resolution is None
-                else reprojection_resolution
+        return TifProcessor._derive(
+            settings,
+            stored_files,
+            "merged_raster.tif",
+            lambda merged, dst_path: merged._merge_rasters(
+                local_paths, labels, dst_path
             ),
         )
-    merged.data_store = first.data_store
-    return merged

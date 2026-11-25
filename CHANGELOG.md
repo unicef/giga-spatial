@@ -20,8 +20,14 @@ All notable changes to this project will be documented in this file.
     -   Added an optional `handler=None` parameter to dataset `map_*` methods (`map_wp_pop`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_ghsl`, `map_buildings`, `map_rwi`, `map_aqueduct_flood_hazard`) and `PoiViewGenerator.find_nearest_buildings` without altering default behavior when `handler` is omitted.
 -   **Native polygon counting in `aggregate_polygons_to_zones` (`gigaspatial/processing/geo.py`)**
     -   Added support for `value_columns=None` with `aggregation="count"` (producing `"polygon_count"`, `output_suffix`, or an explicit `output_column`) across `intersects`, `within`, and `fractional` predicates.
+-   **`TifProcessor.to_crs` (`gigaspatial/processing/tif_processor.py`)**
+    -   Added `to_crs(target_crs, resampling_method=None, resolution=None)`, which returns a new `TifProcessor` in `target_crs`, the way `clip_to_geometry` returns a clipped one. Unset arguments default to the processor's `resampling_method` and `reprojection_resolution`. CRSs are compared semantically, and when the CRS is already equal and no resolution applies, the result reads its own copy of the raster. Every result is independent: cleaning up either processor leaves the other readable.
 
 ### Changed
+
+-   **Breaking change: `TifProcessor.reproject_to` removed in v0.12 (`gigaspatial/processing/tif_processor.py`)**
+    -   Removed `reproject_to`, without a deprecation period, following the pre-1.0 precedent of ADR 0003. It returned a path, wrote to the local filesystem even when the processor's data store was not local, and compared CRSs as strings.
+    -   **Migration:** use `to_crs(...).save_to_file(path)`, or keep the processor `to_crs(...)` returns.
 
 -   **Breaking change — Unified `map_*` return contract, view semantics, and column rules (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
     -   **Breaking for users relying on old return values:** all `map_*` methods on `PoiViewGenerator` and `ZonalViewGenerator` (including `map_google_buildings` and `map_ms_buildings`) now update and return `self.view` (`pd.DataFrame`); on empty spatial data they fill expected columns with `0` (counts), `False` (boolean flags), or `NaN` (continuous/categorical stats, IDs, distances, areas) instead of returning early or returning other shapes (`dict`, detached `pd.DataFrame`, `gpd.GeoDataFrame`, or `None`).
@@ -114,6 +120,10 @@ All notable changes to this project will be documented in this file.
     -   Fixed `map_rasters` on a list of clipped processors over a non-local data store raising `FileNotFoundError`. The generator re-read each processor's `dataset_path` through its own data store, and after a clip those are derived files on local disk. It now merges the processors' own working files.
 -   **Batched sampling of a clipped processor over a non-local data store (`gigaspatial/processing/tif_processor.py`)**
     -   Fixed `sample_by_polygons_batched` on a clipped processor over a non-local data store returning NaN for every polygon, because worker setup looked for the clipped file in the data store. Workers now open the processor's local working file, so results match `sample_by_polygons` under both the `spawn` and `fork` start methods.
+-   **Lineage and settings of derived `TifProcessor`s (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed clipped processors reporting their clipped file as their only source: a clip of a merged processor reported `is_merged=False` and `source_count=1`. Clips and `to_crs` results now report their parent's original stored files in `dataset_paths`, `is_merged` and `source_count`, and `map_rasters`'s merge of a processor list reports the inputs' stored files without duplicates.
+    -   Fixed clipped processors dropping their parent's `merge_method`, `resampling_method`, `reprojection_resolution` and `target_crs`. Clips and `to_crs` results now carry the parent's `mode`, `merge_method`, `resampling_method`, `reprojection_resolution` and `data_store`. `target_crs` is the parent's for a clip and the requested CRS for `to_crs`; it describes the result and never triggers another reprojection.
+    -   Fixed `clip_to_geometry` and `clip_to_bounds` raising `ValueError` on `rgb`, `rgba` and `multi` processors when returning a clipped processor.
 
 ## [v0.11.1] - 2026-11-17
 

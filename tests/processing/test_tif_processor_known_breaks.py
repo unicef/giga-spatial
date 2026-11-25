@@ -35,9 +35,6 @@ def breaks(defect: str, reason: str):
     return pytest.mark.xfail(strict=True, reason=f"[{defect}] {reason}")
 
 
-M2_1 = breaks("M2-1 → 10", "a clip reports its clipped file as its only source")
-M2_4 = breaks("M2-4 → 10", "a clip takes default settings except mode and data_store")
-M2_6 = breaks("M2-6 → 10", "there is no to_crs")
 LATER_POINT_NODATA = breaks("later", "point samples return the raw nodata value")
 LATER_NAN_NODATA = breaks("later", "NaN nodata is never masked")
 LATER_POOLED_BANDS = breaks("later", "polygon statistics pool all bands into one value")
@@ -370,7 +367,6 @@ def test_band_name_list_too_short_for_the_band_says_so(local_rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M2_1
 def test_clip_of_a_merged_processor_reports_the_original_stored_files(rasters):
     tp = merged(rasters)
 
@@ -378,6 +374,41 @@ def test_clip_of_a_merged_processor_reports_the_original_stored_files(rasters):
 
     assert [Path(p).name for p in clip.dataset_paths] == ["west.tif", "east.tif"]
     assert (clip.is_merged, clip.source_count) == (True, 2)
+
+
+def test_clip_of_a_reprojected_merge_is_not_merged_or_reprojected_again(rasters):
+    west = rasters.put("west.tif", BAND)
+    east = rasters.put("east.tif", BAND + 16, bounds=EAST_BOUNDS)
+    tp = TifProcessor([west, east], data_store=rasters.store, target_crs="EPSG:3857")
+    left, bottom, right, top = tp.bounds
+    south_west = box(left, bottom, (left + right) / 4, (bottom + top) / 2)
+    array, _, _ = tp.clip_to_geometry(south_west, return_clipped_processor=False)
+
+    clip = tp.clip_to_geometry(south_west)
+
+    assert (clip.crs, clip.target_crs) == ("EPSG:3857", "EPSG:3857")
+    assert (clip.count, clip.height, clip.width) == array.shape
+    np.testing.assert_array_equal(
+        clip.to_dataframe(drop_nodata=False)["pixel_value"], array.ravel()
+    )
+
+
+@pytest.mark.parametrize("derive", ["clip", "to_crs"])
+def test_cleaning_up_a_derived_processor_leaves_its_derived_parent_readable(
+    rasters, derive
+):
+    tp = merged(rasters)
+    result = (
+        tp.clip_to_geometry(SOUTH_WEST) if derive == "clip" else tp.to_crs("EPSG:3857")
+    )
+
+    result.cleanup()
+
+    assert working_file_exists(tp)
+    assert len(tp.to_dataframe()) == 32
+    with pytest.raises(FileNotFoundError, match="cleaned up"):
+        with result.open_dataset():
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -436,7 +467,6 @@ def settings(tp):
     return {name: getattr(tp, name) for name in SETTINGS}
 
 
-@M2_4
 def test_clip_carries_its_parents_settings(rasters):
     tp = TifProcessor(
         rasters.put("a.tif"),
@@ -450,6 +480,40 @@ def test_clip_carries_its_parents_settings(rasters):
     clip = tp.clip_to_geometry(SOUTH_WEST)
 
     assert settings(clip) == settings(tp)
+
+
+def test_multi_band_clip_carries_its_parents_settings(rasters):
+    tp = TifProcessor(
+        rasters.put("a.tif", TWO_BANDS),
+        data_store=rasters.store,
+        mode="multi",
+        merge_method="max",
+        target_crs="EPSG:4326",
+        resampling_method=Resampling.bilinear,
+        reprojection_resolution=(0.01, 0.01),
+    )
+
+    clip = tp.clip_to_geometry(SOUTH_WEST)
+
+    assert settings(clip) == settings(tp)
+    assert clip.count == 2
+    assert clip.to_dataframe()["band_2"].tolist() == [90.0, 100.0, 130.0, 140.0]
+
+
+def test_to_crs_result_carries_its_parents_settings_and_the_requested_crs(rasters):
+    tp = TifProcessor(
+        rasters.put("a.tif", TWO_BANDS),
+        data_store=rasters.store,
+        mode="multi",
+        merge_method="max",
+        resampling_method=Resampling.bilinear,
+        reprojection_resolution=(1000.0, 1000.0),
+    )
+
+    result = tp.to_crs("EPSG:3857")
+
+    assert settings(result) == {**settings(tp), "target_crs": "EPSG:3857"}
+    assert result.crs == "EPSG:3857"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -574,7 +638,6 @@ def test_map_rasters_merges_with_the_first_processors_reprojection_resolution(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@M2_6
 @pytest.mark.parametrize("cleaned", ["original", "result"])
 @pytest.mark.parametrize(
     "target", ["EPSG:3857", CRS.from_epsg(4326).to_wkt()], ids=["other", "equal"]
