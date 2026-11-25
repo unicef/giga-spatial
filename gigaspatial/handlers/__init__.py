@@ -56,6 +56,12 @@ __getattr__, __dir__, __all__ = attach(
             "HDXReader",
             "HDXHandler",
         ],
+        "gigaspatial.handlers.flopros": [
+            "FLOPROSConfig",
+            "FLOPROSDownloader",
+            "FLOPROSReader",
+            "FLOPROSHandler",
+        ],
         "gigaspatial.handlers.cems.flood_hazard": [
             "CEMSFloodHazardConfig",
             "CEMSFloodHazardDownloader",
@@ -145,6 +151,12 @@ if TYPE_CHECKING:
         OpenCellIDHandler,
     )
     from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
+    from gigaspatial.handlers.flopros import (
+        FLOPROSConfig,
+        FLOPROSDownloader,
+        FLOPROSReader,
+        FLOPROSHandler,
+    )
     from gigaspatial.handlers.cems.flood_hazard import (
         CEMSFloodHazardConfig,
         CEMSFloodHazardDownloader,
