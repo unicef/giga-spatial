@@ -3,6 +3,7 @@ import geopandas as gpd
 import mercantile
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 from shapely.strtree import STRtree
 from shapely import Point
 import json
@@ -130,7 +131,10 @@ class MercatorTiles(BaseModel):
         ):
             return cls.from_points(points=source, zoom_level=zoom_level, **kwargs)
         else:
-            raise
+            raise TypeError(
+                f"Unsupported source type {type(source).__name__!r} for MercatorTiles.from_spatial. "
+                "Expected a Shapely geometry, GeoDataFrame, or iterable of Points or (lon, lat) tuples."
+            )
 
     @classmethod
     def from_geometry(
@@ -331,7 +335,7 @@ class MercatorTiles(BaseModel):
             (
                 mercantile.quadkey(mercantile.tile(p.x, p.y, zoom_level))
                 if isinstance(p, Point)
-                else mercantile.quadkey(mercantile.tile(p[1], p[0], zoom_level))
+                else mercantile.quadkey(mercantile.tile(p[0], p[1], zoom_level))
             )
             for p in points
         ]
@@ -420,11 +424,14 @@ class CountryMercatorTiles(MercatorTiles):
             f"Initializing Mercator zones for country: {country} at zoom level {zoom_level}"
         )
 
-        country_geom = AdminBoundaries.create(
+        geoms = AdminBoundaries.create(
             country_code=country,
             data_store=data_store,
             path=country_geom_path,
-        ).to_geoms()[0]
+        ).to_geoms()
+        if not geoms:
+            raise ValueError(f"No boundary geometry found for country: {country}")
+        country_geom = unary_union(geoms)
 
         tiles = MercatorTiles.from_geometry(country_geom, zoom_level, predicate)
 

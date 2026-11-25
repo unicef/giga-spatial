@@ -6,7 +6,7 @@ from s2sphere import CellId, Cell, LatLng, RegionCoverer, LatLngRect
 
 from shapely.geometry import Polygon, Point, shape
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import orient
+from shapely.ops import orient, unary_union
 
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -150,7 +150,7 @@ class S2Cells(BaseModel):
         )
 
         if isinstance(geometry, Point):
-            return cls.from_points([geometry], level)
+            return cls.from_points([geometry], level, **kwargs)
 
         # For polygons and other shapes, use bounding box with RegionCoverer
         # Then filter to actual intersection
@@ -190,7 +190,7 @@ class S2Cells(BaseModel):
     def from_points(
         cls, points: List[Union[Point, Tuple[float, float]]], level: int, **kwargs
     ) -> "S2Cells":
-        """Create S2Cells from a list of points or lat-lon pairs."""
+        """Create S2Cells from a list of Shapely Points or (lon, lat) tuples."""
         cls.logger.info(f"Creating S2Cells from {len(points)} points at level: {level}")
 
         cells = set(cls.get_cells_from_points(points, level))
@@ -509,11 +509,14 @@ class CountryS2Cells(S2Cells):
             f"Initializing S2 cells for country: {country} at level {level}"
         )
 
-        country_geom = AdminBoundaries.create(
+        geoms = AdminBoundaries.create(
             country_code=country,
             data_store=data_store,
             path=country_geom_path,
-        ).to_geoms()[0]
+        ).to_geoms()
+        if not geoms:
+            raise ValueError(f"No boundary geometry found for country: {country}")
+        country_geom = unary_union(geoms)
 
         cells = S2Cells.from_geometry(country_geom, level, max_cells=max_cells)
         instance.cells = cells.cells

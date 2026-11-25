@@ -77,6 +77,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **Country grid creation on multi-part boundaries (`gigaspatial/grid/h3.py`, `gigaspatial/grid/s2.py`, `gigaspatial/grid/mercator_tiles.py`)**
+    -   Fixed `CountryH3Hexagons.create`, `CountryS2Cells.create`, and `CountryMercatorTiles.create` indexing `.to_geoms()[0]`, which dropped islands and secondary polygons for multi-part countries. All three now union all returned boundary geometries with `shapely.ops.unary_union` (raising `ValueError` if no boundary geometry is found) so every part is covered.
+-   **`MercatorTiles` tuple coordinate order (`gigaspatial/grid/mercator_tiles.py`)**
+    -   Fixed `MercatorTiles.get_quadkeys_from_points` passing `(p[1], p[0])` to `mercantile.tile(lng, lat, zoom)` for tuple inputs, which silently swapped longitude and latitude relative to `Point(lon, lat)` inputs, its own docstring, and `H3Hexagons` / `S2Cells`.
+    -   **Behaviour change:** `MercatorTiles.get_quadkeys_from_points`, `MercatorTiles.from_points`, and `MercatorTiles.from_spatial` now interpret 2-tuples as `(lon, lat)` consistently with Shapely `Point`s, `H3Hexagons`, and `S2Cells`. Callers that previously passed `(lat, lon)` tuples to work around the bug must switch to `(lon, lat)`.
+-   **Single-`Point` geometry handling in `H3Hexagons.from_geometry` and `S2Cells.from_geometry` (`gigaspatial/grid/h3.py`, `gigaspatial/grid/s2.py`)**
+    -   Fixed `H3Hexagons.from_geometry` calling `cls.from_points([geometry])` without `resolution` or `**kwargs`, which raised `TypeError` for a single Shapely `Point`.
+    -   Fixed `S2Cells.from_geometry` dropping `**kwargs` when delegating a single Shapely `Point` to `cls.from_points`.
+-   **`MercatorTiles.from_spatial` unsupported source error (`gigaspatial/grid/mercator_tiles.py`)**
+    -   Replaced the bare `raise` in `MercatorTiles.from_spatial`'s fallback branch (which raised `RuntimeError: No active exception to reraise`) with a `TypeError` naming the accepted input types (`BaseGeometry`, `GeoDataFrame`, or iterable of `Point`s or `(lon, lat)` tuples).
 -   **`MercatorTiles.from_spatial` point dispatch (`gigaspatial/grid/mercator_tiles.py`)**
     -   Fixed `MercatorTiles.from_spatial` passing `geometry=` instead of `points=` to `from_points`, which raised `TypeError` for lists of `(lon, lat)` tuples or Shapely `Point`s, and routed point `GeoDataFrame` inputs to `from_points` to match `H3Hexagons` and `S2Cells`.
 -   **Security: redact API tokens from URLs, logs, exceptions, and reprs (`gigaspatial/core/http/redaction.py`, `gigaspatial/image_downloaders/mapbox_image.py`, `gigaspatial/image_downloaders/maxar_image.py`, `gigaspatial/handlers/georepo.py`, `gigaspatial/core/http/client.py`, `gigaspatial/fetchers/healthsites.py`, `gigaspatial/handlers/opencellid.py`)**
