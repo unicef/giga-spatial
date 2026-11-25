@@ -39,6 +39,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.rwi": ["RWIHandler"],
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
+        "gigaspatial.handlers.wri.global_power_plant": ["GlobalPowerPlantHandler"],
         "gigaspatial.handlers.osm.roads": ["OSMRoadsHandler"],
         # fetchers
         "gigaspatial.fetchers.osm.pois": ["OSMLocationFetcher"],
@@ -122,6 +123,7 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.rwi import RWIHandler
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
+    from gigaspatial.handlers.wri.global_power_plant import GlobalPowerPlantHandler
     from gigaspatial.handlers.osm.roads import OSMRoadsHandler
     from gigaspatial.fetchers.osm.pois import OSMLocationFetcher
     from gigaspatial.fetchers.osm.roads import OSMRoadsFetcher
