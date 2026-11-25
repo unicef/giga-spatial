@@ -89,18 +89,6 @@ __getattr__, __dir__, __all__ = attach(
             "OSMRoadsReader",
             "OSMRoadsHandler",
         ],
-        "gigaspatial.handlers.cds.era5": [
-            "ERA5Config",
-            "ERA5Downloader",
-            "ERA5Reader",
-            "ERA5Handler",
-        ],
-        "gigaspatial.handlers.cds.era5land": [
-            "ERA5LandConfig",
-            "ERA5LandDownloader",
-            "ERA5LandReader",
-            "ERA5LandHandler",
-        ],
     },
 )
 
@@ -178,16 +166,4 @@ if TYPE_CHECKING:
         OSMRoadsDownloader,
         OSMRoadsReader,
         OSMRoadsHandler,
-    )
-    from gigaspatial.handlers.cds.era5 import (
-        ERA5Config,
-        ERA5Downloader,
-        ERA5Reader,
-        ERA5Handler,
-    )
-    from gigaspatial.handlers.cds.era5land import (
-        ERA5LandConfig,
-        ERA5LandDownloader,
-        ERA5LandReader,
-        ERA5LandHandler,
     )

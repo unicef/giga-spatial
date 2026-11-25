@@ -5,7 +5,7 @@ GigaSpatial acquires published geospatial datasets into a data store you control
 ## Language
 
 **ERA5**:
-ECMWF's hourly global reanalysis, as published by the Copernicus Climate Data Store. ERA5 single levels and ERA5-Land are separate datasets, with their own variables, grid spacing, and publication dates.
+ECMWF's hourly global reanalysis, as published by the Copernicus Climate Data Store. ERA5 single levels (`fetch_era5`) and ERA5-Land (`fetch_era5land`) are separate datasets, with their own variables, grid spacing, and publication dates. Both are returned in memory.
 _Avoid_: climate model, forecast
 
 **Dataset**:

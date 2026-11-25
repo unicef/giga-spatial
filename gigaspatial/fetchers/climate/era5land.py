@@ -1,36 +1,18 @@
-"""
-ERA5-Land hourly data, from the Copernicus Climate Data Store.
+"""ERA5-Land hourly data.
 
 Dataset id: ``reanalysis-era5-land``.
 Documentation: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=overview
 Licence: CC BY 4.0. DOI: 10.24381/cds.e2161bac.
 
-The handler name is ``cds-era5land``. The variable list, the 0.1 degree grid,
-and the 1950 start are this dataset's own. The download form has no
-``product_type``. Availability is read from this dataset's catalogue, not from
-ERA5.
+``fetch_era5land`` returns an in-memory ``xarray.Dataset``. The variable list,
+0.1 degree grid, and 1950 start belong to this dataset. Repeated calls ask CDS
+again; a caller that wants incremental updates compares ``latest_available``
+with data it already holds and requests only the missing hours.
 """
 
-from __future__ import annotations
+from gigaspatial.fetchers.climate.shared import DatasetSpec, fetch_dataset, variables_from_rows
 
-from pathlib import Path
-from typing import ClassVar, Optional
-
-from pydantic import ConfigDict, Field
-from pydantic.dataclasses import dataclass
-
-from gigaspatial.config import config as global_config
-from gigaspatial.handlers.cds.era5 import (
-    CDSConfig,
-    CDSDownloader,
-    CDSHandler,
-    CDSReader,
-    _CATALOGUES,
-    variable_records,
-)
-
-
-_CATALOGUES["reanalysis-era5-land"] = variable_records((
+ERA5_LAND_ROWS = (
     ('2m_dewpoint_temperature', '2m dewpoint temperature', ('Temperature',)),
     ('2m_temperature', '2m temperature', ('Temperature',)),
     ('skin_temperature', 'Skin temperature', ('Temperature',)),
@@ -91,64 +73,46 @@ _CATALOGUES["reanalysis-era5-land"] = variable_records((
     ('soil_type', 'Soil type', ('Invariant',)),
     ('type_of_high_vegetation', 'Type of high vegetation', ('Invariant',)),
     ('type_of_low_vegetation', 'Type of low vegetation', ('Invariant',)),
-))
+)
+
+ERA5_LAND = DatasetSpec(
+    name="ERA5-Land",
+    dataset_id="reanalysis-era5-land",
+    documentation_url="https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=overview",
+    doi="10.24381/cds.e2161bac",
+    start_year=1950,
+    resolution=0.1,
+    variables=variables_from_rows(ERA5_LAND_ROWS),
+    product_types=(),
+    default_product=None,
+)
 
 
-@dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
-class ERA5LandConfig(CDSConfig):
-    """ERA5-Land configuration. Files live under ``bronze/cds/era5-land``."""
+def fetch_era5land(area, variables, time=None, *, start=None, end=None, year=None, month=None, day=None, hour=None, full_history=False, data_format="netcdf", retriever=None, max_bytes=None, api_url=None, api_key=None, check_availability=True, max_retries=3):
+    """Fetch ERA5-Land for a country or any geometry.
 
-    HANDLER_NAME: ClassVar[str] = "cds-era5land"
-    DATASET_ID: ClassVar[str] = "reanalysis-era5-land"
-    DOCUMENTATION_URL: ClassVar[str] = (
-        "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=overview"
-    )
-    DOI: ClassVar[str] = "10.24381/cds.e2161bac"
-    START_YEAR: ClassVar[int] = 1950
-    RESOLUTION: ClassVar[float] = 0.1
-    HAS_PRODUCT_TYPE: ClassVar[bool] = False
-    PRODUCT_TYPES: ClassVar[tuple] = ()
-    DEFAULT_PRODUCT_TYPE: ClassVar[Optional[str]] = None
-
-    base_path: Path = Field(
-        default_factory=lambda: global_config.get_path("cds", "bronze") / "era5-land"
-    )
-
-
-class ERA5LandDownloader(CDSDownloader):
-    """Downloads ERA5-Land hourly fields."""
-
-    config_type: ClassVar[type] = ERA5LandConfig
-
-
-class ERA5LandReader(CDSReader):
-    """Reads stored ERA5-Land country files."""
-
-    config_type: ClassVar[type] = ERA5LandConfig
-
-
-class ERA5LandHandler(CDSHandler):
-    """
-    ERA5-Land hourly fields for a country.
-
-    The handler name is ``cds-era5land``.
-
-        ERA5LandHandler().load_data(
-            "ITA",
-            variables="2m_temperature",
-            start="2024-11-01",
-            end="2024-11-02",
-        )
-        ERA5LandHandler().update()
+    Arguments match ``fetch_era5``. This dataset has no ``product_type``.
     """
 
-    name = "cds-era5land"
-    config_class = ERA5LandConfig
-    downloader_class = ERA5LandDownloader
-    reader_class = ERA5LandReader
+    from gigaspatial.fetchers.climate.shared import DEFAULT_MAX_BYTES
 
-
-if __name__ == "__main__":
-    from gigaspatial.handlers.cds.era5 import main
-
-    raise SystemExit(main())
+    return fetch_dataset(
+        ERA5_LAND,
+        area,
+        variables,
+        time,
+        start=start,
+        end=end,
+        year=year,
+        month=month,
+        day=day,
+        hour=hour,
+        full_history=full_history,
+        data_format=data_format,
+        retriever=retriever,
+        max_bytes=DEFAULT_MAX_BYTES if max_bytes is None else max_bytes,
+        api_url=api_url,
+        api_key=api_key,
+        check_availability=check_availability,
+        max_retries=max_retries,
+    )

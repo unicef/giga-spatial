@@ -42,7 +42,7 @@ Some datasets and tools need packages that most users don't. Install them with a
 | `maxar` | OWSLib | `MaxarImageDownloader` |
 | `hdx` | hdx-python-api | `HDXHandler` |
 | `excel` | openpyxl, xlrd | Reading and writing `.xlsx` / `.xls` files via `read_dataset` / `write_dataset` |
-| `cds` | cdsapi, xarray, netCDF4, dask | `ERA5Handler` and `ERA5LandHandler`. GRIB reads also need `cfgrib` and ecCodes, which are not installed by this extra |
+| `cds` | cdsapi, xarray, netCDF4, dask | `fetch_era5` and `fetch_era5land`. GRIB reads also need `cfgrib` and ecCodes, which are not installed by this extra |
 
 ## Installing from Source
 

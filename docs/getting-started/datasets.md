@@ -41,14 +41,12 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | OpenCellID | `OpenCellIDHandler` | Crowd-sourced cell tower locations by country |
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
-| ERA5 | `ERA5Handler` | Hourly ERA5 single-level reanalysis for a country, at 0.25°, from 1940 |
-| ERA5-Land | `ERA5LandHandler` | Hourly ERA5-Land reanalysis for a country, at 0.1°, from 1950 |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 
 ## Fetcher
 
-A fetcher is a dataset served as a query, from an API or a database. It returns records, or a road network. It does not store the dataset as files.
+A fetcher is a dataset served as a query, from an API or a database. It returns records, a road network, or an in-memory grid. It does not store the dataset as files.
 
 ```python
 from gigaspatial import OSMLocationFetcher
@@ -72,6 +70,8 @@ Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.m
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |
 | Google Earth Engine | `GEEProfiler` | Raster and vector collections in Google Earth Engine |
+| ERA5 | `fetch_era5` | Hourly ERA5 single levels (`reanalysis-era5-single-levels`), at 0.25°, from 1940, returned as an `xarray.Dataset` |
+| ERA5-Land | `fetch_era5land` | Hourly ERA5-Land (`reanalysis-era5-land`), at 0.1°, from 1950, returned as an `xarray.Dataset` |
 
 ## Data store
 

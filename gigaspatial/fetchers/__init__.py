@@ -21,6 +21,7 @@ __getattr__, __dir__, __all__ = attach(
         "gigaspatial.fetchers.gee.config": ["GEEConfig"],
         "gigaspatial.fetchers.gee.registry": ["GEEDatasetRegistry"],
         "gigaspatial.fetchers.gee.datasets.base": ["GEEDatasetEntry"],
+        "gigaspatial.fetchers.climate": ["fetch_era5", "fetch_era5land"],
     },
 )
 
@@ -41,3 +42,4 @@ if TYPE_CHECKING:
     from gigaspatial.fetchers.gee.config import GEEConfig
     from gigaspatial.fetchers.gee.registry import GEEDatasetRegistry
     from gigaspatial.fetchers.gee.datasets.base import GEEDatasetEntry
+    from gigaspatial.fetchers.climate import fetch_era5, fetch_era5land

@@ -40,8 +40,6 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
         "gigaspatial.handlers.osm.roads": ["OSMRoadsHandler"],
-        "gigaspatial.handlers.cds.era5": ["ERA5Handler"],
-        "gigaspatial.handlers.cds.era5land": ["ERA5LandHandler"],
         # fetchers
         "gigaspatial.fetchers.osm.pois": ["OSMLocationFetcher"],
         "gigaspatial.fetchers.osm.roads": ["OSMRoadsFetcher"],
@@ -56,6 +54,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.fetchers.unicef.sdg": ["UnicefDataFetcher"],
         "gigaspatial.fetchers.mlab": ["MLabFetcher"],
         "gigaspatial.fetchers.gee.profiler": ["GEEProfiler"],
+        "gigaspatial.fetchers.climate": ["fetch_era5", "fetch_era5land"],
         # image downloaders
         "gigaspatial.image_downloaders.mapbox_image": ["MapboxImageDownloader"],
         "gigaspatial.image_downloaders.maxar_image": ["MaxarImageDownloader"],
@@ -124,8 +123,6 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
     from gigaspatial.handlers.osm.roads import OSMRoadsHandler
-    from gigaspatial.handlers.cds.era5 import ERA5Handler
-    from gigaspatial.handlers.cds.era5land import ERA5LandHandler
     from gigaspatial.fetchers.osm.pois import OSMLocationFetcher
     from gigaspatial.fetchers.osm.roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
@@ -139,6 +136,7 @@ if TYPE_CHECKING:
     from gigaspatial.fetchers.unicef.sdg import UnicefDataFetcher
     from gigaspatial.fetchers.mlab import MLabFetcher
     from gigaspatial.fetchers.gee.profiler import GEEProfiler
+    from gigaspatial.fetchers.climate import fetch_era5, fetch_era5land
     from gigaspatial.image_downloaders.mapbox_image import MapboxImageDownloader
     from gigaspatial.image_downloaders.maxar_image import MaxarImageDownloader
     from gigaspatial.generators.poi import PoiViewGenerator
