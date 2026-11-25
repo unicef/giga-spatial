@@ -64,6 +64,18 @@ from gigaspatial.fetchers import MLabConfig, GEEConfig
         - fetch_statistics
         - fetch_facility_by_id
 
+## PeeringDB
+
+`PeeringDBFetcher` fetches facilities from the [PeeringDB API](https://www.peeringdb.com/api). `fetch_facilities` returns a GeoDataFrame in EPSG:4326. Pass a country, a box `(min_lon, min_lat, max_lon, max_lat)`, or both. Omit both for the default listing. A facility with no coordinates stays in the frame with a missing geometry.
+
+The call is anonymous when `PEERINGDB_API_KEY` is empty. A key is sent as `Authorization: Api-Key`. PeeringDB's [acceptable use policy](https://www.peeringdb.com/aup) limits reproduction, storage, and bulk redistribution.
+
+::: gigaspatial.fetchers.peeringdb.PeeringDBFetcher
+    options:
+      show_source: false
+      members:
+        - fetch_facilities
+
 ## Overture
 
 ::: gigaspatial.fetchers.overture.OvertureAmenityFetcher
