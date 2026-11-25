@@ -20,7 +20,7 @@ view = zones.map_wp_pop(country="RWA")
 print(view.head())
 ```
 
-`source` is the country the cells cover. `resolution=6` is the H3 size: about 36 km² per cell. `map_wp_pop` loads the WorldPop raster for that country and sums it onto the cells. `view` is a table of cells with a `population` column and a geometry.
+`source` is the country the cells cover. `resolution=6` is the H3 size: about 36 km² per cell. `map_wp_pop` loads the WorldPop raster for that country and sums it onto the cells. `view` is a geometry-free table keyed by `zone_id` with a `population` column (call `zones.to_geodataframe()` when you want cell polygon geometries).
 
 `S2ViewGenerator` and `MercatorViewGenerator` follow the same pattern: construct them with a country, then call `map_wp_pop`.
 
@@ -38,7 +38,7 @@ zones.map_wp_pop(country="RWA")
 zones.map_buildings(country="RWA")
 
 schools = OSMLocationFetcher(country="RWA", location_types=["school"]).fetch_locations()
-zones.add_variable_to_view(zones.map_points(schools), "school_count")
+zones.map_points(schools, output_column="school_count")
 
 view = zones.view
 print(view[["zone_id", "population", "building_count", "school_count"]].head())
@@ -143,7 +143,7 @@ Pass `data_store=` when you construct a handler or a generator to choose the sto
 # How GigaSpatial compares to other tools
 
 - **Hand-built `geopandas`, `rasterio`, `rasterstats`, `pyrosm`, and `osmnx` pipelines**: GigaSpatial uses `geopandas`, `rasterio`, and `h3` under the hood, and replaces custom per-dataset download scripts, tile stitching, CRS projection, and buffer or zonal loops with handlers, fetchers, and generators that run in a few lines of Python.
-- **Grid libraries (`h3-py`, `h3ronpy`, `h3-toolkit`)**: `h3-py` indexes coordinates and geometries into H3 cell IDs. `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, and `GeometryBasedZonalViewGenerator` in GigaSpatial acquire published country datasets (WorldPop, GHSL, Google and Microsoft buildings, Relative Wealth Index) into your data store and map them directly onto H3 hexagons, S2 cells, Mercator tiles, administrative boundaries, or custom polygons.
+- **Grid libraries (`h3-py`, `h3ronpy`, `h3-toolkit`)**: `h3-py` indexes coordinates and geometries into H3 cell IDs. `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, and `ZonalViewGenerator` in GigaSpatial acquire published country datasets (WorldPop, GHSL, Google and Microsoft buildings, Relative Wealth Index) into your data store and map them directly onto H3 hexagons, S2 cells, Mercator tiles, administrative boundaries, or custom polygons.
 - **Cloud catalogs and spatial engines (Google Earth Engine, Microsoft Planetary Computer, PostGIS, DuckDB, Apache Sedona)**: Cloud platforms and spatial databases run queries inside their own infrastructure. GigaSpatial downloads and caches published datasets into a data store you control (local disk, Azure Data Lake Storage, or Snowflake) and also provides optional `GEEProfiler` (`giga-spatial[gee]`), `BigQueryClient` (`giga-spatial[bq]`), and DuckDB or Trino integrations when you want them.
 
 # Where to read more

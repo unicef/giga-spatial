@@ -16,7 +16,7 @@ A handler builds its own folder under `BRONZE_DIR`. With `ROOT_DATA_DIR=/data`, 
 
 ## Credentials
 
-Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, and Ookla do not need a key for ordinary access.
+Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, Ookla, and PeeringDB do not need a key for ordinary access.
 
 | Variable | Used by |
 | --- | --- |
@@ -25,6 +25,7 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, and Ookl
 | `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD` | NASA SRTM |
 | `OPENCELLID_ACCESS_TOKEN` | OpenCellID |
 | `HEALTHSITES_API_KEY` | Healthsites.io |
+| `PEERINGDB_API_KEY` | PeeringDB facilities. Empty sends an anonymous request. |
 | `GEOREPO_API_KEY`, `GEOREPO_USER_EMAIL` | UNICEF GeoRepo boundaries |
 | `HDX_KEY` | Humanitarian Data Exchange (HDX) and Meta Relative Wealth Index (RWI) |
 | `GIGA_SCHOOL_LOCATION_API_KEY` | Giga school locations |

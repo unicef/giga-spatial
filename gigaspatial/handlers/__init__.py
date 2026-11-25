@@ -90,6 +90,12 @@ __getattr__, __dir__, __all__ = attach(
             "AqueductFloodReader",
             "AqueductFloodHandler",
         ],
+        "gigaspatial.handlers.wri.global_power_plant": [
+            "GlobalPowerPlantConfig",
+            "GlobalPowerPlantDownloader",
+            "GlobalPowerPlantReader",
+            "GlobalPowerPlantHandler",
+        ],
         "gigaspatial.handlers.osm.roads": [
             "OSMRoadsConfig",
             "OSMRoadsDownloader",
@@ -174,6 +180,12 @@ if TYPE_CHECKING:
         AqueductFloodDownloader,
         AqueductFloodReader,
         AqueductFloodHandler,
+    )
+    from gigaspatial.handlers.wri.global_power_plant import (
+        GlobalPowerPlantConfig,
+        GlobalPowerPlantDownloader,
+        GlobalPowerPlantReader,
+        GlobalPowerPlantHandler,
     )
     from gigaspatial.handlers.osm.roads import (
         OSMRoadsConfig,
