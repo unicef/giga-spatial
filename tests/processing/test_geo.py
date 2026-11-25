@@ -3,10 +3,14 @@ import numpy as np
 import pytest
 from shapely.geometry import Point, Polygon
 
+from gigaspatial.processing import geo as geo_module
 from gigaspatial.processing.geo import (
+    add_area_in_meters,
     aggregate_points_to_zones,
     aggregate_polygons_to_zones,
     annotate_with_admin_regions,
+    buffer_geodataframe,
+    estimate_utm_crs_with_fallback,
     map_points_within_polygons,
 )
 
@@ -481,6 +485,155 @@ def test_annotate_with_admin_regions_preexisting_admin_id_with_tie(monkeypatch):
     assert result.loc["row_1", "admin2_id"] == "ADM2_A"
     assert result.loc["row_2", "admin1_id"] == "ADM1_B"
     assert result.loc["row_2", "admin2_id"] == "ADM2_B"
+
+
+def test_buffer_geodataframe_high_latitude_matches_utm_not_web_mercator():
+    oslo = gpd.GeoDataFrame(geometry=[Point(10.7522, 59.9139)], crs="EPSG:4326")
+    radius_m = 1000.0
+
+    buffered = buffer_geodataframe(oslo, radius_m)
+
+    utm_crs = "EPSG:32632"
+    actual_area = buffered.to_crs(utm_crs).geometry.area.iloc[0]
+    utm_ref_area = (
+        oslo.to_crs(utm_crs).geometry.buffer(radius_m).area.iloc[0]
+    )
+    mercator_ref_area = (
+        oslo.to_crs("EPSG:3857")
+        .geometry.buffer(radius_m)
+        .to_crs(utm_crs)
+        .area.iloc[0]
+    )
+
+    assert actual_area == pytest.approx(utm_ref_area, rel=1e-2)
+    assert abs(actual_area - mercator_ref_area) / utm_ref_area > 0.5
+
+
+def test_add_area_in_meters_high_latitude_matches_utm_not_web_mercator():
+    oslo_poly = gpd.GeoDataFrame(
+        geometry=[
+            Polygon([(10.7, 59.9), (10.8, 59.9), (10.8, 59.95), (10.7, 59.95)])
+        ],
+        crs="EPSG:4326",
+    )
+
+    result = add_area_in_meters(oslo_poly)
+    actual_area = result["area_in_meters"].iloc[0]
+    utm_ref_area = oslo_poly.to_crs("EPSG:32632").geometry.area.iloc[0]
+    mercator_ref_area = oslo_poly.to_crs("EPSG:3857").geometry.area.iloc[0]
+
+    assert actual_area == pytest.approx(utm_ref_area, rel=1e-4)
+    assert abs(actual_area - mercator_ref_area) / utm_ref_area > 2.0
+
+
+def test_metric_operations_handle_none_utm_crs_via_helper(monkeypatch):
+    oslo_poly = gpd.GeoDataFrame(
+        {
+            "val": [10.0],
+            "geometry": [
+                Polygon([(10.7, 59.9), (10.8, 59.9), (10.8, 59.95), (10.7, 59.95)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    oslo_zones = gpd.GeoDataFrame(
+        {
+            "zone_id": ["oslo_z1"],
+            "geometry": [
+                Polygon([(10.65, 59.85), (10.85, 59.85), (10.85, 60.0), (10.65, 60.0)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+
+    monkeypatch.setattr(gpd.GeoDataFrame, "estimate_utm_crs", lambda self: None)
+
+    buffered = buffer_geodataframe(oslo_poly, 100.0)
+    assert len(buffered) == 1
+    assert buffered.crs == "EPSG:4326"
+
+    with_area = add_area_in_meters(oslo_poly)
+    assert with_area["area_in_meters"].iloc[0] > 0
+
+    counted = aggregate_polygons_to_zones(
+        oslo_poly,
+        oslo_zones,
+        value_columns=None,
+        aggregation="count",
+        predicate="fractional",
+        drop_geometry=True,
+    )
+    assert counted.set_index("zone_id").loc["oslo_z1", "polygon_count"] == 1
+
+    aggregated = aggregate_polygons_to_zones(
+        oslo_poly,
+        oslo_zones,
+        value_columns="val",
+        aggregation="sum",
+        predicate="fractional",
+        drop_geometry=True,
+    )
+    assert aggregated.set_index("zone_id").loc["oslo_z1", "val"] == pytest.approx(10.0)
+
+
+def test_metric_operations_delegate_to_estimate_utm_crs_with_fallback(monkeypatch):
+    oslo_poly = gpd.GeoDataFrame(
+        {
+            "val": [10.0],
+            "geometry": [
+                Polygon([(10.7, 59.9), (10.8, 59.9), (10.8, 59.95), (10.7, 59.95)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    oslo_zones = gpd.GeoDataFrame(
+        {
+            "zone_id": ["oslo_z1"],
+            "geometry": [
+                Polygon([(10.65, 59.85), (10.85, 59.85), (10.85, 60.0), (10.65, 60.0)])
+            ],
+        },
+        crs="EPSG:4326",
+    )
+
+    real_helper = estimate_utm_crs_with_fallback
+    calls = []
+
+    def _spy(gdf, logger=geo_module.LOGGER, fallback_crs="EPSG:3857"):
+        calls.append(len(gdf))
+        return real_helper(gdf, logger=logger, fallback_crs=fallback_crs)
+
+    monkeypatch.setattr(geo_module, "estimate_utm_crs_with_fallback", _spy)
+
+    buffer_geodataframe(oslo_poly, 100.0)
+    add_area_in_meters(oslo_poly)
+    aggregate_polygons_to_zones(
+        oslo_poly,
+        oslo_zones,
+        value_columns=None,
+        aggregation="count",
+        predicate="fractional",
+    )
+    aggregate_polygons_to_zones(
+        oslo_poly,
+        oslo_zones,
+        value_columns="val",
+        aggregation="sum",
+        predicate="fractional",
+    )
+
+    assert len(calls) == 4
+
+
+def test_estimate_utm_crs_with_fallback_preserves_custom_fallback_crs(monkeypatch):
+    oslo = gpd.GeoDataFrame(geometry=[Point(10.7522, 59.9139)], crs="EPSG:4326")
+    monkeypatch.setattr(
+        gpd.GeoDataFrame,
+        "estimate_utm_crs",
+        lambda self: (_ for _ in ()).throw(RuntimeError("utm failed")),
+    )
+
+    assert estimate_utm_crs_with_fallback(oslo, fallback_crs="EPSG:32632") == "EPSG:32632"
 
 
 

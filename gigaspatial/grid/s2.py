@@ -282,25 +282,30 @@ class S2Cells(BaseModel):
         self.logger.info(f"Successfully converted to DataFrame.")
         return pd.DataFrame(data)
 
-    def to_geoms(self) -> List[Polygon]:
-        """Convert cells to shapely Polygon geometries."""
+    def _build_cell_geoms(self) -> Tuple[List[int], List[str], List[Polygon]]:
+        """Build aligned (cell_ids, cell_tokens, polygons), skipping invalid cells."""
         self.logger.info(f"Converting {len(self.cells)} cells to geometries.")
-        polygons = []
+        cell_ids: List[int] = []
+        cell_tokens: List[str] = []
+        polygons: List[Polygon] = []
         invalid_count = 0
+        skipped_count = 0
 
         for cell_id in self.cells:
-            c_id = CellId(int(cell_id))
-            cell = Cell(c_id)
-
-            vertices = []
-            for i in range(4):
-                vertex = cell.get_vertex(i)
-                lat_lng = LatLng.from_point(vertex)
-                vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))
-
-            vertices.append(vertices[0])
-
+            token = str(cell_id)
             try:
+                c_id = CellId(int(cell_id))
+                token = c_id.to_token()
+                cell = Cell(c_id)
+
+                vertices = []
+                for i in range(4):
+                    vertex = cell.get_vertex(i)
+                    lat_lng = LatLng.from_point(vertex)
+                    vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))
+
+                vertices.append(vertices[0])
+
                 poly = Polygon(vertices)
 
                 # Enforce CCW orientation
@@ -313,31 +318,46 @@ class S2Cells(BaseModel):
 
                 # Verify after repair
                 if not poly.is_valid:
+                    skipped_count += 1
                     self.logger.warning(
-                        f"Cell {c_id.to_token()} still invalid after buffer(0)"
+                        f"Cell {token} still invalid after buffer(0)"
                     )
                     continue
 
+                cell_ids.append(cell_id)
+                cell_tokens.append(token)
                 polygons.append(poly)
 
             except Exception as e:
-                self.logger.error(f"Failed to convert cell {c_id.to_token()}: {e}")
+                skipped_count += 1
+                self.logger.error(f"Failed to convert cell {token}: {e}")
 
         if invalid_count > 0:
             self.logger.info(
                 f"Repaired {invalid_count} invalid geometries via buffer(0)"
             )
 
+        if skipped_count > 0:
+            self.logger.warning(
+                f"Skipped {skipped_count} of {len(self.cells)} S2 cells during geometry conversion."
+            )
+
+        return cell_ids, cell_tokens, polygons
+
+    def to_geoms(self) -> List[Polygon]:
+        """Convert cells to shapely Polygon geometries."""
+        _, _, polygons = self._build_cell_geoms()
         return polygons
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
         """Convert to GeoPandas GeoDataFrame."""
+        cell_ids, cell_tokens, polygons = self._build_cell_geoms()
         return gpd.GeoDataFrame(
             {
-                "cell_id": self.cells,
-                "cell_token": [CellId(c).to_token() for c in self.cells],
-                "geometry": self.to_geoms(),
+                "cell_id": cell_ids,
+                "cell_token": cell_tokens,
             },
+            geometry=gpd.GeoSeries(polygons, crs="EPSG:4326"),
             crs="EPSG:4326",
         )
 

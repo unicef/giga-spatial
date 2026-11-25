@@ -322,13 +322,7 @@ def buffer_geodataframe(
     input_crs = gdf_work.crs
 
     try:
-        try:
-            utm_crs = gdf_work.estimate_utm_crs()
-        except Exception as e:
-            LOGGER.warning(
-                f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
-            )
-            utm_crs = "EPSG:3857"  # Fallback to Web Mercator
+        utm_crs = estimate_utm_crs_with_fallback(gdf_work, logger=LOGGER)
 
         # Transform to UTM, create buffer, and transform back
         gdf_work = gdf_work.to_crs(utm_crs)
@@ -482,13 +476,7 @@ def add_area_in_meters(
     gdf_with_area = gdf.copy()
 
     # Calculate the UTM CRS for accurate area calculation
-    try:
-        utm_crs = gdf_with_area.estimate_utm_crs()
-    except Exception as e:
-        LOGGER.warning(
-            f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
-        )
-        utm_crs = "EPSG:3857"  # Fallback to Web Mercator
+    utm_crs = estimate_utm_crs_with_fallback(gdf_with_area, logger=LOGGER)
 
     # Transform to UTM CRS and calculate the area in square meters
     gdf_with_area[area_column_name] = gdf_with_area.to_crs(utm_crs).geometry.area
@@ -1155,11 +1143,7 @@ def _count_polygons_per_zone(
 ) -> pd.DataFrame:
     """Count unique polygons matching each zone without mutating caller inputs."""
     if predicate == "fractional":
-        try:
-            overlay_utm_crs = polygons_gdf.estimate_utm_crs()
-        except Exception as e:
-            LOGGER.warning(f"UTM CRS estimation failed, using Web Mercator. Error: {e}")
-            overlay_utm_crs = "EPSG:3857"
+        overlay_utm_crs = estimate_utm_crs_with_fallback(polygons_gdf, logger=LOGGER)
 
         polygons_utm = polygons_gdf[["geometry"]].to_crs(overlay_utm_crs)
         polygons_utm["__poly_idx"] = np.arange(len(polygons_utm))
@@ -1241,11 +1225,7 @@ def _fractional_aggregation(
     """
     try:
         # Compute UTM CRS for accurate area calculations
-        try:
-            overlay_utm_crs = polygons_gdf.estimate_utm_crs()
-        except Exception as e:
-            LOGGER.warning(f"UTM CRS estimation failed, using Web Mercator. Error: {e}")
-            overlay_utm_crs = "EPSG:3857"  # Fallback to Web Mercator
+        overlay_utm_crs = estimate_utm_crs_with_fallback(polygons_gdf, logger=LOGGER)
 
         # Prepare polygons for overlay - only necessary columns
         polygons_utm = polygons_gdf.to_crs(overlay_utm_crs)
