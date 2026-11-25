@@ -116,7 +116,10 @@ class MercatorTiles(BaseModel):
         if isinstance(source, gpd.GeoDataFrame):
             if source.crs != "EPSG:4326":
                 source = source.to_crs("EPSG:4326")
-            source = source.geometry.unary_union
+            if (source.geometry.geom_type == "Point").all():
+                source = source.geometry.to_list()
+            else:
+                source = source.geometry.unary_union
 
         if isinstance(source, BaseGeometry):
             return cls.from_geometry(
@@ -125,7 +128,7 @@ class MercatorTiles(BaseModel):
         elif isinstance(source, Iterable) and all(
             isinstance(pt, Point) or len(pt) == 2 for pt in source
         ):
-            return cls.from_points(geometry=source, zoom_level=zoom_level, **kwargs)
+            return cls.from_points(points=source, zoom_level=zoom_level, **kwargs)
         else:
             raise
 

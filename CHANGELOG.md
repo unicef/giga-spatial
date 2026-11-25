@@ -77,6 +77,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **`MercatorTiles.from_spatial` point dispatch (`gigaspatial/grid/mercator_tiles.py`)**
+    -   Fixed `MercatorTiles.from_spatial` passing `geometry=` instead of `points=` to `from_points`, which raised `TypeError` for lists of `(lon, lat)` tuples or Shapely `Point`s, and routed point `GeoDataFrame` inputs to `from_points` to match `H3Hexagons` and `S2Cells`.
 -   **Security: redact API tokens from URLs, logs, exceptions, and reprs (`gigaspatial/core/http/redaction.py`, `gigaspatial/image_downloaders/mapbox_image.py`, `gigaspatial/image_downloaders/maxar_image.py`, `gigaspatial/handlers/georepo.py`, `gigaspatial/core/http/client.py`, `gigaspatial/fetchers/healthsites.py`, `gigaspatial/handlers/opencellid.py`)**
     -   Added shared `redact_url` and `sanitize_exception` helpers in `gigaspatial.core.http.redaction` to mask token-like query parameters (`access_token`, `token`, `api_key`, `key`, `connectid`, and prefixed variants) while leaving non-secret parameters untouched.
     -   Redacted tokens from warning/error logs, raised exceptions, and `__repr__` outputs in `MapboxImageDownloader`, `MaxarConfig`, `MaxarImageDownloader`, `GeoRepoClient`, `BaseRestApiClient`, `HealthSitesFetcher`, `PeeringDBFetcher`, and the Giga API fetchers, and migrated `OpenCellIDConfig` / `OpenCellIDDownloader` onto the shared helpers. Outgoing HTTP requests continue to use the real credentials.
