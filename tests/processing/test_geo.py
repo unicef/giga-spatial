@@ -447,5 +447,42 @@ def test_annotate_with_admin_regions_shared_border_deterministic_and_preserves_o
     assert results[0].equals(results[1])
 
 
+def test_annotate_with_admin_regions_preexisting_admin_id_with_tie(monkeypatch):
+    from gigaspatial.handlers.boundaries import AdminBoundaries
+
+    admin1_gdf, admin2_gdf = _make_admin_fixtures()
+
+    def _fake_create(country_code, admin_level, data_store=None):
+        return _FakeAdminBoundaries(admin1_gdf if admin_level == 1 else admin2_gdf)
+
+    monkeypatch.setattr(AdminBoundaries, "create", staticmethod(_fake_create))
+
+    points = gpd.GeoDataFrame(
+        {
+            "pid": ["border", "in_b"],
+            "admin1_id": ["STALE_1", "STALE_2"],
+            "geometry": [Point(1.0, 1.0), Point(0.5, 1.0)],
+        },
+        index=["row_1", "row_2"],
+        crs="EPSG:4326",
+    )
+    original_snapshot = points.copy(deep=True)
+
+    result = annotate_with_admin_regions(points, country_code="RWA")
+
+    assert result is not points
+    assert points.equals(original_snapshot)
+    assert list(points["admin1_id"]) == ["STALE_1", "STALE_2"]
+
+    assert len(result) == 2
+    assert list(result.index) == ["row_1", "row_2"]
+    assert list(result["pid"]) == ["border", "in_b"]
+    assert result.loc["row_1", "admin1_id"] == "ADM1_A"
+    assert result.loc["row_1", "admin2_id"] == "ADM2_A"
+    assert result.loc["row_2", "admin1_id"] == "ADM1_B"
+    assert result.loc["row_2", "admin2_id"] == "ADM2_B"
+
+
+
 
 

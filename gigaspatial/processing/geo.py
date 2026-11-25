@@ -786,11 +786,13 @@ def annotate_with_admin_regions(
     in the original row order and with the original index. The input GeoDataFrame
     is not mutated.
 
-    When a point intersects multiple administrative polygons (for example on a
+    When a point intersects multiple administrative boundaries (for example on a
     shared border or overlapping boundary), ties are resolved deterministically
     by sorting candidate matches ascending by
     ``(admin1_id<suffix>, admin2_id<suffix>)`` with missing IDs sorted last and
-    keeping the first match.
+    keeping the first match. Pre-existing ``admin1_id<suffix>`` or
+    ``admin2_id<suffix>`` columns on the input are dropped from the working copy
+    with a warning before the spatial join.
 
     Args:
         gdf: GeoDataFrame containing points to annotate.
@@ -880,6 +882,18 @@ def annotate_with_admin_regions(
     elif work_gdf.crs != "EPSG:4326":
         LOGGER.info(f"Reprojecting from {work_gdf.crs} to EPSG:4326")
         work_gdf = work_gdf.to_crs(epsg=4326)
+
+    # Drop pre-existing admin ID columns on the working copy so sjoin does not
+    # suffix them into _left/_right and break tie-breaking.
+    existing_admin_cols = [
+        col for col in (admin1_id_col, admin2_id_col) if col in work_gdf.columns
+    ]
+    if existing_admin_cols:
+        LOGGER.warning(
+            f"Input GeoDataFrame already contains admin columns {existing_admin_cols}; "
+            "dropping them before spatial join."
+        )
+        work_gdf = work_gdf.drop(columns=existing_admin_cols)
 
     # Use a monotonic positional index during the join so non-default or
     # duplicate caller indices remain aligned and in input order.
