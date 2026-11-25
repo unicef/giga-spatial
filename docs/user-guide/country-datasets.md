@@ -14,17 +14,17 @@ zones.map_wp_pop(country="RWA")
 zones.map_buildings(country="RWA")
 
 schools = OSMLocationFetcher(country="RWA", location_types=["school"]).fetch_locations()
-zones.add_variable_to_view(zones.map_points(schools), "school_count")
+zones.map_points(schools, output_column="school_count")
 
 view = zones.view
 print(view[["zone_id", "population", "building_count", "school_count"]].head())
 ```
 
-`view` is a GeoDataFrame with one row per H3 cell, its polygon geometry, the summed WorldPop `population`, the `building_count` from Google and Microsoft building footprints, and the OpenStreetMap `school_count`.
+`view` is a geometry-free DataFrame keyed by `zone_id`, with the summed WorldPop `population`, the `building_count` from Google and Microsoft building footprints, and the OpenStreetMap `school_count`. Call `zones.to_geodataframe()` when you want a `GeoDataFrame` with cell geometries.
 
 You can attach additional datasets to the same view before reading `zones.view`:
 
-- `zones.map_rwi(country="RWA")` attaches the mean Meta Relative Wealth Index (`rwi`)
+- `zones.map_rwi(country="RWA")` attaches the mean Meta Relative Wealth Index (`rwi_mean`)
 - `zones.map_smod()` attaches the GHSL settlement model class (`smod_class`)
 - `zones.map_ghsl_pop()` attaches GHSL population (`ghsl_pop`)
 

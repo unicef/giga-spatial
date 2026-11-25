@@ -9,6 +9,7 @@ __getattr__, __dir__, __all__ = attach(
         "gigaspatial.fetchers.osm.roads": ["OSMRoadsFetcher"],
         "gigaspatial.fetchers.overture": ["OvertureAmenityFetcher"],
         "gigaspatial.fetchers.healthsites": ["HealthSitesFetcher"],
+        "gigaspatial.fetchers.peeringdb": ["PeeringDBFetcher"],
         "gigaspatial.fetchers.giga.school_locations": ["GigaSchoolLocationFetcher"],
         "gigaspatial.fetchers.giga.school_profile": ["GigaSchoolProfileFetcher"],
         "gigaspatial.fetchers.giga.school_measurements": [
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from gigaspatial.fetchers.osm.roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
     from gigaspatial.fetchers.healthsites import HealthSitesFetcher
+    from gigaspatial.fetchers.peeringdb import PeeringDBFetcher
     from gigaspatial.fetchers.giga.school_locations import GigaSchoolLocationFetcher
     from gigaspatial.fetchers.giga.school_profile import GigaSchoolProfileFetcher
     from gigaspatial.fetchers.giga.school_measurements import (

@@ -4,7 +4,7 @@ A dataset is a named product the library can acquire, such as WorldPop populatio
 
 ## Handler
 
-A handler is a dataset published as files. It keeps those files in a data store and loads them for a source.
+A handler persists files in a data store and loads them for a source.
 
 A source is the place you load for, or an explicit list of stored files. A place is a country, a geometry, points, or a frame.
 
@@ -42,11 +42,12 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
+| Global Power Plant Database | `GlobalPowerPlantHandler` | Grid-scale power plants worldwide, one WRI release at a time |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 
 ## Fetcher
 
-A fetcher is a dataset served as a query, from an API or a database. It returns records, a road network, or an in-memory grid. It does not store the dataset as files.
+A fetcher returns its result in memory and imposes no data-store layout. Publication as files or as a query does not decide this. `fetch_era5` and `fetch_era5land` return an `xarray.Dataset`.
 
 ```python
 from gigaspatial import OSMLocationFetcher
@@ -60,12 +61,13 @@ clinics = OSMLocationFetcher(country="RWA", location_types=["clinic"]).fetch_loc
 
 Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.md) for method signatures.
 
-| Dataset | Fetcher | What it queries |
+| Dataset | Fetcher | What it reads |
 | --- | --- | --- |
 | OpenStreetMap places | `OSMLocationFetcher` | Points of interest (schools, clinics, hospitals, amenities) from the Overpass API |
 | OpenStreetMap roads | `OSMRoadsFetcher` | Road networks from the Overpass API, returned as a `SpatialNetwork` |
 | Giga schools | `GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher` | School locations, profiles, connectivity measurements, and country metadata from the Giga API |
 | Healthsites.io | `HealthSitesFetcher` | Health facility locations and attributes |
+| PeeringDB | `PeeringDBFetcher` | Facility locations and attributes from the PeeringDB API |
 | Overture Maps | `OvertureAmenityFetcher` | Amenity places from Overture Maps |
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |

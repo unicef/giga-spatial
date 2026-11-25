@@ -901,31 +901,43 @@ def annotate_with_admin_regions(
 def aggregate_polygons_to_zones(
     polygons: Union[pd.DataFrame, gpd.GeoDataFrame],
     zones: gpd.GeoDataFrame,
-    value_columns: Union[str, List[str]],
-    aggregation: Union[str, Dict[str, str]] = "sum",
+    value_columns: Optional[Union[str, List[str]]] = None,
+    aggregation: Optional[Union[str, Dict[str, str]]] = None,
     predicate: Literal["intersects", "within", "fractional"] = "intersects",
     zone_id_column: str = "zone_id",
     output_suffix: str = "",
     drop_geometry: bool = False,
-) -> gpd.GeoDataFrame:
+    output_column: Optional[str] = None,
+) -> Union[gpd.GeoDataFrame, pd.DataFrame]:
     """
     Aggregates polygon data to zones based on a spatial relationship.
+
+    When ``value_columns`` is ``None`` and ``aggregation`` is ``"count"``
+    (the default when ``value_columns`` is omitted), counts polygons per zone
+    into ``output_column`` or ``f"polygon_count{output_suffix}"`` without
+    mutating the input ``polygons`` GeoDataFrame.
 
     Args:
         polygons: Polygon data to aggregate.
         zones: Target zones.
-        value_columns: Column(s) in polygons with numeric values.
-        aggregation: Aggregation method(s) to use (str or dict).
+        value_columns: Column(s) in polygons with values to aggregate, or
+            ``None`` to count polygons per zone.
+        aggregation: Aggregation method(s) to use (str or dict). Defaults to
+            ``"count"`` when ``value_columns`` is ``None`` and ``"sum"``
+            otherwise.
         predicate: Spatial relationship ('intersects', 'within', 'fractional').
         zone_id_column: Unique identifier column in zones.
         output_suffix: Suffix for output columns.
         drop_geometry: Whether to drop the geometry column.
+        output_column: Explicit name for a single output column (overrides
+            ``value_columns`` / ``"polygon_count"`` and ``output_suffix``).
 
     Returns:
-        The zones GeoDataFrame with aggregated values.
+        The zones GeoDataFrame (or DataFrame if ``drop_geometry=True``) with
+        aggregated values.
 
     Raises:
-        TypeError: If polygons/zones are not GeoDataFrames.
+        TypeError: If polygons/zones are not GeoDataFrames or aggregation is invalid.
         ValueError: If columns or predicates are invalid.
     """
     # --- Input validation ---
@@ -944,7 +956,34 @@ def aggregate_polygons_to_zones(
             "Must be one of: 'intersects', 'within', 'fractional'."
         )
 
-    # --- Normalise polygons ---
+    if aggregation is None:
+        aggregation = "count" if value_columns is None else "sum"
+
+    # --- Normalise value_columns and validate aggregation/output options ---
+    if value_columns is None:
+        if aggregation != "count":
+            raise ValueError(
+                "value_columns must be specified for aggregation methods other than 'count'"
+            )
+        count_col = (
+            output_column
+            if output_column is not None
+            else f"polygon_count{output_suffix}"
+        )
+        agg_funcs = None
+        agg_method_for_col: Dict[str, str] = {}
+    else:
+        if isinstance(value_columns, str):
+            value_columns = [value_columns]
+        if output_column is not None and len(value_columns) > 1:
+            raise ValueError(
+                "output_column cannot be used with multiple value_columns; use output_suffix instead."
+            )
+        agg_funcs = _process_aggregation_methods(aggregation, value_columns)
+        agg_method_for_col = dict(agg_funcs)
+        count_col = ""
+
+    # --- Normalise polygons (always copy so caller data is never mutated) ---
     if not isinstance(polygons, gpd.GeoDataFrame):
         try:
             polygons_gdf = convert_to_geodataframe(polygons)
@@ -957,7 +996,20 @@ def aggregate_polygons_to_zones(
 
     if polygons_gdf.empty:
         LOGGER.warning("Empty polygons GeoDataFrame provided")
-        return zones
+        result = zones.copy()
+        if value_columns is None:
+            result[count_col] = 0
+        else:
+            for col in value_columns:
+                out_col = (
+                    output_column
+                    if output_column is not None
+                    else f"{col}{output_suffix}"
+                )
+                result[out_col] = 0 if agg_method_for_col[col] == "count" else np.nan
+        if drop_geometry:
+            result = result.drop(columns=["geometry"])
+        return result
 
     # --- Geometry type validation ---
     non_polygon_geoms = [
@@ -971,9 +1023,21 @@ def aggregate_polygons_to_zones(
             "Use aggregate_points_to_zones for point data."
         )
 
-    # --- Normalise value_columns ---
-    if isinstance(value_columns, str):
-        value_columns = [value_columns]
+    # --- CRS alignment ---
+    if polygons_gdf.crs != zones.crs:
+        polygons_gdf = polygons_gdf.to_crs(zones.crs)
+
+    minimal_zones = zones[[zone_id_column, "geometry"]].copy()
+
+    if value_columns is None:
+        aggregated_counts = _count_polygons_per_zone(
+            polygons_gdf, minimal_zones, zone_id_column, predicate, count_col
+        )
+        result = zones.merge(aggregated_counts, on=zone_id_column, how="left")
+        result[count_col] = result[count_col].fillna(0).astype(int)
+        if drop_geometry:
+            result = result.drop(columns=["geometry"])
+        return result
 
     missing_cols = [col for col in value_columns if col not in polygons_gdf.columns]
     if missing_cols:
@@ -986,23 +1050,7 @@ def aggregate_polygons_to_zones(
             "Please rename this column in the polygons data."
         )
 
-    # --- CRS alignment ---
-    if polygons_gdf.crs != zones.crs:
-        polygons_gdf = polygons_gdf.to_crs(zones.crs)
-
-    # --- Build aggregation functions ---
-    agg_funcs = _process_aggregation_methods(aggregation, value_columns)
-
-    # Build lookup: original col name → method (before suffix is applied)
-    # Used below to decide fill value per column.
-    if isinstance(aggregation, str):
-        agg_method_for_col: Dict[str, str] = {col: aggregation for col in value_columns}
-    else:
-        agg_method_for_col = dict(aggregation)
-
     # --- Spatial aggregation ---
-    minimal_zones = zones[[zone_id_column, "geometry"]].copy()
-
     if predicate == "fractional":
         aggregated_data = _fractional_aggregation(
             polygons_gdf, minimal_zones, value_columns, agg_funcs, zone_id_column
@@ -1029,14 +1077,16 @@ def aggregate_polygons_to_zones(
     # still match the keys in agg_method_for_col.
     aggregated_cols = [col for col in result.columns if col not in zones.columns]
     for col in aggregated_cols:
-        if not pd.api.types.is_numeric_dtype(result[col]):
-            continue
         method = agg_method_for_col.get(col, "")
-        fill_value = 0 if method == "count" else np.nan
-        result[col] = result[col].fillna(fill_value)
+        if method == "count":
+            result[col] = result[col].fillna(0)
+        elif pd.api.types.is_numeric_dtype(result[col]):
+            result[col] = result[col].fillna(np.nan)
 
-    # --- Apply output suffix ---
-    if output_suffix:
+    # --- Apply output suffix or explicit single output_column ---
+    if output_column is not None:
+        result = result.rename(columns={value_columns[0]: output_column})
+    elif output_suffix:
         rename_dict = {col: f"{col}{output_suffix}" for col in aggregated_cols}
         result = result.rename(columns=rename_dict)
 
@@ -1044,6 +1094,54 @@ def aggregate_polygons_to_zones(
         result = result.drop(columns=["geometry"])
 
     return result
+
+
+def _empty_count_frame(
+    zones: gpd.GeoDataFrame, zone_id_column: str, count_col: str
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            zone_id_column: pd.Series(dtype=zones[zone_id_column].dtype),
+            count_col: pd.Series(dtype=int),
+        }
+    )
+
+
+def _count_polygons_per_zone(
+    polygons_gdf: gpd.GeoDataFrame,
+    zones: gpd.GeoDataFrame,
+    zone_id_column: str,
+    predicate: Literal["intersects", "within", "fractional"],
+    count_col: str,
+) -> pd.DataFrame:
+    """Count unique polygons matching each zone without mutating caller inputs."""
+    if predicate == "fractional":
+        try:
+            overlay_utm_crs = polygons_gdf.estimate_utm_crs()
+        except Exception as e:
+            LOGGER.warning(f"UTM CRS estimation failed, using Web Mercator. Error: {e}")
+            overlay_utm_crs = "EPSG:3857"
+
+        polygons_utm = polygons_gdf[["geometry"]].to_crs(overlay_utm_crs)
+        polygons_utm["__poly_idx"] = np.arange(len(polygons_utm))
+        zones_utm = zones.to_crs(overlay_utm_crs)
+        overlayed = gpd.overlay(polygons_utm, zones_utm, how="intersection")
+        if overlayed.empty:
+            LOGGER.warning("No intersections found during fractional polygon counting")
+            return _empty_count_frame(zones, zone_id_column, count_col)
+        return (
+            overlayed.groupby(zone_id_column)["__poly_idx"]
+            .nunique()
+            .reset_index(name=count_col)
+        )
+
+    joined = gpd.sjoin(
+        polygons_gdf[["geometry"]], zones, how="inner", predicate=predicate
+    )
+    if joined.empty:
+        LOGGER.warning(f"No {predicate} relationships found during polygon counting")
+        return _empty_count_frame(zones, zone_id_column, count_col)
+    return joined.groupby(zone_id_column).size().reset_index(name=count_col)
 
 
 def _process_aggregation_methods(aggregation, value_columns):
@@ -1074,6 +1172,16 @@ def _process_aggregation_methods(aggregation, value_columns):
         return aggregation
     else:
         raise TypeError("aggregation must be a string or dictionary")
+
+
+def _empty_aggregated_frame(
+    zones: gpd.GeoDataFrame, zone_id_column: str, value_columns: List[str]
+) -> pd.DataFrame:
+    """Return an empty aggregation frame preserving zone_id and float value columns."""
+    data = {zone_id_column: pd.Series(dtype=zones[zone_id_column].dtype)}
+    for col in value_columns:
+        data[col] = pd.Series(dtype=float)
+    return pd.DataFrame(data)
 
 
 def _fractional_aggregation(
@@ -1116,7 +1224,7 @@ def _fractional_aggregation(
 
         if gdf_overlayed.empty:
             LOGGER.warning("No intersections found during fractional aggregation")
-            return zones
+            return _empty_aggregated_frame(zones, zone_id_column, value_columns)
 
         # Calculate fractional areas
         gdf_overlayed["intersection_area"] = gdf_overlayed.area
@@ -1166,7 +1274,7 @@ def _simple_aggregation(
 
     if joined.empty:
         LOGGER.warning(f"No {predicate} relationships found during spatial join")
-        return zones
+        return _empty_aggregated_frame(zones, zone_id_column, value_columns)
 
     # Remove geometry column for aggregation (keep only necessary columns)
     agg_cols = value_columns + [zone_id_column]

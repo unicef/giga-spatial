@@ -13,6 +13,129 @@ All notable changes to this project will be documented in this file.
     -   Time is a year, month, day, hour, a start and end, or `full_history=True`. Hours after that dataset's own CDS catalogue end are rejected. NetCDF is the default format; GRIB is standardized to the same names and coordinates.
     -   Credentials come from `CDS_API_URL` / `CDS_API_KEY`, `CDSAPI_URL` / `CDSAPI_KEY`, or `~/.cdsapirc`. Install the client with `pip install "giga-spatial[cds]"`. A request above `max_bytes` (default 2 GiB) raises before the download.
     -   `latest_available` and `period_available` read each dataset's catalogue end. `merge_climate` unions datasets and keeps the first finite value at a repeated timestamp. There is no in-process cache or scheduler; repeated calls wait on the CDS queue again.
+-   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
+    -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
+-   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**
+    -   `PeeringDBFetcher.fetch_facilities` returns PeeringDB facilities as a GeoDataFrame in EPSG:4326. `country` and `extent` filter the call; omitting both returns the default listing. An empty `PEERINGDB_API_KEY` sends an anonymous request.
+-   **Shared internal `BaseViewGenerator` and unified enrichment interface (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
+    -   Extracted internal `BaseViewGenerator` and `BaseViewGeneratorConfig` (not exported publicly) and migrated `PoiViewGenerator` and `ZonalViewGenerator` onto it.
+    -   Made `map_points`, `map_polygons`, `map_rasters`, `map_wp_pop`, `map_ghsl`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_rwi`, `map_aqueduct_flood_hazard`, `add_variable_to_view`, `chain_operations`, and `validate_data_coverage` available uniformly on both `PoiViewGenerator` and `ZonalViewGenerator`.
+    -   Added `ensure_available: bool = True` directly to generator constructors (`PoiViewGenerator`, `ZonalViewGenerator`, `AdminBoundariesViewGenerator`, `H3ViewGenerator`, `MercatorViewGenerator`, `S2ViewGenerator`) with per-call `ensure_available=` overrides on dataset `map_*` methods and `find_nearest_buildings`.
+    -   Added `overwrite: bool = False` across all `map_*` methods and `add_variable_to_view`.
+    -   Simplified `save_view(path, include_geometry=None, **kwargs)` to accept a destination file path directly, delegate format handling to `write_dataset`, and attach geometries automatically for `.geojson`, `.gpkg`, and `.shp` (or when `include_geometry=True`).
+-   **Optional handler injection on view generators (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/`)**
+    -   Added an optional `handler=None` parameter to dataset `map_*` methods (`map_wp_pop`, `map_built_s`, `map_smod`, `map_ghsl_pop`, `map_ghsl`, `map_buildings`, `map_rwi`, `map_aqueduct_flood_hazard`) and `PoiViewGenerator.find_nearest_buildings` without altering default behavior when `handler` is omitted.
+-   **Native polygon counting in `aggregate_polygons_to_zones` (`gigaspatial/processing/geo.py`)**
+    -   Added support for `value_columns=None` with `aggregation="count"` (producing `"polygon_count"`, `output_suffix`, or an explicit `output_column`) across `intersects`, `within`, and `fractional` predicates.
+-   **`TifProcessor.to_crs` (`gigaspatial/processing/tif_processor.py`)**
+    -   Added `to_crs(target_crs, resampling_method=None, resolution=None)`, which returns a new `TifProcessor` in `target_crs`, the way `clip_to_geometry` returns a clipped one. Unset arguments default to the processor's `resampling_method` and `reprojection_resolution`. CRSs are compared semantically, and when the CRS is already equal and no `resolution` is passed, the result reads its own copy of the raster, even if the processor has a `reprojection_resolution`. Every result is independent: cleaning up either processor leaves the other readable.
+
+### Changed
+
+-   **Breaking change: `TifProcessor.reproject_to` removed in v0.12 (`gigaspatial/processing/tif_processor.py`)**
+    -   Removed `reproject_to`, without a deprecation period, following the pre-1.0 precedent of ADR 0003. It returned a path, wrote to the local filesystem even when the processor's data store was not local, and compared CRSs as strings.
+    -   **Migration:** use `to_crs(...).save_to_file(path)`, or keep the processor `to_crs(...)` returns.
+
+-   **Breaking change — Unified `map_*` return contract, view semantics, and column rules (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
+    -   **Breaking for users relying on old return values:** all `map_*` methods on `PoiViewGenerator` and `ZonalViewGenerator` (including `map_google_buildings` and `map_ms_buildings`) now update and return `self.view` (`pd.DataFrame`); on empty spatial data they fill expected columns with `0` (counts), `False` (boolean flags), or `NaN` (continuous/categorical stats, IDs, distances, areas) instead of returning early or returning other shapes (`dict`, detached `pd.DataFrame`, `gpd.GeoDataFrame`, or `None`).
+    -   **Migration:** stop passing `ZonalViewGenerator.map_points`/`map_polygons`/`map_rasters` outputs into `add_variable_to_view(...)`, read enriched columns from the returned `view` (calling `to_geodataframe()` if you need geometries), and check target columns for `0`/`False`/`NaN` instead of checking for `None` or an alternate return type:
+
+        ```python
+        # Before
+        counts = zones.map_points(schools)              # returned dict
+        zones.add_variable_to_view(counts, "schools")
+        bldg_gdf = zones.map_ms_buildings()             # returned GeoDataFrame
+
+        # After
+        view = zones.map_points(schools, output_column="schools")  # updates & returns zones.view
+        view = zones.map_ms_buildings()                            # updates & returns zones.view (0/NaN if empty)
+        bldg_gdf = zones.to_geodataframe()                         # attach geometries when needed
+        ```
+
+    -   `ZonalViewGenerator.map_points`, `map_polygons`, and `map_rasters` now update `self._view` and return `self.view` (`pd.DataFrame`) instead of returning raw `dict` mappings (and `ZonalViewGenerator.map_ms_buildings` return type changed from `gpd.GeoDataFrame` to `pd.DataFrame`).
+    -   `PoiViewGenerator.map_zonal_stats` and `PoiViewGenerator.map_nearest_points` now update `self._view` and return `self.view` (`pd.DataFrame`) instead of returning detached `pd.DataFrame` instances without updating `self.view`.
+    -   `map_google_buildings` and `map_ms_buildings` on both `PoiViewGenerator` and `ZonalViewGenerator` now populate target columns (`0` for counts, `np.nan` for IDs, distances, and areas) and return `self.view` (`pd.DataFrame`) when loaded building data is empty, instead of returning `self.points_gdf.copy()`, `self._zone_gdf.copy()`, or an un-updated view.
+    -   Empty spatial datasets on `map_points`, `map_polygons`, `map_rasters`, `map_zonal_stats`, `map_nearest_points`, `map_aqueduct_flood_hazard`, `ZonalViewGenerator.map_buildings` (empty `building_files`), and `PoiViewGenerator.find_nearest_buildings` (empty `building_files`) now add target columns filled with `0` (counts), `False` (boolean flags), or `np.nan` (continuous/categorical stats, IDs, distances) and return `self.view` instead of `None`, an unchanged view, or a `GeoDataFrame`.
+    -   `map_rwi` now honors an explicit `output_column` verbatim (defaulting `output_column=None` to `f"rwi_{aggregation}"` instead of `f"{output_column}_{aggregation}"`) and raises `ValueError` instead of returning `None` when no RWI data units exist for the requested country.
+    -   `PoiViewGenerator.find_nearest_buildings` now raises `RuntimeError` when `ensure_data_available` returns `False`, aligning with `ZonalViewGenerator.map_buildings` and handler availability failures.
+    -   Re-using an existing output column in any `map_*` method or `add_variable_to_view` now raises `ValueError` unless `overwrite=True`.
+    -   `view` and `to_dataframe()` now return defensive copies of the geometry-free `pd.DataFrame` keyed by `id_column` (`"poi_id"` or `"zone_id"`), and `to_geodataframe()` preserves the generator's CRS across both `PoiViewGenerator` and `ZonalViewGenerator`.
+    -   Harmonized `map_built_s` and `map_smod` parameter names around `year` and `resolution` across both `PoiViewGenerator` and `ZonalViewGenerator`.
+-   **Collapsed zonal view generator hierarchy (`gigaspatial/generators/zonal/`)**
+    -   Merged the abstract `ZonalViewGenerator` base class and `GeometryBasedZonalViewGenerator` into one concrete `ZonalViewGenerator` in `gigaspatial/generators/zonal/base.py`, exported from `gigaspatial`, `gigaspatial.generators`, and `gigaspatial.generators.zonal`.
+    -   Moved `self._country` default resolution in `map_wp_pop`, `map_rwi`, and `map_buildings` onto `ZonalViewGenerator` and removed the duplicated pass-through overrides from `AdminBoundariesViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, and `MercatorViewGenerator`.
+-   **`TifProcessor` downloads a non-local stored file once (`gigaspatial/processing/tif_processor.py`)**
+    -   A processor over a stored file in a non-local data store, such as ADLS, now downloads it once into a local copy in its temporary directory and reads that copy until `cleanup()`. Previously every open read the whole file into memory again, including in each batched-sampling worker; workers now open the local file by path. `cleanup()` and garbage collection delete the copy, and copies of a processor never do. A processor over a stored file stays readable after `cleanup()` and makes a fresh copy on its next read.
+    -   Merges of stored files read them from local disk, and copies made for a merge are deleted once the merged file is written.
+    -   A relative stored path in a `LocalDataStore` with a `base_path` is now opened relative to that `base_path`, as merges already were, instead of the working directory.
+-   **`map_rasters` merges of a processor list inherit the first processor's settings (`gigaspatial/generators/base.py`)**
+    -   `map_rasters`'s merge of a processor list now uses the first processor's `merge_method`, `resampling_method`, `reprojection_resolution` and `mode` unless the call overrides them, instead of the defaults. `target_crs` is not inherited: processors in different CRSs still raise `ValueError` unless the call passes it.
+
+### Deprecated
+
+-   **`PoiViewGeneratorConfig` and `ZonalViewGeneratorConfig` (`gigaspatial/generators/base.py`, `gigaspatial/generators/poi.py`, `gigaspatial/generators/zonal/base.py`)**
+    -   Deprecated both config classes (now subclasses of `BaseViewGeneratorConfig`); passing `config=` to a generator emits `DeprecationWarning`. Pass `ensure_available=` to the generator constructor and pass a file path directly to `save_view(path)` instead.
+-   **`dataset_year` and `dataset_resolution` on `map_built_s` and `map_smod` (`gigaspatial/generators/base.py`)**
+    -   Deprecated `dataset_year` and `dataset_resolution` aliases in favor of `year` and `resolution` (emitting `DeprecationWarning`).
+-   **Legacy `save_view` bare name and `output_format=` arguments (`gigaspatial/generators/base.py`)**
+    -   Passing a bare name without suffix, `name=`, or `output_format=` to `save_view` emits `DeprecationWarning`; pass a target file path with extension instead.
+-   **`GeometryBasedZonalViewGenerator` (`gigaspatial/generators/zonal/geometry.py`)**
+    -   Turned `GeometryBasedZonalViewGenerator` into a thin subclass of `ZonalViewGenerator` that emits `DeprecationWarning` on instantiation; it will be removed in a later minor release.
+
+### Fixed
+
+-   **Custom `poi_id_column` validation and collision checks (`gigaspatial/generators/poi.py`)**
+    -   Fixed `PoiViewGenerator` silently auto-generating `poi_0..N` or misnaming columns when a custom `poi_id_column` is missing from input data; missing non-default `poi_id_column` values or collisions with an existing `"poi_id"` column now raise `ValueError`.
+-   **Projected `GeoDataFrame` coordinate extraction (`gigaspatial/generators/poi.py`)**
+    -   Fixed `PoiViewGenerator` extracting `latitude` and `longitude` from projected geometries before reprojecting to `EPSG:4326`, and now requires input `GeoDataFrame`s to have a CRS set.
+-   **`save_view` GeoJSON and geospatial export (`gigaspatial/generators/base.py`)**
+    -   Fixed `save_view` failing on geospatial formats (`.geojson`, `.gpkg`) by delegating to `to_geodataframe()` rather than merging a plain `pd.DataFrame`.
+-   **`map_zonal_stats` default column rename (`gigaspatial/generators/poi.py`)**
+    -   Fixed `PoiViewGenerator.map_zonal_stats` skipping column renaming when `output_column="zonal_stat"` on point and polygon `GeoDataFrame` inputs.
+-   **Non-mutating polygon counting and empty polygon outputs (`gigaspatial/processing/geo.py`)**
+    -   Fixed `map_polygons` / `aggregate_polygons_to_zones` mutating caller polygon `GeoDataFrame`s with temporary columns and failing to include expected `0`/`np.nan`-filled output columns when polygons are empty or have zero intersections.
+-   **Deterministic `TifProcessor` temporary directory cleanup (`gigaspatial/generators/base.py`)**
+    -   Wrapped internally constructed or handler-loaded `TifProcessor` instances in `try ... finally: cleanup()` across `map_rasters`, `map_ghsl`, `map_wp_pop`, and `map_aqueduct_flood_hazard` so temporary raster directories are removed promptly.
+-   **Grid generator `GeoDataFrame` source handling and `zone_id` validation (`gigaspatial/generators/zonal/`)**
+    -   Fixed `H3ViewGenerator`, `S2ViewGenerator`, and `MercatorViewGenerator` misclassifying a `GeoDataFrame` `source` as an `Iterable` of string identifiers instead of resolving geometries spatially via `from_spatial`.
+    -   Added `zone_id` uniqueness and custom `zone_id_column` collision validation to `ZonalViewGenerator.__init__`, raising `ValueError` on duplicate zone IDs or when a custom `zone_id_column` collides with an existing `"zone_id"` column.
+-   **Microsoft buildings handler override in zonal mapping (`gigaspatial/generators/zonal/geometry.py`)**
+    -   Fixed `GeometryBasedZonalViewGenerator.map_ms_buildings` overwriting a passed `handler` argument with a newly instantiated `MSBuildingsHandler`.
+-   **Overture release resolution and explicit release validation (`gigaspatial/fetchers/overture.py`)**
+    -   Removed the stale `_DEFAULT_RELEASE` fallback; when `release` is `None` or `"latest"` and the Overture STAC catalog lookup fails, `OvertureAmenityFetcher` now raises a `RuntimeError` advising the caller to pass an explicit `release=` (e.g. `"2026-11-18.0"`) and linking `https://docs.overturemaps.org/release-calendar`.
+    -   Added `OvertureAmenityFetcher.get_available_releases()` and switched STAC catalog lookups (`_fetch_stac_catalog`) to `requests.get(..., timeout=20)` with JSON-type validation.
+    -   Explicit `release=` values are validated against the Overture STAC catalog when using the default S3 `base_url`: unlisted releases raise `ValueError` listing available releases, noting Overture's ~60-day retention policy, and linking the release calendar; STAC catalog fetch/parse failures log a `WARNING` and proceed with the explicit release (and custom `base_url` values skip STAC validation).
+-   **`TifProcessor` temporary file ownership and idempotent cleanup (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `sample_by_polygons_batched` deleting the merged, reprojected, or clipped working file of the processor it was called on, under both the `spawn` and `fork` start methods, so the next call on that processor failed. Copies of a processor (pickled worker copies, `copy.copy`, and `copy.deepcopy`) no longer delete the original's temporary files when they are dropped or cleaned up; only the processor that created its temporary directory, in the process that created it, deletes it.
+    -   `cleanup()` and finalization at garbage collection are now idempotent and tolerate a temporary directory that is already gone.
+    -   **Change in error type:** using a merged, reprojected, or clipped processor after `cleanup()` now raises `FileNotFoundError` from `open_dataset` saying the processor was cleaned up, instead of a rasterio I/O error surfacing as a misleading "mode mismatch" `ValueError`. Methods that already wrap errors in `ValueError` (such as `to_dataframe`) still raise `ValueError`, with that cause in the message. A processor opened on an original stored file stays readable after `cleanup()`.
+-   **`TifProcessor.to_dataframe_chunked` on multi-band rasters (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `to_dataframe_chunked` raising `AttributeError` on every `rgb`, `rgba`, and `multi` raster. It now returns the same columns (band names from descriptions, `band_N`, or the rgb and rgba names) and rows as `to_dataframe` with the same `drop_nodata`; like single-band chunked conversion, it still ignores `min_value` and `max_value`. Single-band chunked output is unchanged.
+-   **`TifProcessor.sample_by_polygons_batched` memory guard (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `sample_by_polygons_batched` raising `UnboundLocalError` whenever the memory guard found available memory insufficient. It now emits the intended `ResourceWarning` suggesting a smaller `n_workers`, then samples and returns results. Behaviour with sufficient memory, and the macOS/Windows start-method `RuntimeWarning`, are unchanged.
+-   **`TifProcessor.to_graph` sparse output without edges (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `to_graph(graph_type="sparse")` raising `IndexError` when no two valid pixels are adjacent, such as scattered flood pixels, or when no pixel is valid. It now returns an n×n CSR matrix with no stored entries, where n is the number of valid pixels (0×0 when none are valid). The `networkx` output, and sparse output for rasters with adjacent valid pixels, are unchanged.
+-   **Mixed-CRS `TifProcessor` merges (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed merging stored files in different CRSs without `target_crs` producing a wrong mosaic: it logged a warning, mosaicked the files as if they shared one CRS, and labelled the result with the first file's CRS, so metres could be read as degrees. Construction now raises `ValueError` naming the offending file, its CRS, and the first file's CRS. CRSs are compared semantically, so an EPSG code and the equivalent WKT still merge, and merges with `target_crs` set still reproject every file first.
+    -   **Behaviour change:** the mixed-CRS warning is now a `ValueError`, also raised through `merge_rasters=True` on raster handlers and `map_rasters` with a list of processors. To migrate, pass `target_crs`.
+-   **Mean `TifProcessor` merges of integer rasters (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `merge_method="mean"` casting the mean back to the source dtype, so the mean of 1 and 2 on `uint8` was 1. The merged raster is now written in the source dtype promoted with `float32`: 8- and 16-bit integers become `float32`, 32- and 64-bit integers become `float64`, and floats keep their dtype. Nodata handling and the `first`, `last`, `min` and `max` merges are unchanged.
+    -   **Behaviour change:** for mean merges of integer rasters, `TifProcessor.dtype`, `get_raster_info()` and the value columns of converted tables now report the floating dtype instead of the source integer dtype.
+-   **`TifProcessor.to_dataframe` with a `band_names` list in single mode (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `to_dataframe(band_names=["pop"])` on a single-band raster indexing the list with the 1-based band number, which raised `IndexError` wrapped in a misleading "mode mismatch" `ValueError`. The list is now indexed by the selected band, so the example produces a `pop` column. A list too short for the selected band raises `ValueError` naming `band_names` and the band. A string `band_names` is unchanged.
+-   **`map_rasters` on clipped processors over a non-local data store (`gigaspatial/generators/base.py`, `gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `map_rasters` on a list of clipped processors over a non-local data store raising `FileNotFoundError`. The generator re-read each processor's `dataset_path` through its own data store, and after a clip those are derived files on local disk. It now merges the processors' own working files.
+-   **Batched sampling of a clipped processor over a non-local data store (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed `sample_by_polygons_batched` on a clipped processor over a non-local data store returning NaN for every polygon, because worker setup looked for the clipped file in the data store. Workers now open the processor's local working file, so results match `sample_by_polygons` under both the `spawn` and `fork` start methods.
+-   **Lineage and settings of derived `TifProcessor`s (`gigaspatial/processing/tif_processor.py`)**
+    -   Fixed clipped processors reporting their clipped file as their only source: a clip of a merged processor reported `is_merged=False` and `source_count=1`. Clips and `to_crs` results now report their parent's original stored files in `dataset_paths`, `is_merged` and `source_count`, and `map_rasters`'s merge of a processor list reports the inputs' stored files without duplicates.
+    -   Fixed clipped processors dropping their parent's `merge_method`, `resampling_method`, `reprojection_resolution` and `target_crs`. Clips and `to_crs` results now carry the parent's `mode`, `merge_method`, `resampling_method`, `reprojection_resolution` and `data_store`. `target_crs` is the parent's for a clip and the requested CRS for `to_crs`; it describes the result and never triggers another reprojection.
+    -   Fixed `clip_to_geometry` and `clip_to_bounds` raising `ValueError` on `rgb`, `rgba` and `multi` processors when returning a clipped processor.
+
+## [v0.11.1] - 2026-11-17
+
+### Added
+
 -   **Connecting points directly to network nodes (`gigaspatial/processing/network/insertion.py`, `gigaspatial/processing/network/points.py`)**
     -   Added `SpatialNetwork.connect_points(points, id_column=None, connect="knn", k=1, max_distance=None, nodes=None, return_skipped=False)` to add points as `kind="point"` nodes joined directly to existing nodes by straight-line edges (`kind="point_link"` to `"point"` nodes, `kind="connection"` to other nodes) without splitting existing edges, optionally restricted to candidate target `nodes`.
     -   Supports `connect="knn"` (joining each point to its `k` nearest candidate nodes, dropping links beyond `max_distance` when set) and `connect="distance"` (joining each point to every candidate node within `max_distance` meters); points with no candidate node within `max_distance` are skipped with a warning (and returned when `return_skipped=True`).
@@ -70,6 +193,15 @@ All notable changes to this project will be documented in this file.
 
 -   **`build_distance_graph` (`gigaspatial/processing/algorithms.py`)**
     -   Deprecated `build_distance_graph` (to be removed in 0.12) in favor of `SpatialNetwork.from_points` and `SpatialNetwork.from_point_sets`; it now emits a `DeprecationWarning` and delegates to `SpatialNetwork`.
+
+### Documentation
+
+-   **Versioned docs publishing (`docs/scripts/publish_docs.py`, `docs/scripts/site_root.py`, `docs/hooks.py`, `mkdocs.yml`, `CONTRIBUTING.md`)**
+    -   Docs now publish by minor version (`0.11.x` updates `0.11` and aliases `latest`) using `mike` with canonical URLs pointing to `/latest/`, alongside a generated `robots.txt` and root sitemap.
+-   **Domain glossary page (`GLOSSARY.md`, `docs/concepts/glossary.md`, `mkdocs.yml`)**
+    -   Published `GLOSSARY.md` at the repository root and added the **Concepts > Glossary** page included from it, and grouped the spatial networks concept pages under a **Concepts > Spatial networks** subsection.
+-   **Pull request template (`.github/pull_request_template.md`, `CONTRIBUTING.md`)**
+    -   Moved the pull request template to `.github/pull_request_template.md` and tailored it to GigaSpatial with checklists for public API exports, dependencies/extras, changelog, docs, glossary/ADRs, and new handlers.
 
 ## [v0.11.0] - 2026-11-03
 

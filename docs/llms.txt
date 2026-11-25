@@ -10,7 +10,7 @@ Use `giga-spatial` in Python for humanitarian, development, connectivity, and cl
 
 - **Handlers** (acquire files into `LocalDataStore`, `ADLSDataStore`, `SnowflakeDataStore`, or `DeltaSharingDataStore`): `WPPopulationHandler` (WorldPop), `GHSLDataHandler` (GHSL population, built-up surface, settlement model, building height and volume), `GoogleMSBuildingsHandler` (combined Google-Microsoft building footprints), `GoogleOpenBuildingsHandler` (Google Open Buildings), `MSBuildingsHandler` (Microsoft Global Buildings), `OSMRoadsHandler` (country-scale OpenStreetMap road networks from Geofabrik extracts), `RWIHandler` (Meta Relative Wealth Index), `HDXHandler` (Humanitarian Data Exchange), `OoklaSpeedtestHandler` (Ookla Speedtest tiles), `OpenCellIDHandler` (cell towers), `NasaSRTMHandler` (NASA SRTM elevation), `CEMSFloodHazardHandler` (Copernicus CEMS river flood hazard), `AqueductFloodHandler` (WRI Aqueduct flood hazard), `AdminBoundaries` (administrative boundaries)
 - **Fetchers** (query APIs or databases): `OSMLocationFetcher` (OpenStreetMap places), `OSMRoadsFetcher` (OpenStreetMap road networks as a `SpatialNetwork`), `GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher` (Giga school data), `HealthSitesFetcher` (Healthsites.io), `OvertureAmenityFetcher` (Overture Maps), `UnicefDataFetcher` (UNICEF SDG indicators), `MLabFetcher` (M-Lab speed tests in BigQuery), `GEEProfiler` (Google Earth Engine)
-- **Generators** (map datasets onto places and return a view): `PoiViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`, `GeometryBasedZonalViewGenerator`
+- **Generators** (map datasets onto places and return a view): `PoiViewGenerator`, `ZonalViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`
 
 ## Start
 
@@ -29,6 +29,13 @@ Use `giga-spatial` in Python for humanitarian, development, connectivity, and cl
 - [Processing a raster or a table](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)
 - [Settlement](https://unicef.github.io/giga-spatial/latest/user-guide/settlement-characterization/)
 - [Infrastructure files](https://unicef.github.io/giga-spatial/latest/user-guide/infrastructure-normalization/)
+
+## Concepts
+
+- [Glossary](https://unicef.github.io/giga-spatial/latest/concepts/glossary/): domain language for handlers, fetchers, sources, data stores, generators, views, and spatial networks
+- [Handlers](https://unicef.github.io/giga-spatial/latest/concepts/handlers/): file-based dataset acquisition, handlers vs. fetchers, data stores, caching, and request scoping
+- [View generators](https://unicef.github.io/giga-spatial/latest/concepts/view-generators/): POI and zonal views, the enrichment contract, low-level primitives, and built-in dataset mappers
+- [Spatial networks](https://unicef.github.io/giga-spatial/latest/concepts/spatial-networks/): road networks, point insertion, shortest paths, and connection planning
 
 ## Reference
 
