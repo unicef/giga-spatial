@@ -77,6 +77,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **Security: redact API tokens from URLs, logs, exceptions, and reprs (`gigaspatial/core/http/redaction.py`, `gigaspatial/image_downloaders/mapbox_image.py`, `gigaspatial/image_downloaders/maxar_image.py`, `gigaspatial/handlers/georepo.py`, `gigaspatial/core/http/client.py`, `gigaspatial/fetchers/healthsites.py`, `gigaspatial/handlers/opencellid.py`)**
+    -   Added shared `redact_url` and `sanitize_exception` helpers in `gigaspatial.core.http.redaction` to mask token-like query parameters (`access_token`, `token`, `api_key`, `key`, `connectid`, and prefixed variants) while leaving non-secret parameters untouched.
+    -   Redacted tokens from warning/error logs, raised exceptions, and `__repr__` outputs in `MapboxImageDownloader`, `MaxarConfig`, `MaxarImageDownloader`, `GeoRepoClient`, `BaseRestApiClient`, `HealthSitesFetcher`, `PeeringDBFetcher`, and the Giga API fetchers, and migrated `OpenCellIDConfig` / `OpenCellIDDownloader` onto the shared helpers. Outgoing HTTP requests continue to use the real credentials.
 -   **Custom `poi_id_column` validation and collision checks (`gigaspatial/generators/poi.py`)**
     -   Fixed `PoiViewGenerator` silently auto-generating `poi_0..N` or misnaming columns when a custom `poi_id_column` is missing from input data; missing non-default `poi_id_column` values or collisions with an existing `"poi_id"` column now raise `ValueError`.
 -   **Projected `GeoDataFrame` coordinate extraction (`gigaspatial/generators/poi.py`)**

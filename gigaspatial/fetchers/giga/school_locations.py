@@ -53,7 +53,7 @@ class GigaSchoolLocationFetcher:
     """
 
     country: str = Field(...)
-    api_key: str = Field(default=global_config.GIGA_SCHOOL_LOCATION_API_KEY)
+    api_key: str = Field(default=global_config.GIGA_SCHOOL_LOCATION_API_KEY, repr=False)
     page_size: int = Field(default=1000, description="Number of records per API page")
     max_retries: int = Field(default=3, description="Max retry attempts on errors")
     logger: Optional[logging.Logger] = Field(default=None, repr=False)
