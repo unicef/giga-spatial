@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **STORM tropical cyclone wind speeds (`gigaspatial/fetchers/storm.py`)**
+    -   `STORMFetcher.fetch` returns one global STORM fixed-return-period wind-speed map as a `TifProcessor` (maximum wind speed in m/s, 10 km). `model` selects the present-day baseline (`constant`) or a 2050 RCP8.5 model, and `return_period` selects the map (default 100 years). A source clips the map to that place. The Zenodo zip is kept in a temporary directory for the life of the fetcher and is not written to a data store. Licence: CC0. DOI: 10.5281/zenodo.10931452.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
     -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**

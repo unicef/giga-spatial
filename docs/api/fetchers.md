@@ -76,6 +76,17 @@ The call is anonymous when `PEERINGDB_API_KEY` is empty. A key is sent as `Autho
       members:
         - fetch_facilities
 
+## STORM tropical cyclone wind speeds
+
+`STORMFetcher` fetches global tropical cyclone maximum wind speed (m/s) at 10 km resolution. `fetch` returns a `TifProcessor`. Pass a country or a geometry to clip the map to that place. Omit the source for the global raster. `model` is `constant` for the present-day baseline, or `CMCC-CM2-VHR4`, `CNRM-CM6-1-HR`, `EC-Earth3P-HR`, or `HadGEM3-GC31-HM` for 2050 under RCP8.5. `return_period` is the return period in years and defaults to 100. The Zenodo zip (about 1.1 GB) is kept in a temporary directory for the life of the fetcher and is not written to a data store. Licence: CC0. DOI: [10.5281/zenodo.10931452](https://doi.org/10.5281/zenodo.10931452).
+
+::: gigaspatial.fetchers.storm.STORMFetcher
+    options:
+      show_source: false
+      members:
+        - fetch
+        - close
+
 ## Overture
 
 ::: gigaspatial.fetchers.overture.OvertureAmenityFetcher
