@@ -18,7 +18,7 @@ from gigaspatial.processing.elevation import LOSAnalyzer
         - clip_to_bounds
         - sample_by_coordinates
         - sample_by_polygons
-        - reproject_to
+        - to_crs
         - get_raster_info
 
 ::: gigaspatial.processing.geo.convert_to_geodataframe

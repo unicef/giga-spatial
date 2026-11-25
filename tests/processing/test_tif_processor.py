@@ -9,6 +9,7 @@ test_tif_processor_known_breaks.py.
 All rasters are tiny synthetic GeoTIFFs; nothing touches the network.
 """
 
+import copy
 from pathlib import Path
 
 import geopandas as gpd
@@ -399,22 +400,64 @@ def test_clip_to_a_non_overlapping_geometry_raises(local_rasters):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_reproject_to_writes_a_file_in_the_target_crs(local_rasters):
+def test_to_crs_returns_a_processor_in_the_target_crs(local_rasters):
     tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
 
-    out = tp.reproject_to("EPSG:3857")
+    result = tp.to_crs("EPSG:3857")
 
-    assert isinstance(out, Path) and out.exists()
-    with rasterio.open(out) as src:
-        assert src.crs.to_string() == "EPSG:3857"
-        assert src.bounds.right == pytest.approx(4452.78, abs=0.01)
+    assert isinstance(result, TifProcessor)
+    assert result.crs == "EPSG:3857"
+    assert result.bounds.right == pytest.approx(4452.78, abs=0.01)
+    assert tp.crs == "EPSG:4326"
 
 
-def test_reproject_to_the_same_crs_returns_the_current_path(local_rasters):
+def test_to_crs_to_the_same_crs_returns_an_independent_copy(local_rasters):
     path = local_rasters.put("a.tif")
     tp = TifProcessor(path, data_store=local_rasters.store)
 
-    assert tp.reproject_to("EPSG:4326") == path
+    result = tp.to_crs("EPSG:4326")
+
+    assert result is not tp and result.dataset_path != path
+    pd.testing.assert_frame_equal(result.to_dataframe(), tp.to_dataframe())
+    result.cleanup()
+    assert Path(path).is_file()
+
+
+def test_to_crs_to_another_crs_defaults_to_the_processors_reprojection_resolution(
+    local_rasters,
+):
+    tp = TifProcessor(
+        local_rasters.put("a.tif"),
+        data_store=local_rasters.store,
+        reprojection_resolution=(2000.0, 2000.0),
+    )
+
+    inherited = tp.to_crs("EPSG:3857")
+    overridden = tp.to_crs("EPSG:3857", resolution=(500.0, 500.0))
+
+    assert inherited.resolution == pytest.approx((2000.0, 2000.0))
+    assert overridden.resolution == pytest.approx((500.0, 500.0))
+
+
+def test_to_crs_to_the_same_crs_resamples_only_to_a_requested_resolution(
+    local_rasters,
+):
+    tp = TifProcessor(
+        local_rasters.put("a.tif"),
+        data_store=local_rasters.store,
+        reprojection_resolution=(0.02, 0.02),
+    )
+
+    copied = tp.to_crs("EPSG:4326")
+    resampled = tp.to_crs("EPSG:4326", resolution=(0.02, 0.02))
+
+    assert copied.resolution == pytest.approx((0.01, 0.01))
+    pd.testing.assert_frame_equal(copied.to_dataframe(), tp.to_dataframe())
+    assert resampled.resolution == pytest.approx((0.02, 0.02))
+
+
+def test_reproject_to_is_removed():
+    assert not hasattr(TifProcessor, "reproject_to")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -616,19 +659,23 @@ def test_context_manager_cleans_up_on_exit(local_rasters):
     assert not temp_dir.exists()
 
 
-def test_processor_over_a_stored_file_stays_readable_after_cleanup(local_rasters):
-    tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
+def test_processor_over_a_stored_file_stays_readable_after_cleanup(rasters):
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
 
+    tp.cleanup()
+    assert tp.to_dataframe()["pixel_value"].tolist() == BAND.ravel().tolist()
     tp.cleanup()
 
     assert tp.to_dataframe()["pixel_value"].tolist() == BAND.ravel().tolist()
 
 
-def test_cleanup_twice_does_not_raise(local_rasters):
-    tp = TifProcessor(local_rasters.put("a.tif"), data_store=local_rasters.store)
+def test_deepcopy_stays_readable_after_the_original_is_cleaned_up(rasters):
+    tp = TifProcessor(rasters.put("a.tif"), data_store=rasters.store)
+    duplicate = copy.deepcopy(tp)
 
     tp.cleanup()
-    tp.cleanup()
+
+    assert duplicate.to_dataframe()["pixel_value"].tolist() == BAND.ravel().tolist()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

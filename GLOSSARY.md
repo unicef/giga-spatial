@@ -140,3 +140,11 @@ _Avoid_: search key, bounding box (unless it is one)
 **Stored file**:
 A file a handler has written in the data store, as opposed to the remote file it came from. One data unit may produce several stored files, for example when an archive is extracted.
 _Avoid_: downloaded file, cache file
+
+**Derived file**:
+A raster file a processor wrote by merging, reprojecting, or clipping, as opposed to a stored file. It lasts until the processor that wrote it is cleaned up.
+_Avoid_: temp file, intermediate file, merged file (unless it is one)
+
+**Working file**:
+The one raster file a processor reads: either a stored file or a derived file.
+_Avoid_: active raster, raster source, temp file
