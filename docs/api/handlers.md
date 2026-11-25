@@ -187,6 +187,20 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
         - ensure_data_available
         - get_available_data_info
 
+## Global Seismic Hazard Map
+
+`GSHMHandler` loads the GEM Global Seismic Hazard Map v2026.1. The map is one global point layer of peak ground acceleration (g) with a 10% probability of exceedance in 50 years, for reference rock (Vs30 800 m/s), including the oceans. Licence: CC BY-NC-SA 4.0. A source resolves to that single file. `crop_to_source=True` reads points inside the search geometry's bounds, then keeps the points that intersect the geometry.
+
+::: gigaspatial.handlers.gshm.GSHMHandler
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - load_data
+        - download_and_load
+        - ensure_data_available
+        - get_available_data_info
+
 ## WRI Aqueduct
 
 ::: gigaspatial.handlers.wri.aqueduct_flood.AqueductFloodHandler

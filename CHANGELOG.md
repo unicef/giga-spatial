@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **GEM Global Seismic Hazard Map (`gigaspatial/handlers/gshm.py`)**
+    -   `GSHMHandler` downloads the GEM GSHM v2026.1 point GeoPackage (peak ground acceleration, 10% exceedance in 50 years, reference rock) from Zenodo and loads it for a geometry. The archive is global, so every source resolves to the same file. `crop_to_source=True` reads the points in the search geometry's bounds, then keeps those that intersect the geometry. Licence: CC BY-NC-SA 4.0.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
     -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**

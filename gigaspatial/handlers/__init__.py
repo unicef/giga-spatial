@@ -13,6 +13,12 @@ __getattr__, __dir__, __all__ = attach(
             "GHSLDataReader",
             "GHSLDataHandler",
         ],
+        "gigaspatial.handlers.gshm": [
+            "GSHMConfig",
+            "GSHMDownloader",
+            "GSHMReader",
+            "GSHMHandler",
+        ],
         "gigaspatial.handlers.google_open_buildings": [
             "GoogleOpenBuildingsConfig",
             "GoogleOpenBuildingsDownloader",
@@ -106,6 +112,12 @@ if TYPE_CHECKING:
         GHSLDataDownloader,
         GHSLDataReader,
         GHSLDataHandler,
+    )
+    from gigaspatial.handlers.gshm import (
+        GSHMConfig,
+        GSHMDownloader,
+        GSHMReader,
+        GSHMHandler,
     )
     from gigaspatial.handlers.google_open_buildings import (
         GoogleOpenBuildingsConfig,
