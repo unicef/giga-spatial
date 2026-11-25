@@ -1,4 +1,4 @@
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 
 from typing import TYPE_CHECKING
 
@@ -39,12 +39,14 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.rwi": ["RWIHandler"],
         "gigaspatial.handlers.nasa.srtm": ["NasaSRTMHandler"],
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
+        "gigaspatial.handlers.wri.global_power_plant": ["GlobalPowerPlantHandler"],
         "gigaspatial.handlers.osm.roads": ["OSMRoadsHandler"],
         # fetchers
         "gigaspatial.fetchers.osm.pois": ["OSMLocationFetcher"],
         "gigaspatial.fetchers.osm.roads": ["OSMRoadsFetcher"],
         "gigaspatial.fetchers.overture": ["OvertureAmenityFetcher"],
         "gigaspatial.fetchers.healthsites": ["HealthSitesFetcher"],
+        "gigaspatial.fetchers.peeringdb": ["PeeringDBFetcher"],
         "gigaspatial.fetchers.giga.school_locations": ["GigaSchoolLocationFetcher"],
         "gigaspatial.fetchers.giga.school_profile": ["GigaSchoolProfileFetcher"],
         "gigaspatial.fetchers.giga.school_measurements": [
@@ -59,6 +61,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.image_downloaders.maxar_image": ["MaxarImageDownloader"],
         # generators
         "gigaspatial.generators.poi": ["PoiViewGenerator"],
+        "gigaspatial.generators.zonal.base": ["ZonalViewGenerator"],
         "gigaspatial.generators.zonal.geometry": ["GeometryBasedZonalViewGenerator"],
         "gigaspatial.generators.zonal.admin": ["AdminBoundariesViewGenerator"],
         "gigaspatial.generators.zonal.mercator": ["MercatorViewGenerator"],
@@ -121,11 +124,13 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.rwi import RWIHandler
     from gigaspatial.handlers.nasa.srtm import NasaSRTMHandler
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
+    from gigaspatial.handlers.wri.global_power_plant import GlobalPowerPlantHandler
     from gigaspatial.handlers.osm.roads import OSMRoadsHandler
     from gigaspatial.fetchers.osm.pois import OSMLocationFetcher
     from gigaspatial.fetchers.osm.roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
     from gigaspatial.fetchers.healthsites import HealthSitesFetcher
+    from gigaspatial.fetchers.peeringdb import PeeringDBFetcher
     from gigaspatial.fetchers.giga.school_locations import GigaSchoolLocationFetcher
     from gigaspatial.fetchers.giga.school_profile import GigaSchoolProfileFetcher
     from gigaspatial.fetchers.giga.school_measurements import (
@@ -138,6 +143,7 @@ if TYPE_CHECKING:
     from gigaspatial.image_downloaders.mapbox_image import MapboxImageDownloader
     from gigaspatial.image_downloaders.maxar_image import MaxarImageDownloader
     from gigaspatial.generators.poi import PoiViewGenerator
+    from gigaspatial.generators.zonal.base import ZonalViewGenerator
     from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
     from gigaspatial.generators.zonal.admin import AdminBoundariesViewGenerator
     from gigaspatial.generators.zonal.mercator import MercatorViewGenerator

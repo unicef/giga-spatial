@@ -25,7 +25,7 @@ python .agents/vendor/di-applied-science-skills/install.py giga-spatial
 
 The skills land in `.agents/skills/`, which Cursor and Codex read and git ignores. Invoke them by name:
 
-- `build-handler` probes a dataset's source, interviews you on the design, and writes the handler, its registrations, and its tests.
+- `build-handler` probes a dataset's source, decides with you whether to build a handler or a fetcher, interviews you on the design, and writes that one artifact, its registrations, and its tests.
 - `judge-handler-base` reviews a new handler, or a change to the handler base, against the contract in `.agents/reference/handler-contract.md`.
 
 The contract lives here because it describes this repository's code; update it with any change to the handler base. The skills themselves are edited in the skills repository. After the submodule moves to a newer commit, run `install.py` again with no arguments.
