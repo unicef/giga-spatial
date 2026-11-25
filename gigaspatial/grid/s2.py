@@ -6,7 +6,7 @@ from s2sphere import CellId, Cell, LatLng, RegionCoverer, LatLngRect
 
 from shapely.geometry import Polygon, Point, shape
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import orient
+from shapely.ops import orient, unary_union
 
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -150,7 +150,7 @@ class S2Cells(BaseModel):
         )
 
         if isinstance(geometry, Point):
-            return cls.from_points([geometry], level)
+            return cls.from_points([geometry], level, **kwargs)
 
         # For polygons and other shapes, use bounding box with RegionCoverer
         # Then filter to actual intersection
@@ -190,7 +190,7 @@ class S2Cells(BaseModel):
     def from_points(
         cls, points: List[Union[Point, Tuple[float, float]]], level: int, **kwargs
     ) -> "S2Cells":
-        """Create S2Cells from a list of points or lat-lon pairs."""
+        """Create S2Cells from a list of Shapely Points or (lon, lat) tuples."""
         cls.logger.info(f"Creating S2Cells from {len(points)} points at level: {level}")
 
         cells = set(cls.get_cells_from_points(points, level))
@@ -282,25 +282,30 @@ class S2Cells(BaseModel):
         self.logger.info(f"Successfully converted to DataFrame.")
         return pd.DataFrame(data)
 
-    def to_geoms(self) -> List[Polygon]:
-        """Convert cells to shapely Polygon geometries."""
+    def _build_cell_geoms(self) -> Tuple[List[int], List[str], List[Polygon]]:
+        """Build aligned (cell_ids, cell_tokens, polygons), skipping invalid cells."""
         self.logger.info(f"Converting {len(self.cells)} cells to geometries.")
-        polygons = []
+        cell_ids: List[int] = []
+        cell_tokens: List[str] = []
+        polygons: List[Polygon] = []
         invalid_count = 0
+        skipped_count = 0
 
         for cell_id in self.cells:
-            c_id = CellId(int(cell_id))
-            cell = Cell(c_id)
-
-            vertices = []
-            for i in range(4):
-                vertex = cell.get_vertex(i)
-                lat_lng = LatLng.from_point(vertex)
-                vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))
-
-            vertices.append(vertices[0])
-
+            token = str(cell_id)
             try:
+                c_id = CellId(int(cell_id))
+                token = c_id.to_token()
+                cell = Cell(c_id)
+
+                vertices = []
+                for i in range(4):
+                    vertex = cell.get_vertex(i)
+                    lat_lng = LatLng.from_point(vertex)
+                    vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))
+
+                vertices.append(vertices[0])
+
                 poly = Polygon(vertices)
 
                 # Enforce CCW orientation
@@ -313,31 +318,46 @@ class S2Cells(BaseModel):
 
                 # Verify after repair
                 if not poly.is_valid:
+                    skipped_count += 1
                     self.logger.warning(
-                        f"Cell {c_id.to_token()} still invalid after buffer(0)"
+                        f"Cell {token} still invalid after buffer(0)"
                     )
                     continue
 
+                cell_ids.append(cell_id)
+                cell_tokens.append(token)
                 polygons.append(poly)
 
             except Exception as e:
-                self.logger.error(f"Failed to convert cell {c_id.to_token()}: {e}")
+                skipped_count += 1
+                self.logger.error(f"Failed to convert cell {token}: {e}")
 
         if invalid_count > 0:
             self.logger.info(
                 f"Repaired {invalid_count} invalid geometries via buffer(0)"
             )
 
+        if skipped_count > 0:
+            self.logger.warning(
+                f"Skipped {skipped_count} of {len(self.cells)} S2 cells during geometry conversion."
+            )
+
+        return cell_ids, cell_tokens, polygons
+
+    def to_geoms(self) -> List[Polygon]:
+        """Convert cells to shapely Polygon geometries."""
+        _, _, polygons = self._build_cell_geoms()
         return polygons
 
     def to_geodataframe(self) -> gpd.GeoDataFrame:
         """Convert to GeoPandas GeoDataFrame."""
+        cell_ids, cell_tokens, polygons = self._build_cell_geoms()
         return gpd.GeoDataFrame(
             {
-                "cell_id": self.cells,
-                "cell_token": [CellId(c).to_token() for c in self.cells],
-                "geometry": self.to_geoms(),
+                "cell_id": cell_ids,
+                "cell_token": cell_tokens,
             },
+            geometry=gpd.GeoSeries(polygons, crs="EPSG:4326"),
             crs="EPSG:4326",
         )
 
@@ -509,11 +529,14 @@ class CountryS2Cells(S2Cells):
             f"Initializing S2 cells for country: {country} at level {level}"
         )
 
-        country_geom = AdminBoundaries.create(
+        geoms = AdminBoundaries.create(
             country_code=country,
             data_store=data_store,
             path=country_geom_path,
-        ).to_geoms()[0]
+        ).to_geoms()
+        if not geoms:
+            raise ValueError(f"No boundary geometry found for country: {country}")
+        country_geom = unary_union(geoms)
 
         cells = S2Cells.from_geometry(country_geom, level, max_cells=max_cells)
         instance.cells = cells.cells

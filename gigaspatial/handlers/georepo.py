@@ -1,6 +1,7 @@
 import requests
 
 from gigaspatial.config import config
+from gigaspatial.core.http.redaction import redact_url, sanitize_exception
 
 
 class GeoRepoClient:
@@ -54,6 +55,15 @@ class GeoRepoClient:
             "GeoRepo-User-Key": self.email,
         }
 
+    def __repr__(self) -> str:
+        masked_key = "'***'" if self.api_key else "''"
+        return (
+            f"GeoRepoClient("
+            f"base_url={redact_url(self.base_url)!r}, "
+            f"email={self.email!r}, "
+            f"api_key={masked_key})"
+        )
+
     def _make_request(self, method, endpoint, params=None, data=None):
         """Internal method to handle making HTTP requests."""
         try:
@@ -63,7 +73,10 @@ class GeoRepoClient:
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:
-            raise requests.exceptions.HTTPError(f"API request failed: {e}")
+            sanitize_exception(e, extra_secrets=(self.api_key,))
+            raise requests.exceptions.HTTPError(
+                f"API request failed: {redact_url(str(e), extra_secrets=(self.api_key,))}"
+            )
 
     def check_connection(self):
         """
@@ -79,8 +92,10 @@ class GeoRepoClient:
         except requests.exceptions.HTTPError as e:
             return False
         except requests.exceptions.RequestException as e:
+            sanitize_exception(e, extra_secrets=(self.api_key,))
             raise requests.exceptions.RequestException(
-                f"Connection check encountered a network error: {e}"
+                f"Connection check encountered a network error: "
+                f"{redact_url(str(e), extra_secrets=(self.api_key,))}"
             )
 
     def list_modules(self):
@@ -717,7 +732,8 @@ def get_country_boundaries_by_iso3(
                             page += 1
 
                 except Exception as e:
-                    client.logger.warning(f"Error fetching admin level {level}: {e}")
+                    redacted = redact_url(str(e), extra_secrets=(client.api_key,))
+                    client.logger.warning(f"Error fetching admin level {level}: {redacted}")
     else:
         # Use the global view with filtering
         client.logger.info(f"Using global view and filtering by country...")
@@ -770,7 +786,8 @@ def get_country_boundaries_by_iso3(
 
                 return features
             except Exception as e:
-                client.logger.warning(f"Error getting children for {parent_ucode}: {e}")
+                redacted = redact_url(str(e), extra_secrets=(client.api_key,))
+                client.logger.warning(f"Error getting children for {parent_ucode}: {redacted}")
                 return []
 
         # Start with the country boundaries

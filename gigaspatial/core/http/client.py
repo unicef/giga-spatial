@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from gigaspatial.core.http.auth import AuthConfig, AuthType
 from gigaspatial.core.http.pagination import BasePaginationStrategy
+from gigaspatial.core.http.redaction import sanitize_exception
 
 logger = logging.getLogger(__name__)
 
@@ -116,28 +117,37 @@ class BaseRestApiClient(ABC):
         """
         assert self._client is not None, "Client not started — use as a context manager."
         delay = 1.0
+        secrets = tuple(
+            s.get_secret_value()
+            for s in (self.config.auth.api_key, self.config.auth.password)
+            if s is not None
+        )
 
-        for attempt in range(1, self.config.max_retries + 1):
-            response = self._client.request(method, endpoint, **kwargs)
+        try:
+            for attempt in range(1, self.config.max_retries + 1):
+                response = self._client.request(method, endpoint, **kwargs)
 
-            if response.status_code == 429:
-                wait = float(response.headers.get("Retry-After", delay))
-                logger.warning("Rate limited. Waiting %.1fs (attempt %d/%d)", wait, attempt, self.config.max_retries)
-                time.sleep(wait)
-                delay *= self.config.retry_backoff
-                continue
+                if response.status_code == 429:
+                    wait = float(response.headers.get("Retry-After", delay))
+                    logger.warning("Rate limited. Waiting %.1fs (attempt %d/%d)", wait, attempt, self.config.max_retries)
+                    time.sleep(wait)
+                    delay *= self.config.retry_backoff
+                    continue
 
-            if response.status_code >= 500 and attempt < self.config.max_retries:
-                logger.warning("Server error %d. Retrying in %.1fs (attempt %d/%d)", response.status_code, delay, attempt, self.config.max_retries)
-                time.sleep(delay)
-                delay *= self.config.retry_backoff
-                continue
+                if response.status_code >= 500 and attempt < self.config.max_retries:
+                    logger.warning("Server error %d. Retrying in %.1fs (attempt %d/%d)", response.status_code, delay, attempt, self.config.max_retries)
+                    time.sleep(delay)
+                    delay *= self.config.retry_backoff
+                    continue
+
+                response.raise_for_status()
+                return response
 
             response.raise_for_status()
             return response
-
-        response.raise_for_status()
-        return response
+        except httpx.HTTPError as e:
+            sanitize_exception(e, extra_secrets=secrets)
+            raise
 
     def get(self, endpoint: str, **kwargs: Any) -> httpx.Response:
         """Convenience wrapper for GET requests."""

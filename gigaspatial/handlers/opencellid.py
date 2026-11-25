@@ -21,8 +21,11 @@ import pycountry
 from pydantic.dataclasses import dataclass
 from pydantic import Field, ConfigDict
 import os
-import re
 
+from gigaspatial.core.http.redaction import (
+    redact_url as _redact_url,
+    sanitize_exception as _sanitize_exception,
+)
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.readers import read_dataset
 from gigaspatial.handlers.base import (
@@ -37,27 +40,11 @@ from gigaspatial.handlers.base import (
 from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.config import config as global_config
 
-_TOKEN_PARAM_RE = re.compile(
-    r"([?&](?:token|access_token|api_token)=)[^&#\s'\"<>)\]}]+",
-    re.IGNORECASE,
-)
-
-
-def _redact_url(text: str, extra_secrets: Tuple[str, ...] = ()) -> str:
-    """Redact authentication tokens from OpenCellID URLs and error messages."""
-    redacted = _TOKEN_PARAM_RE.sub(r"\1***", text)
-    for secret in extra_secrets:
-        if secret:
-            redacted = redacted.replace(secret, "***")
-    return redacted
-
-
 def _unmasked_url_variants(url: str, token: str) -> Tuple[str, ...]:
     """Return URL forms that still expose ``token`` after query-param redaction."""
     if not token:
         return ()
-    redacted = _TOKEN_PARAM_RE.sub(r"\1***", url)
-    if redacted != url or token not in url:
+    if _redact_url(url) != url or token not in url:
         return ()
     parsed = urlparse(url)
     path_and_query = parsed.path + (f"?{parsed.query}" if parsed.query else "")
@@ -79,52 +66,6 @@ class _OpenCellIDUnit(dict):
 
     def __str__(self) -> str:
         return self.__repr__()
-
-
-def _sanitize_exception(
-    exc: BaseException, extra_secrets: Tuple[str, ...] = ()
-) -> BaseException:
-    """Redact tokens from an exception message, cause/context chain, and request URLs."""
-    seen = set()
-
-    def _visit(err: Optional[BaseException]) -> None:
-        if err is None or id(err) in seen:
-            return
-        seen.add(id(err))
-
-        _visit(err.__cause__)
-        _visit(err.__context__)
-
-        if hasattr(err, "url") and isinstance(err.url, str):
-            err.url = _redact_url(err.url, extra_secrets)
-
-        request = getattr(err, "request", None)
-        if request is not None and isinstance(getattr(request, "url", None), str):
-            request.url = _redact_url(request.url, extra_secrets)
-
-        response = getattr(err, "response", None)
-        if response is not None and isinstance(getattr(response, "url", None), str):
-            response.url = _redact_url(response.url, extra_secrets)
-
-        if isinstance(err, OSError) and isinstance(err.strerror, str):
-            err.strerror = _redact_url(err.strerror, extra_secrets)
-
-        if not isinstance(err, UnicodeError) and getattr(err, "args", None):
-            new_args = []
-            for arg in err.args:
-                if isinstance(arg, str):
-                    new_args.append(_redact_url(arg, extra_secrets))
-                elif isinstance(arg, BaseException):
-                    _visit(arg)
-                    arg_str = str(arg)
-                    redacted = _redact_url(arg_str, extra_secrets)
-                    new_args.append(redacted if redacted != arg_str else arg)
-                else:
-                    new_args.append(arg)
-            err.args = tuple(new_args)
-
-    _visit(exc)
-    return exc
 
 
 @dataclasses.dataclass(frozen=True)

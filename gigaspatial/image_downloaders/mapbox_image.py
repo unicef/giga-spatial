@@ -9,6 +9,7 @@ import pandas as pd
 
 from gigaspatial.grid.mercator_tiles import MercatorTiles
 from gigaspatial.processing.geo import convert_to_geodataframe, buffer_geodataframe
+from gigaspatial.core.http.redaction import redact_url
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.config import config
@@ -38,6 +39,14 @@ class MapboxImageDownloader:
         self.data_store = data_store or LocalDataStore()
         self.logger = config.get_logger(self.__class__.__name__)
 
+    def __repr__(self) -> str:
+        masked_token = "'***'" if self.access_token else "''"
+        return (
+            f"MapboxImageDownloader("
+            f"style_id={self.style_id!r}, "
+            f"access_token={masked_token})"
+        )
+
     def _construct_url(self, bounds: Iterable[float], image_size: str) -> str:
         """Construct the Mapbox Static Images API URL"""
         bounds_str = f"[{','.join(map(str, bounds))}]"
@@ -57,7 +66,8 @@ class MapboxImageDownloader:
                 f.write(response.content)
             return True
         except Exception as e:
-            self.logger.warning(f"Error downloading {output_path.name}: {str(e)}")
+            redacted_error = redact_url(str(e), extra_secrets=(self.access_token,))
+            self.logger.warning(f"Error downloading {output_path.name}: {redacted_error}")
             return False
 
     def download_images_by_tiles(
