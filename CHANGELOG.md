@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **GEM Global Seismic Hazard Map (`gigaspatial/handlers/gshm.py`)**
+    -   `GSHMHandler` downloads the GEM GSHM v2026.1 point GeoPackage (peak ground acceleration, 10% exceedance in 50 years, reference rock) from Zenodo and loads it for a geometry. The archive is global, so every source resolves to the same file. `crop_to_source=True` reads the points in the search geometry's bounds, then keeps those that intersect the geometry. Licence: CC BY-NC-SA 4.0.
 -   **MERIT Hydro in the Earth Engine registry (`gigaspatial/fetchers/gee/datasets/builtin.py`)**
     -   Added `merit_hydro` for the `MERIT/Hydro/v1_0_1` image: 3 arc-second global hydrography with elevation, flow direction, river width, permanent water, upstream drainage area, and height above nearest drainage. Licensed CC-BY-NC 4.0 or ODbL 1.0.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**

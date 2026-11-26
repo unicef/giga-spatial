@@ -155,6 +155,7 @@ class Config(BaseSettings):
             "srtm": "srtm",
             "worldpop": "worldpop",
             "ghsl": "ghsl",
+            "gshm": "gshm",
             "cems": "cems",
             "opencellid": "opencellid",
             "hdx": "hdx",

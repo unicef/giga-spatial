@@ -24,6 +24,7 @@ from gigaspatial.handlers.base import (
 
 HANDLER_MODULES = [
     "gigaspatial.handlers.ghsl",
+    "gigaspatial.handlers.gshm",
     "gigaspatial.handlers.google_open_buildings",
     "gigaspatial.handlers.google_ms_combined_buildings",
     "gigaspatial.handlers.microsoft_global_buildings",
