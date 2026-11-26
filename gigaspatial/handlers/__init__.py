@@ -95,6 +95,12 @@ __getattr__, __dir__, __all__ = attach(
             "OSMRoadsReader",
             "OSMRoadsHandler",
         ],
+        "gigaspatial.handlers.ecmwf.tropical_cyclone": [
+            "EcmwfTropicalCycloneConfig",
+            "EcmwfTropicalCycloneDownloader",
+            "EcmwfTropicalCycloneReader",
+            "EcmwfTropicalCycloneHandler",
+        ],
     },
 )
 
@@ -178,4 +184,10 @@ if TYPE_CHECKING:
         OSMRoadsDownloader,
         OSMRoadsReader,
         OSMRoadsHandler,
+    )
+    from gigaspatial.handlers.ecmwf.tropical_cyclone import (
+        EcmwfTropicalCycloneConfig,
+        EcmwfTropicalCycloneDownloader,
+        EcmwfTropicalCycloneReader,
+        EcmwfTropicalCycloneHandler,
     )

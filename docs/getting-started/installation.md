@@ -42,6 +42,7 @@ Some datasets and tools need packages that most users don't. Install them with a
 | `maxar` | OWSLib | `MaxarImageDownloader` |
 | `hdx` | hdx-python-api | `HDXHandler` |
 | `excel` | openpyxl, xlrd | Reading and writing `.xlsx` / `.xls` files via `read_dataset` / `write_dataset` |
+| `ecmwf` | cfgrib | Reading ECMWF open-data GRIB2 with `EcmwfOpenDataFetcher`. Decoding full tropical-cyclone trajectories also needs the ECMWF ecCodes library |
 
 ## Installing from Source
 

@@ -43,6 +43,7 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
 | Global Power Plant Database | `GlobalPowerPlantHandler` | Grid-scale power plants worldwide, one WRI release at a time |
+| ECMWF tropical cyclone tracks | `EcmwfTropicalCycloneHandler` | IFS deterministic, IFS ENS, AIFS Single, and AIFS ENS track positions for one forecast cycle |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 
 ## Fetcher
@@ -72,6 +73,8 @@ Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.m
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |
 | Google Earth Engine | `GEEProfiler` | Raster and vector collections in Google Earth Engine |
+| ECMWF open data | `EcmwfOpenDataFetcher` | IFS and AIFS real-time forecast fields at 0.25° and, for IFS, 0.1°, including 10 m wind speed and gust around tropical-cyclone tracks |
+| ECMWF tropical cyclone tracks | `EcmwfTropicalCycloneFetcher` | IFS deterministic, IFS ENS, AIFS Single, and AIFS ENS track positions for one forecast cycle, returned in memory |
 
 ## Data store
 

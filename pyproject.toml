@@ -19,7 +19,7 @@ keywords = [
     "worldpop", "population", "buildings", "building footprints",
     "google open buildings", "microsoft buildings",
     "point of interest", "POI", "catchment", "zonal statistics",
-    "raster", "vector", "road network", "rwi", "ookla", "cems", "glofas", "flood hazard", "climate",
+    "raster", "vector", "road network", "rwi", "ookla", "cems", "glofas", "ecmwf", "flood hazard", "climate",
     "humanitarian", "development", "connectivity", "school connectivity",
     "unicef", "giga", "mapping", "analysis", "python"
 ]
@@ -133,6 +133,9 @@ excel = [
     "openpyxl>=3.1.0",
     "xlrd>=2.0.0"
 ]
+ecmwf = [
+    "cfgrib>=0.9.10"
+]
 
 # Meta target using PEP 508 self-references to bundle everything seamlessly
 all = [
@@ -149,7 +152,8 @@ all = [
     "giga-spatial[hdx]",
     "giga-spatial[roads]",
     "giga-spatial[pandana]",
-    "giga-spatial[excel]"
+    "giga-spatial[excel]",
+    "giga-spatial[ecmwf]"
 ]
 
 [tool.setuptools.dynamic]

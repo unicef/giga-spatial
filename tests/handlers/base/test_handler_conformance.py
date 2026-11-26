@@ -37,6 +37,7 @@ HANDLER_MODULES = [
     "gigaspatial.handlers.wri.global_power_plant",
     "gigaspatial.handlers.cems.flood_hazard",
     "gigaspatial.handlers.osm.roads",
+    "gigaspatial.handlers.ecmwf.tropical_cyclone",
 ]
 
 

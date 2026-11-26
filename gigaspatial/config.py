@@ -169,6 +169,7 @@ class Config(BaseSettings):
             "mobile_coverage": "mobile_coverage",
             "wri": "wri",
             "osm": "osm",
+            "ecmwf": "ecmwf",
         },
         description="Mapping of data types to directory names",
     )

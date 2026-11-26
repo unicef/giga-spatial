@@ -9,6 +9,53 @@ from gigaspatial.fetchers import MLabConfig, GEEConfig
 
 `MLabFetcher` queries M-Lab speed tests in BigQuery. [`GEEProfiler`](earth-engine.md) is also a fetcher and has its own page.
 
+## ECMWF open data
+
+`EcmwfOpenDataFetcher` downloads the public IFS and AIFS forecast fields and returns them in memory. It does not store the files. The catalogue is the [ECMWF open data](https://www.ecmwf.int/en/forecasts/datasets/open-data) subset, licensed CC-BY-4.0.
+
+IFS deterministic and IFS ENS are published at 0.25° and 0.1°. AIFS Single and AIFS ENS are published at 0.25°. At 0.1° each step is a surface file and a pressure-level file. Omitting `param` downloads every field in the step file. `fetch_wind` reads `10u` and `10v`, adds `wind_speed` in m/s, and, for the IFS systems, the maximum 10 m gust (`10fg` through 90 h, `10fg3` after that). A track table crops each storm, wind and gust together, to the box around that storm's positions.
+
+```python
+from gigaspatial import EcmwfOpenDataFetcher
+
+EcmwfOpenDataFetcher().fetch_wind(
+    system="ifs-ens",
+    date="2026-11-26",
+    time=0,
+    step=24,
+    resol="0p25",
+    tracks=tracks,
+)
+```
+
+Forecast steps: IFS deterministic runs to 360 h at 00 and 12 UTC and to 90 h at 06 and 18 UTC. IFS ENS runs to 360 h at 00 and 12 UTC and to 144 h at 06 and 18 UTC. AIFS Single and AIFS ENS run to 360 h at every cycle, every 6 h.
+
+::: gigaspatial.fetchers.ecmwf.open_data.EcmwfOpenDataFetcher
+    options:
+      show_source: false
+      members:
+        - fetch
+        - fetch_wind
+        - download_fields
+
+## ECMWF tropical cyclone tracks
+
+`EcmwfTropicalCycloneFetcher` returns track positions for one cycle and does not store them. Per-storm files come from the [essential portal](https://essential.ecmwf.int/). IFS deterministic files use the ECMF heading and IFS ENS files use ECEP. AIFS Single, AIFS ENS, and an IFS system with no essential file use the open-data BUFR track. The same cycle can be kept on disk with `EcmwfTropicalCycloneHandler`.
+
+```python
+from gigaspatial import EcmwfTropicalCycloneFetcher
+
+EcmwfTropicalCycloneFetcher().fetch(date="2026-10-15", time=0, system="ifs")
+```
+
+Pass a place as the first argument to keep positions inside it: `fetch(area, system="ifs", date="2026-10-15", time=0)`.
+
+::: gigaspatial.fetchers.ecmwf.tropical_cyclone.EcmwfTropicalCycloneFetcher
+    options:
+      show_source: false
+      members:
+        - fetch
+
 ## OpenStreetMap
 
 ::: gigaspatial.fetchers.osm.pois.OSMLocationFetcher

@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **ECMWF open data (`gigaspatial/fetchers/ecmwf/open_data.py`)**
+    -   `EcmwfOpenDataFetcher` downloads IFS and AIFS real-time fields from the ECMWF open-data archive and returns them in memory. IFS deterministic and IFS ENS are available at 0.25° and 0.1°. AIFS Single and AIFS ENS are available at 0.25°. Omitting `param` downloads every field in the step file.
+    -   Horizons follow the open-data schedule: IFS deterministic 00/12 UTC through 360 h and 06/18 UTC through 90 h; IFS ENS 00/12 UTC through 360 h and 06/18 UTC through 144 h; AIFS Single and AIFS ENS through 360 h at every cycle.
+    -   `fetch_wind` computes 10 m wind speed from `10u` and `10v`. IFS gust (`10fg` through 90 h, `10fg3` after that) is cropped to the same cells. A track table gives each storm the box around its own positions, and wind and gust stay on that box.
+-   **ECMWF tropical cyclone tracks (`gigaspatial/fetchers/ecmwf/tropical_cyclone.py`, `gigaspatial/handlers/ecmwf/tropical_cyclone.py`)**
+    -   `EcmwfTropicalCycloneFetcher` returns one cycle of tracks in memory. `EcmwfTropicalCycloneHandler` stores the same cycle as GeoJSON. Both cover IFS deterministic, IFS ENS, AIFS Single, and AIFS ENS. Per-storm BUFR files are taken from `https://essential.ecmwf.int/`. A system with no essential file uses the open-data `type=tf` BUFR. Positions can be limited to a source.
+    -   IFS tracks run to 360 h at 00/12 UTC and 144 h at 06/18 UTC. AIFS tracks run to 360 h at every cycle. ecCodes decodes the full trajectory. Without it, a per-storm essential file still contributes the position in its file name.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
     -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**

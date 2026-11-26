@@ -41,6 +41,7 @@ __getattr__, __dir__, _exports = attach(
         "gigaspatial.handlers.wri.aqueduct_flood": ["AqueductFloodHandler"],
         "gigaspatial.handlers.wri.global_power_plant": ["GlobalPowerPlantHandler"],
         "gigaspatial.handlers.osm.roads": ["OSMRoadsHandler"],
+        "gigaspatial.handlers.ecmwf.tropical_cyclone": ["EcmwfTropicalCycloneHandler"],
         # fetchers
         "gigaspatial.fetchers.osm.pois": ["OSMLocationFetcher"],
         "gigaspatial.fetchers.osm.roads": ["OSMRoadsFetcher"],
@@ -54,6 +55,8 @@ __getattr__, __dir__, _exports = attach(
         ],
         "gigaspatial.fetchers.giga.countries": ["GigaCountriesFetcher"],
         "gigaspatial.fetchers.unicef.sdg": ["UnicefDataFetcher"],
+        "gigaspatial.fetchers.ecmwf.open_data": ["EcmwfOpenDataFetcher"],
+        "gigaspatial.fetchers.ecmwf.tropical_cyclone": ["EcmwfTropicalCycloneFetcher"],
         "gigaspatial.fetchers.mlab": ["MLabFetcher"],
         "gigaspatial.fetchers.gee.profiler": ["GEEProfiler"],
         # image downloaders
@@ -126,6 +129,7 @@ if TYPE_CHECKING:
     from gigaspatial.handlers.wri.aqueduct_flood import AqueductFloodHandler
     from gigaspatial.handlers.wri.global_power_plant import GlobalPowerPlantHandler
     from gigaspatial.handlers.osm.roads import OSMRoadsHandler
+    from gigaspatial.handlers.ecmwf.tropical_cyclone import EcmwfTropicalCycloneHandler
     from gigaspatial.fetchers.osm.pois import OSMLocationFetcher
     from gigaspatial.fetchers.osm.roads import OSMRoadsFetcher
     from gigaspatial.fetchers.overture import OvertureAmenityFetcher
@@ -138,6 +142,8 @@ if TYPE_CHECKING:
     )
     from gigaspatial.fetchers.giga.countries import GigaCountriesFetcher
     from gigaspatial.fetchers.unicef.sdg import UnicefDataFetcher
+    from gigaspatial.fetchers.ecmwf.open_data import EcmwfOpenDataFetcher
+    from gigaspatial.fetchers.ecmwf.tropical_cyclone import EcmwfTropicalCycloneFetcher
     from gigaspatial.fetchers.mlab import MLabFetcher
     from gigaspatial.fetchers.gee.profiler import GEEProfiler
     from gigaspatial.image_downloaders.mapbox_image import MapboxImageDownloader

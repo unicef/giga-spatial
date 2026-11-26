@@ -175,6 +175,29 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
       show_source: false
       members: false
 
+## ECMWF tropical cyclone tracks
+
+`EcmwfTropicalCycloneHandler` stores track positions for one forecast cycle. `system="all"` keeps IFS deterministic, IFS ENS, AIFS Single, and AIFS ENS as separate GeoJSON files. Per-storm files come from the [essential portal](https://essential.ecmwf.int/). A system with no file there uses the open-data BUFR track (`type=tf`). `crop_to_source=True` keeps positions inside the source.
+
+IFS track files run to 360 h at 00 and 12 UTC and to 144 h at 06 and 18 UTC. AIFS track files run to 360 h at every cycle. Full member-and-step trajectories need ecCodes. A per-storm essential file still contributes the position written into its file name when the BUFR message cannot be decoded.
+
+```python
+from gigaspatial import EcmwfTropicalCycloneHandler
+
+tracks = EcmwfTropicalCycloneHandler(date="2026-10-15", time=0, system="ifs")
+frame = tracks.load_data(area, crop_to_source=True)
+```
+
+::: gigaspatial.handlers.ecmwf.tropical_cyclone.EcmwfTropicalCycloneHandler
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - load_data
+        - download_and_load
+        - ensure_data_available
+        - get_available_data_info
+
 ## Global Power Plant Database
 
 ::: gigaspatial.handlers.wri.global_power_plant.GlobalPowerPlantHandler
