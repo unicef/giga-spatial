@@ -9,6 +9,53 @@ from gigaspatial.fetchers import MLabConfig, GEEConfig
 
 `MLabFetcher` queries M-Lab speed tests in BigQuery. [`GEEProfiler`](earth-engine.md) is also a fetcher and has its own page.
 
+## GloFAS historical
+
+`GlofasHistoricalFetcher` queries the EWDS dataset `cems-glofas-historical` for a country and returns the reanalysis in memory. It does not store the files. Set `EWDS_API_KEY` and accept the CEMS-FLOODS licence before a time-series query. Auxiliary maps are public NetCDF files and do not use that key.
+
+The country boundary, including islands, selects native grid cells. Values are not resampled. The operational system version is `version_4_0`. Omit `variable` to query all four daily variables, or pass one EWDS variable name. `start` and `end` limit the days. `include_auxiliary=True` also returns the version 4.0 upstream-area and elevation maps.
+
+```python
+from gigaspatial import GlofasHistoricalFetcher
+
+GlofasHistoricalFetcher().fetch(
+    "RWA",
+    variable="average_river_discharge_in_the_last_24_hours",
+    start="2020-01-01",
+    end="2020-01-31",
+)
+```
+
+::: gigaspatial.fetchers.cems.glofas_historical.GlofasHistoricalFetcher
+    options:
+      show_source: false
+      members:
+        - fetch
+
+## GloFAS forecast
+
+`GlofasForecastFetcher` queries the EWDS dataset `cems-glofas-forecast` for a country and returns the forecast in memory. It does not store the files. Set `EWDS_API_KEY` and accept the CEMS-FLOODS licence before a forecast query. Auxiliary maps are public NetCDF files and do not use that key.
+
+The country boundary, including islands, selects native grid cells. Values are not resampled. `include_auxiliary=True` also retrieves the GloFAS v4.0 upstream-area and flood-threshold maps and copies them onto a v4 forecast. `exceeded_return_period_years` is the highest return period the discharge exceeds.
+
+```python
+from gigaspatial import GlofasForecastFetcher
+
+GlofasForecastFetcher().fetch(
+    "RWA",
+    variable="river_discharge_in_the_last_24_hours",
+    product_type="control_forecast",
+    reference_start="2026-11-15",
+    reference_end="2026-11-15",
+)
+```
+
+::: gigaspatial.fetchers.cems.glofas_forecast.GlofasForecastFetcher
+    options:
+      show_source: false
+      members:
+        - fetch
+
 ## OpenStreetMap
 
 ::: gigaspatial.fetchers.osm.pois.OSMLocationFetcher

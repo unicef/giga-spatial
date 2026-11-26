@@ -45,6 +45,8 @@ classifiers = [
 dependencies = [
     "numpy>=2.2.2",
     "pandas>=2.2.3",
+    "xarray>=2024.1.0",
+    "netCDF4>=1.6.5",
     "geopandas>=1.0.1",
     "pycountry>=24.6.1",
     "pydantic>=2.10.6",
@@ -133,6 +135,9 @@ excel = [
     "openpyxl>=3.1.0",
     "xlrd>=2.0.0"
 ]
+glofas = [
+    "cfgrib>=0.9.10"
+]
 
 # Meta target using PEP 508 self-references to bundle everything seamlessly
 all = [
@@ -149,7 +154,8 @@ all = [
     "giga-spatial[hdx]",
     "giga-spatial[roads]",
     "giga-spatial[pandana]",
-    "giga-spatial[excel]"
+    "giga-spatial[excel]",
+    "giga-spatial[glofas]"
 ]
 
 [tool.setuptools.dynamic]

@@ -54,6 +54,8 @@ __getattr__, __dir__, _exports = attach(
         ],
         "gigaspatial.fetchers.giga.countries": ["GigaCountriesFetcher"],
         "gigaspatial.fetchers.unicef.sdg": ["UnicefDataFetcher"],
+        "gigaspatial.fetchers.cems.glofas_forecast": ["GlofasForecastFetcher"],
+        "gigaspatial.fetchers.cems.glofas_historical": ["GlofasHistoricalFetcher"],
         "gigaspatial.fetchers.mlab": ["MLabFetcher"],
         "gigaspatial.fetchers.gee.profiler": ["GEEProfiler"],
         # image downloaders
@@ -138,6 +140,8 @@ if TYPE_CHECKING:
     )
     from gigaspatial.fetchers.giga.countries import GigaCountriesFetcher
     from gigaspatial.fetchers.unicef.sdg import UnicefDataFetcher
+    from gigaspatial.fetchers.cems.glofas_forecast import GlofasForecastFetcher
+    from gigaspatial.fetchers.cems.glofas_historical import GlofasHistoricalFetcher
     from gigaspatial.fetchers.mlab import MLabFetcher
     from gigaspatial.fetchers.gee.profiler import GEEProfiler
     from gigaspatial.image_downloaders.mapbox_image import MapboxImageDownloader

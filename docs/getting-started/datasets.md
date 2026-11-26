@@ -72,6 +72,8 @@ Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.m
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |
 | Google Earth Engine | `GEEProfiler` | Raster and vector collections in Google Earth Engine |
+| GloFAS historical | `GlofasHistoricalFetcher` | Daily river discharge, runoff, snow water equivalent, and soil wetness for a country |
+| GloFAS forecast | `GlofasForecastFetcher` | Operational river discharge, runoff, snow water equivalent, and soil wetness for a country, plus v4.0 auxiliary maps |
 
 ## Data store
 
