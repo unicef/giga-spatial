@@ -8,13 +8,13 @@ import logging
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.grid.s2 import S2Cells, CountryS2Cells
 from gigaspatial.generators.zonal.base import (
+    ZonalViewGenerator,
     ZonalViewGeneratorConfig,
     T,
 )
-from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
 
 
-class S2ViewGenerator(GeometryBasedZonalViewGenerator[T]):
+class S2ViewGenerator(ZonalViewGenerator[T]):
     """
     Generates zonal views using Google S2 cells as the zones.
 
@@ -50,6 +50,7 @@ class S2ViewGenerator(GeometryBasedZonalViewGenerator[T]):
         data_store: Optional[DataStore] = None,
         logger: logging.Logger = None,
         max_cells: int = 1000,
+        ensure_available: bool = True,
     ):
 
         super().__init__(
@@ -60,6 +61,7 @@ class S2ViewGenerator(GeometryBasedZonalViewGenerator[T]):
             config=config,
             data_store=data_store,
             logger=logger,
+            ensure_available=ensure_available,
         )
         self.logger.info("Initialized S2ViewGenerator")
 
@@ -75,14 +77,16 @@ class S2ViewGenerator(GeometryBasedZonalViewGenerator[T]):
                 country=source, level=level, data_store=data_store, max_cells=max_cells
             )
             self._country = source
-        elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame, Iterable)):
+        elif isinstance(source, (BaseGeometry, gpd.GeoDataFrame)):
+            cells = S2Cells.from_spatial(
+                source=source, level=level, max_cells=max_cells
+            )
+        elif isinstance(source, Iterable):
             # If it's an explicit cells list of ids/tokens
-            if isinstance(source, Iterable) and all(
-                isinstance(c, (int, str)) for c in source
-            ):
+            if all(isinstance(c, (int, str)) for c in source):
                 cells = S2Cells.from_cells(list(source))
             else:
-                # Spatial extraction from geometry/points/gdf
+                # Spatial extraction from point list
                 cells = S2Cells.from_spatial(
                     source=source, level=level, max_cells=max_cells
                 )
@@ -95,42 +99,3 @@ class S2ViewGenerator(GeometryBasedZonalViewGenerator[T]):
             )
 
         return cells.to_geodataframe()
-
-    def map_wp_pop(
-        self,
-        country=None,
-        resolution=1000,
-        predicate="intersects",
-        output_column="population",
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_wp_pop(
-            country, resolution, predicate, output_column, **kwargs
-        )
-
-    def map_rwi(
-        self,
-        country=None,
-        predicate="intersects",
-        aggregation="mean",
-        output_column: str = "rwi",
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_rwi(country, predicate, aggregation, output_column, **kwargs)
-
-    def map_buildings(
-        self,
-        country=None,
-        output_column: str = "building_count",
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_buildings(country, output_column, **kwargs)

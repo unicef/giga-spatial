@@ -77,6 +77,10 @@ class Config(BaseSettings):
     # Used for accessing Healthsites global health facility data
     HEALTHSITES_API_KEY: str = Field(default="", alias="HEALTHSITES_API_KEY")
 
+    # PeeringDB configuration
+    # Used for higher rate limits on the PeeringDB API. Empty means anonymous.
+    PEERINGDB_API_KEY: str = Field(default="", alias="PEERINGDB_API_KEY")
+
     # Humanitarian Data Exchange (HDX) configuration
     # Used for accessing HDX datasets and humanitarian indicators
     HDX_KEY: str = Field(default="", alias="HDX_KEY")

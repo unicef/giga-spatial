@@ -6,20 +6,20 @@ import logging
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.handlers.boundaries import AdminBoundaries
 from gigaspatial.generators.zonal.base import (
+    ZonalViewGenerator,
     ZonalViewGeneratorConfig,
     T,
 )
-from gigaspatial.generators.zonal.geometry import GeometryBasedZonalViewGenerator
 
 
-class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
+class AdminBoundariesViewGenerator(ZonalViewGenerator[T]):
     """
     Generates zonal views using administrative boundaries as the zones.
 
     This class specializes in creating zonal views where the zones are defined by
     administrative boundaries (e.g., countries, states, districts) at a specified
-    administrative level. It extends the `GeometryBasedZonalViewGenerator` and
-    leverages the `AdminBoundaries` handler to load the necessary geographical data.
+    administrative level. It extends `ZonalViewGenerator` and leverages the
+    `AdminBoundaries` handler to load the necessary geographical data.
 
     The administrative boundaries serve as the base geometries to which other
     geospatial data (points, polygons, rasters) can be mapped and aggregated.
@@ -43,6 +43,7 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
         admin_path: Optional[Union[str, Path]] = None,
         config: Optional[ZonalViewGeneratorConfig] = None,
         logger: logging.Logger = None,
+        ensure_available: bool = True,
     ):
         """
         Initializes the AdminBoundariesViewGenerator.
@@ -52,10 +53,10 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
             admin_level (int): The administrative level to load (e.g., 0 for country, 1 for states, 2 for districts).
             admin_path (Union[str, Path], optional): Path to a local administrative boundaries file (GeoJSON, Shapefile).
                                                      If provided, overrides default data loading.
-            config (Optional[ZonalViewGeneratorConfig]): Configuration for the zonal view generator.
-                                                         If None, a default config will be used.
+            config (Optional[ZonalViewGeneratorConfig]): Deprecated configuration object.
             data_store (Optional[DataStore]): Data storage interface. If None, LocalDataStore is used.
             logger (Optional[logging.Logger]): Custom logger instance. If None, a default logger is used.
+            ensure_available (bool): If True, ensures datasets are downloaded locally during mapping.
         """
 
         super().__init__(
@@ -66,6 +67,7 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
             config=config,
             data_store=data_store,
             logger=logger,
+            ensure_available=ensure_available,
         )
         self._country = country
         self.logger.info(
@@ -83,40 +85,3 @@ class AdminBoundariesViewGenerator(GeometryBasedZonalViewGenerator[T]):
             country, admin_level, data_store, admin_path
         ).to_geodataframe()
         return gdf_boundaries
-
-    def map_wp_pop(
-        self,
-        country=None,
-        resolution=1000,
-        predicate="intersects",
-        output_column="population",
-        **kwargs,
-    ):
-        country = self._country if country is None else country
-        return super().map_wp_pop(
-            country, resolution, predicate, output_column, **kwargs
-        )
-
-    def map_rwi(
-        self,
-        country=None,
-        predicate="intersects",
-        aggregation="mean",
-        output_column: str = "rwi",
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_rwi(country, predicate, aggregation, output_column, **kwargs)
-
-    def map_buildings(
-        self,
-        country=None,
-        output_column: str = "building_count",
-        **kwargs,
-    ):
-        if hasattr(self, "_country") and country is None:
-            country = self._country
-
-        return super().map_buildings(country, output_column, **kwargs)

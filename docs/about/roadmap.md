@@ -4,7 +4,7 @@ This page says what the project is aiming at. It has no dates. A line here is no
 
 ## More datasets
 
-Publish more datasets through the library, including climate data. A dataset published as files becomes a handler. A dataset served as a query becomes a fetcher.
+Publish more datasets through the library, including climate data. The library acquires a dataset either by persisting files and loading them for a source, or by returning the result in memory.
 
 ## Documentation
 

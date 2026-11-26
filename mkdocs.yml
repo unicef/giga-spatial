@@ -80,6 +80,8 @@ nav:
       - Infrastructure files: user-guide/infrastructure-normalization.md
   - Concepts:
       - Glossary: concepts/glossary.md
+      - Handlers: concepts/handlers.md
+      - View generators: concepts/view-generators.md
       - Spatial networks:
           - concepts/spatial-networks/index.md
           - Getting a network: concepts/spatial-networks/getting-a-network.md

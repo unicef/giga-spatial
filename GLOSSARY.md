@@ -1,6 +1,6 @@
 # GigaSpatial
 
-GigaSpatial acquires published geospatial datasets into a data store you control, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. That mapping is one use of the data, not the purpose of the library.
+GigaSpatial acquires published geospatial datasets, loads them for a source, and processes them. A generator maps a dataset onto points of interest or zones. That mapping is one use of the data, not the purpose of the library.
 
 ## Language
 
@@ -21,11 +21,11 @@ A connection used to query a database, a warehouse, or a web API. A fetcher or a
 _Avoid_: data store, fetcher
 
 **Handler**:
-A dataset published as files. Its files are kept in a data store and loaded for a source.
+The persisted acquisition of a dataset: files kept in a data store and loaded for a source.
 _Avoid_: fetcher, downloader
 
 **Fetcher**:
-A dataset served as a query, from an API or a database. The result is records, or a road network.
+The in-memory acquisition of a dataset: it returns the result and imposes no data-store layout. Publication as files or as a query does not decide this.
 _Avoid_: handler
 
 **Spatial network**:
@@ -81,12 +81,16 @@ An operation that maps datasets onto points of interest or zones.
 _Avoid_: view
 
 **View**:
-Points of interest or zones with attributes from datasets attached. That attachment is enrichment.
-_Avoid_: generator, a loaded dataset
+A table of points of interest or zones keyed by their identifier column, with attributes from datasets attached and without geometry until exported as geospatial data. That attachment is enrichment.
+_Avoid_: generator, a loaded dataset, a GeoDataFrame
 
 **Enrichment**:
 The attachment of dataset attributes to points of interest or zones. The result is a view.
 _Avoid_: the name of the library, a dataset that has only been loaded
+
+**`id_column`**:
+The canonical identifier column that keys every row of a view (`poi_id` for points of interest, `zone_id` for zones) and aligns enriched dataset attributes back to their places.
+_Avoid_: index, row number, raw source identifier column
 
 **Point of interest**:
 A location analysed in its own right, such as a school, clinic, or cell site. A view attaches dataset attributes to points of interest.
@@ -134,5 +138,13 @@ The geometry of a request's area of interest, used to crop loaded data. Always a
 _Avoid_: search key, bounding box (unless it is one)
 
 **Stored file**:
-A file as it exists in the data store after fetching, as opposed to the remote file it came from. One data unit may produce several stored files, for example when an archive is extracted.
+A file a handler has written in the data store, as opposed to the remote file it came from. One data unit may produce several stored files, for example when an archive is extracted.
 _Avoid_: downloaded file, cache file
+
+**Derived file**:
+A raster file a processor wrote by merging, reprojecting, or clipping, as opposed to a stored file. It lasts until the processor that wrote it is cleaned up.
+_Avoid_: temp file, intermediate file, merged file (unless it is one)
+
+**Working file**:
+The one raster file a processor reads: either a stored file or a derived file.
+_Avoid_: active raster, raster source, temp file

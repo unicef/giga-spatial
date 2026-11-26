@@ -322,13 +322,7 @@ def buffer_geodataframe(
     input_crs = gdf_work.crs
 
     try:
-        try:
-            utm_crs = gdf_work.estimate_utm_crs()
-        except Exception as e:
-            LOGGER.warning(
-                f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
-            )
-            utm_crs = "EPSG:3857"  # Fallback to Web Mercator
+        utm_crs = estimate_utm_crs_with_fallback(gdf_work, logger=LOGGER)
 
         # Transform to UTM, create buffer, and transform back
         gdf_work = gdf_work.to_crs(utm_crs)
@@ -482,13 +476,7 @@ def add_area_in_meters(
     gdf_with_area = gdf.copy()
 
     # Calculate the UTM CRS for accurate area calculation
-    try:
-        utm_crs = gdf_with_area.estimate_utm_crs()
-    except Exception as e:
-        LOGGER.warning(
-            f"Warning: UTM CRS estimation failed, using Web Mercator. Error: {e}"
-        )
-        utm_crs = "EPSG:3857"  # Fallback to Web Mercator
+    utm_crs = estimate_utm_crs_with_fallback(gdf_with_area, logger=LOGGER)
 
     # Transform to UTM CRS and calculate the area in square meters
     gdf_with_area[area_column_name] = gdf_with_area.to_crs(utm_crs).geometry.area
@@ -548,7 +536,8 @@ def map_points_within_polygons(base_points_gdf, polygon_gdf):
         polygon_gdf: GeoDataFrame containing polygons.
 
     Returns:
-        The `base_points_gdf` with an additional `is_within` boolean column.
+        A new GeoDataFrame copied from `base_points_gdf` with an additional
+        `is_within` boolean column.
 
     Raises:
         ValueError: If geometries are invalid or match is impossible (CRS mismatch).
@@ -564,17 +553,19 @@ def map_points_within_polygons(base_points_gdf, polygon_gdf):
     if not base_points_gdf.crs == polygon_gdf.crs:
         raise ValueError("CRS of `base_points_gdf` and `polygon_gdf` must match.")
 
+    result = base_points_gdf.copy()
+
     # Perform spatial join to check if points fall within any polygon
     joined_gdf = gpd.sjoin(
-        base_points_gdf, polygon_gdf[["geometry"]], how="left", predicate="within"
+        result, polygon_gdf[["geometry"]], how="left", predicate="within"
     )
 
-    # Add `is_within` column to base_points_gdf
-    base_points_gdf["is_within"] = base_points_gdf.index.isin(
+    # Add `is_within` column to the copied GeoDataFrame
+    result["is_within"] = result.index.isin(
         set(joined_gdf.index[~joined_gdf.index_right.isna()])
     )
 
-    return base_points_gdf
+    return result
 
 
 def calculate_distance(lat1, lon1, lat2, lon2, R=6371e3):
@@ -779,7 +770,17 @@ def annotate_with_admin_regions(
     Annotate a GeoDataFrame with administrative region information.
 
     Performs a spatial join between the input points and administrative boundaries
-    at levels 1 and 2, resolving conflicts when points intersect multiple regions.
+    at levels 1 and 2, returning a new GeoDataFrame with one row per input point
+    in the original row order and with the original index. The input GeoDataFrame
+    is not mutated.
+
+    When a point intersects multiple administrative boundaries (for example on a
+    shared border or overlapping boundary), ties are resolved deterministically
+    by sorting candidate matches ascending by
+    ``(admin1_id<suffix>, admin2_id<suffix>)`` with missing IDs sorted last and
+    keeping the first match. Pre-existing ``admin1_id<suffix>`` or
+    ``admin2_id<suffix>`` columns on the input are dropped from the working copy
+    with a warning before the spatial join.
 
     Args:
         gdf: GeoDataFrame containing points to annotate.
@@ -788,7 +789,9 @@ def annotate_with_admin_regions(
         admin_id_column_suffix: Optional suffix for admin ID columns.
 
     Returns:
-        GeoDataFrame with added administrative region columns (admin1, admin2, etc.).
+        A new GeoDataFrame with added administrative region columns
+        (admin1, admin2, and their ID columns), preserving the input order and
+        index.
 
     Raises:
         TypeError: If gdf is not a GeoDataFrame.
@@ -800,7 +803,10 @@ def annotate_with_admin_regions(
 
     if gdf.empty:
         LOGGER.warning("Empty GeoDataFrame provided, returning as-is")
-        return gdf
+        return gdf.copy()
+
+    admin1_id_col = f"admin1_id{admin_id_column_suffix}"
+    admin2_id_col = f"admin2_id{admin_id_column_suffix}"
 
     # read country admin data
     admin1_data = AdminBoundaries.create(
@@ -808,12 +814,10 @@ def annotate_with_admin_regions(
     ).to_geodataframe()
 
     admin1_data.rename(
-        columns={"boundary_id": f"admin1_id{admin_id_column_suffix}", "name": "admin1"},
+        columns={"boundary_id": admin1_id_col, "name": "admin1"},
         inplace=True,
     )
-    admin1_data = admin1_data[
-        [f"admin1_id{admin_id_column_suffix}", "admin1", "geometry"]
-    ]
+    admin1_data = admin1_data[[admin1_id_col, "admin1", "geometry"]]
 
     admin2_data = AdminBoundaries.create(
         country_code=country_code, admin_level=2, data_store=data_store
@@ -821,26 +825,26 @@ def annotate_with_admin_regions(
 
     admin2_data.rename(
         columns={
-            "boundary_id": f"admin2_id{admin_id_column_suffix}",
-            "parent_id": f"admin1_id{admin_id_column_suffix}",
+            "boundary_id": admin2_id_col,
+            "parent_id": admin1_id_col,
             "name": "admin2",
         },
         inplace=True,
     )
     admin2_data = admin2_data[
         [
-            f"admin2_id{admin_id_column_suffix}",
+            admin2_id_col,
             "admin2",
-            f"admin1_id{admin_id_column_suffix}",
+            admin1_id_col,
             "geometry",
         ]
     ]
 
-    # Join dataframes based on 'admin1_id_giga'
+    # Join dataframes based on admin1_id
     admin_data = admin2_data.merge(
         admin1_data,
-        left_on=f"admin1_id{admin_id_column_suffix}",
-        right_on=f"admin1_id{admin_id_column_suffix}",
+        left_on=admin1_id_col,
+        right_on=admin1_id_col,
         how="outer",
     )
 
@@ -854,46 +858,69 @@ def annotate_with_admin_regions(
         crs=4326,
     )
 
-    # admin_data["admin2"].fillna("Unknown", inplace=True)
-    admin_data[f"admin2_id{admin_id_column_suffix}"] = admin_data[
-        f"admin2_id{admin_id_column_suffix}"
-    ].replace({np.nan: None})
+    admin_data[admin2_id_col] = admin_data[admin2_id_col].replace({np.nan: None})
 
-    if gdf.crs is None:
+    # Work on a copy so caller's GeoDataFrame (including CRS) is never mutated
+    orig_index = gdf.index.copy()
+    work_gdf = gdf.copy()
+
+    if work_gdf.crs is None:
         LOGGER.warning("Input GeoDataFrame has no CRS, assuming EPSG:4326")
-        gdf.set_crs(epsg=4326, inplace=True)
-    elif gdf.crs != "EPSG:4326":
-        LOGGER.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
-        gdf = gdf.to_crs(epsg=4326)
+        work_gdf = work_gdf.set_crs(epsg=4326)
+    elif work_gdf.crs != "EPSG:4326":
+        LOGGER.info(f"Reprojecting from {work_gdf.crs} to EPSG:4326")
+        work_gdf = work_gdf.to_crs(epsg=4326)
+
+    # Drop pre-existing admin ID columns on the working copy so sjoin does not
+    # suffix them into _left/_right and break tie-breaking.
+    existing_admin_cols = [
+        col for col in (admin1_id_col, admin2_id_col) if col in work_gdf.columns
+    ]
+    if existing_admin_cols:
+        LOGGER.warning(
+            f"Input GeoDataFrame already contains admin columns {existing_admin_cols}; "
+            "dropping them before spatial join."
+        )
+        work_gdf = work_gdf.drop(columns=existing_admin_cols)
+
+    # Use a monotonic positional index during the join so non-default or
+    # duplicate caller indices remain aligned and in input order.
+    work_gdf = work_gdf.reset_index(drop=True)
 
     # spatial join gdf to admins
-    gdf_w_admins = gdf.copy().sjoin(
+    gdf_w_admins = work_gdf.sjoin(
         admin_data,
         how="left",
         predicate="intersects",
     )
 
     # Check for duplicates caused by points intersecting multiple polygons
-    if len(gdf_w_admins) != len(gdf):
+    if len(gdf_w_admins) != len(work_gdf):
         LOGGER.warning(
             "Some points intersect multiple administrative boundaries. Resolving conflicts..."
         )
-
-        # Group by original index and select the closest admin area for ties
-        gdf_w_admins["distance"] = gdf_w_admins.apply(
-            lambda row: row.geometry.distance(
-                admin_data.loc[row.index_right, "geometry"].centroid
-            ),
-            axis=1,
+        sort_frame = pd.DataFrame(
+            {
+                "pos": gdf_w_admins.index.to_numpy(),
+                "a1": gdf_w_admins[admin1_id_col].to_numpy(),
+                "a2": gdf_w_admins[admin2_id_col].to_numpy(),
+            }
         )
+        keep_ilocs = (
+            sort_frame.sort_values(
+                by=["pos", "a1", "a2"],
+                ascending=True,
+                na_position="last",
+                kind="mergesort",
+            )
+            .drop_duplicates(subset=["pos"], keep="first")
+            .index.to_numpy()
+        )
+        gdf_w_admins = gdf_w_admins.iloc[keep_ilocs]
 
-        # For points with multiple matches, keep the closest polygon
-        gdf_w_admins = gdf_w_admins.loc[
-            gdf_w_admins.groupby(gdf.index)["distance"].idxmin()
-        ].drop(columns="distance")
-
-    # Drop unnecessary columns and reset the index
-    gdf_w_admins = gdf_w_admins.drop(columns="index_right").reset_index(drop=True)
+    # Drop join helper column and restore caller's index
+    gdf_w_admins = gdf_w_admins.drop(columns="index_right")
+    gdf_w_admins.index = orig_index
 
     return gdf_w_admins
 
@@ -901,31 +928,43 @@ def annotate_with_admin_regions(
 def aggregate_polygons_to_zones(
     polygons: Union[pd.DataFrame, gpd.GeoDataFrame],
     zones: gpd.GeoDataFrame,
-    value_columns: Union[str, List[str]],
-    aggregation: Union[str, Dict[str, str]] = "sum",
+    value_columns: Optional[Union[str, List[str]]] = None,
+    aggregation: Optional[Union[str, Dict[str, str]]] = None,
     predicate: Literal["intersects", "within", "fractional"] = "intersects",
     zone_id_column: str = "zone_id",
     output_suffix: str = "",
     drop_geometry: bool = False,
-) -> gpd.GeoDataFrame:
+    output_column: Optional[str] = None,
+) -> Union[gpd.GeoDataFrame, pd.DataFrame]:
     """
     Aggregates polygon data to zones based on a spatial relationship.
+
+    When ``value_columns`` is ``None`` and ``aggregation`` is ``"count"``
+    (the default when ``value_columns`` is omitted), counts polygons per zone
+    into ``output_column`` or ``f"polygon_count{output_suffix}"`` without
+    mutating the input ``polygons`` GeoDataFrame.
 
     Args:
         polygons: Polygon data to aggregate.
         zones: Target zones.
-        value_columns: Column(s) in polygons with numeric values.
-        aggregation: Aggregation method(s) to use (str or dict).
+        value_columns: Column(s) in polygons with values to aggregate, or
+            ``None`` to count polygons per zone.
+        aggregation: Aggregation method(s) to use (str or dict). Defaults to
+            ``"count"`` when ``value_columns`` is ``None`` and ``"sum"``
+            otherwise.
         predicate: Spatial relationship ('intersects', 'within', 'fractional').
         zone_id_column: Unique identifier column in zones.
         output_suffix: Suffix for output columns.
         drop_geometry: Whether to drop the geometry column.
+        output_column: Explicit name for a single output column (overrides
+            ``value_columns`` / ``"polygon_count"`` and ``output_suffix``).
 
     Returns:
-        The zones GeoDataFrame with aggregated values.
+        The zones GeoDataFrame (or DataFrame if ``drop_geometry=True``) with
+        aggregated values.
 
     Raises:
-        TypeError: If polygons/zones are not GeoDataFrames.
+        TypeError: If polygons/zones are not GeoDataFrames or aggregation is invalid.
         ValueError: If columns or predicates are invalid.
     """
     # --- Input validation ---
@@ -944,7 +983,34 @@ def aggregate_polygons_to_zones(
             "Must be one of: 'intersects', 'within', 'fractional'."
         )
 
-    # --- Normalise polygons ---
+    if aggregation is None:
+        aggregation = "count" if value_columns is None else "sum"
+
+    # --- Normalise value_columns and validate aggregation/output options ---
+    if value_columns is None:
+        if aggregation != "count":
+            raise ValueError(
+                "value_columns must be specified for aggregation methods other than 'count'"
+            )
+        count_col = (
+            output_column
+            if output_column is not None
+            else f"polygon_count{output_suffix}"
+        )
+        agg_funcs = None
+        agg_method_for_col: Dict[str, str] = {}
+    else:
+        if isinstance(value_columns, str):
+            value_columns = [value_columns]
+        if output_column is not None and len(value_columns) > 1:
+            raise ValueError(
+                "output_column cannot be used with multiple value_columns; use output_suffix instead."
+            )
+        agg_funcs = _process_aggregation_methods(aggregation, value_columns)
+        agg_method_for_col = dict(agg_funcs)
+        count_col = ""
+
+    # --- Normalise polygons (always copy so caller data is never mutated) ---
     if not isinstance(polygons, gpd.GeoDataFrame):
         try:
             polygons_gdf = convert_to_geodataframe(polygons)
@@ -957,7 +1023,20 @@ def aggregate_polygons_to_zones(
 
     if polygons_gdf.empty:
         LOGGER.warning("Empty polygons GeoDataFrame provided")
-        return zones
+        result = zones.copy()
+        if value_columns is None:
+            result[count_col] = 0
+        else:
+            for col in value_columns:
+                out_col = (
+                    output_column
+                    if output_column is not None
+                    else f"{col}{output_suffix}"
+                )
+                result[out_col] = 0 if agg_method_for_col[col] == "count" else np.nan
+        if drop_geometry:
+            result = result.drop(columns=["geometry"])
+        return result
 
     # --- Geometry type validation ---
     non_polygon_geoms = [
@@ -971,9 +1050,21 @@ def aggregate_polygons_to_zones(
             "Use aggregate_points_to_zones for point data."
         )
 
-    # --- Normalise value_columns ---
-    if isinstance(value_columns, str):
-        value_columns = [value_columns]
+    # --- CRS alignment ---
+    if polygons_gdf.crs != zones.crs:
+        polygons_gdf = polygons_gdf.to_crs(zones.crs)
+
+    minimal_zones = zones[[zone_id_column, "geometry"]].copy()
+
+    if value_columns is None:
+        aggregated_counts = _count_polygons_per_zone(
+            polygons_gdf, minimal_zones, zone_id_column, predicate, count_col
+        )
+        result = zones.merge(aggregated_counts, on=zone_id_column, how="left")
+        result[count_col] = result[count_col].fillna(0).astype(int)
+        if drop_geometry:
+            result = result.drop(columns=["geometry"])
+        return result
 
     missing_cols = [col for col in value_columns if col not in polygons_gdf.columns]
     if missing_cols:
@@ -986,23 +1077,7 @@ def aggregate_polygons_to_zones(
             "Please rename this column in the polygons data."
         )
 
-    # --- CRS alignment ---
-    if polygons_gdf.crs != zones.crs:
-        polygons_gdf = polygons_gdf.to_crs(zones.crs)
-
-    # --- Build aggregation functions ---
-    agg_funcs = _process_aggregation_methods(aggregation, value_columns)
-
-    # Build lookup: original col name → method (before suffix is applied)
-    # Used below to decide fill value per column.
-    if isinstance(aggregation, str):
-        agg_method_for_col: Dict[str, str] = {col: aggregation for col in value_columns}
-    else:
-        agg_method_for_col = dict(aggregation)
-
     # --- Spatial aggregation ---
-    minimal_zones = zones[[zone_id_column, "geometry"]].copy()
-
     if predicate == "fractional":
         aggregated_data = _fractional_aggregation(
             polygons_gdf, minimal_zones, value_columns, agg_funcs, zone_id_column
@@ -1029,14 +1104,16 @@ def aggregate_polygons_to_zones(
     # still match the keys in agg_method_for_col.
     aggregated_cols = [col for col in result.columns if col not in zones.columns]
     for col in aggregated_cols:
-        if not pd.api.types.is_numeric_dtype(result[col]):
-            continue
         method = agg_method_for_col.get(col, "")
-        fill_value = 0 if method == "count" else np.nan
-        result[col] = result[col].fillna(fill_value)
+        if method == "count":
+            result[col] = result[col].fillna(0)
+        elif pd.api.types.is_numeric_dtype(result[col]):
+            result[col] = result[col].fillna(np.nan)
 
-    # --- Apply output suffix ---
-    if output_suffix:
+    # --- Apply output suffix or explicit single output_column ---
+    if output_column is not None:
+        result = result.rename(columns={value_columns[0]: output_column})
+    elif output_suffix:
         rename_dict = {col: f"{col}{output_suffix}" for col in aggregated_cols}
         result = result.rename(columns=rename_dict)
 
@@ -1044,6 +1121,50 @@ def aggregate_polygons_to_zones(
         result = result.drop(columns=["geometry"])
 
     return result
+
+
+def _empty_count_frame(
+    zones: gpd.GeoDataFrame, zone_id_column: str, count_col: str
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            zone_id_column: pd.Series(dtype=zones[zone_id_column].dtype),
+            count_col: pd.Series(dtype=int),
+        }
+    )
+
+
+def _count_polygons_per_zone(
+    polygons_gdf: gpd.GeoDataFrame,
+    zones: gpd.GeoDataFrame,
+    zone_id_column: str,
+    predicate: Literal["intersects", "within", "fractional"],
+    count_col: str,
+) -> pd.DataFrame:
+    """Count unique polygons matching each zone without mutating caller inputs."""
+    if predicate == "fractional":
+        overlay_utm_crs = estimate_utm_crs_with_fallback(polygons_gdf, logger=LOGGER)
+
+        polygons_utm = polygons_gdf[["geometry"]].to_crs(overlay_utm_crs)
+        polygons_utm["__poly_idx"] = np.arange(len(polygons_utm))
+        zones_utm = zones.to_crs(overlay_utm_crs)
+        overlayed = gpd.overlay(polygons_utm, zones_utm, how="intersection")
+        if overlayed.empty:
+            LOGGER.warning("No intersections found during fractional polygon counting")
+            return _empty_count_frame(zones, zone_id_column, count_col)
+        return (
+            overlayed.groupby(zone_id_column)["__poly_idx"]
+            .nunique()
+            .reset_index(name=count_col)
+        )
+
+    joined = gpd.sjoin(
+        polygons_gdf[["geometry"]], zones, how="inner", predicate=predicate
+    )
+    if joined.empty:
+        LOGGER.warning(f"No {predicate} relationships found during polygon counting")
+        return _empty_count_frame(zones, zone_id_column, count_col)
+    return joined.groupby(zone_id_column).size().reset_index(name=count_col)
 
 
 def _process_aggregation_methods(aggregation, value_columns):
@@ -1076,6 +1197,16 @@ def _process_aggregation_methods(aggregation, value_columns):
         raise TypeError("aggregation must be a string or dictionary")
 
 
+def _empty_aggregated_frame(
+    zones: gpd.GeoDataFrame, zone_id_column: str, value_columns: List[str]
+) -> pd.DataFrame:
+    """Return an empty aggregation frame preserving zone_id and float value columns."""
+    data = {zone_id_column: pd.Series(dtype=zones[zone_id_column].dtype)}
+    for col in value_columns:
+        data[col] = pd.Series(dtype=float)
+    return pd.DataFrame(data)
+
+
 def _fractional_aggregation(
     polygons_gdf, zones, value_columns, agg_funcs, zone_id_column
 ):
@@ -1094,11 +1225,7 @@ def _fractional_aggregation(
     """
     try:
         # Compute UTM CRS for accurate area calculations
-        try:
-            overlay_utm_crs = polygons_gdf.estimate_utm_crs()
-        except Exception as e:
-            LOGGER.warning(f"UTM CRS estimation failed, using Web Mercator. Error: {e}")
-            overlay_utm_crs = "EPSG:3857"  # Fallback to Web Mercator
+        overlay_utm_crs = estimate_utm_crs_with_fallback(polygons_gdf, logger=LOGGER)
 
         # Prepare polygons for overlay - only necessary columns
         polygons_utm = polygons_gdf.to_crs(overlay_utm_crs)
@@ -1116,7 +1243,7 @@ def _fractional_aggregation(
 
         if gdf_overlayed.empty:
             LOGGER.warning("No intersections found during fractional aggregation")
-            return zones
+            return _empty_aggregated_frame(zones, zone_id_column, value_columns)
 
         # Calculate fractional areas
         gdf_overlayed["intersection_area"] = gdf_overlayed.area
@@ -1166,7 +1293,7 @@ def _simple_aggregation(
 
     if joined.empty:
         LOGGER.warning(f"No {predicate} relationships found during spatial join")
-        return zones
+        return _empty_aggregated_frame(zones, zone_id_column, value_columns)
 
     # Remove geometry column for aggregation (keep only necessary columns)
     agg_cols = value_columns + [zone_id_column]
