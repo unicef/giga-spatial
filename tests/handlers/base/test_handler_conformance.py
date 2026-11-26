@@ -36,7 +36,6 @@ HANDLER_MODULES = [
     "gigaspatial.handlers.wri.aqueduct_flood",
     "gigaspatial.handlers.wri.global_power_plant",
     "gigaspatial.handlers.cems.flood_hazard",
-    "gigaspatial.handlers.cems.glofas_historical",
     "gigaspatial.handlers.osm.roads",
 ]
 

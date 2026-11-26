@@ -4,8 +4,12 @@ GloFAS historical reanalysis at country level (CEMS Early Warning Data Store).
 Publisher: Copernicus Emergency Management Service, ECMWF.
 Dataset: ``cems-glofas-historical``.
 Licence: CEMS-FLOODS. The EWDS account must accept that licence before a
-download will run.
+query will run. The static auxiliary maps are separate NetCDF files and do
+not use the EWDS key.
 Landing page: https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical
+
+``GlofasHistoricalFetcher`` queries that API and returns the result. It does
+not write the dataset into a data store. Every call asks EWDS again.
 
 The operational system version is ``version_4_0`` (0.05 degree native grid,
 daily, 1979 to near real time). ``version_5_0`` is pre-operational. Variable
@@ -13,33 +17,27 @@ names, the timespan of each variable, and which days exist are read from the
 dataset's catalogue constraints. A day is not requested unless that
 constraint lists it.
 
-A data unit is one variable for one rectangular extract of a country. The
-country's administrative boundary, including islands and other parts, decides
-the extract. Cells stay on the native grid: the request asks EWDS for a
-sub-region and does not set a target grid. Consolidated days are kept once
-downloaded. Intermediate days are requested again when the catalogue's
-updated timestamp changes, because that product is revised until the
-consolidated month is published. A run with nothing new logs that the
-country is already up to date.
-
-The reader returns an ``xarray.Dataset`` for one variable and one area, or a
-dict when several variables or areas were requested. Time stays daily.
+The country's administrative boundary, including islands and other parts,
+selects the native grid cells. The request asks EWDS for a sub-region and
+does not set a target grid. Values are not resampled. Consolidated days are
+preferred over intermediate days when the catalogue lists both. Omitting
+``start`` and ``end`` queries every day the catalogue publishes.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import io
-import json
+import logging
 import math
 import os
 import tempfile
 import threading
 import time
 import zipfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
-from typing import ClassVar, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -51,18 +49,7 @@ from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 
 from gigaspatial.config import config as global_config
-from gigaspatial.core.io.local_data_store import LocalDataStore
-from gigaspatial.handlers.base import (
-    BaseHandler,
-    BaseHandlerConfig,
-    BaseHandlerDownloader,
-    BaseHandlerReader,
-    DownloadOptions,
-    ReadOptions,
-    ResolveOptions,
-)
 from gigaspatial.handlers.base.config import source_geometry
-from gigaspatial.handlers.base.fetch import stream_to_store
 from gigaspatial.handlers.base.source import SourceKind, classify_source
 
 
@@ -143,19 +130,25 @@ LON_NAMES = ("longitude", "lon")
 
 
 @dataclasses.dataclass(frozen=True)
-class GlofasHistoricalResolveOptions(ResolveOptions):
+class GlofasHistoricalResolveOptions:
     """
-    Resolve options for one GloFAS historical load.
+    Options for one GloFAS historical query.
 
     Attributes:
-        variable: One EWDS variable name. Omit it to load all four time-series
+        variable: One EWDS variable name. Omit it to query all four time-series
             variables. ``upstream_area`` and ``elevation`` select a static map.
-        include_auxiliary: Also fetch upstream area and elevation when the
+        include_auxiliary: Also query upstream area and elevation when the
             selected system version has a published file. Off by default.
+        start: First day to query, inclusive. Omit it to start at the first
+            day the catalogue publishes.
+        end: Last day to query, inclusive. Omit it to stop at the latest day
+            the catalogue publishes.
     """
 
     variable: Optional[str] = None
     include_auxiliary: bool = False
+    start: Optional[date] = None
+    end: Optional[date] = None
 
     def __post_init__(self):
         known = set(VARIABLES) | set(AUXILIARY)
@@ -165,6 +158,10 @@ class GlofasHistoricalResolveOptions(ResolveOptions):
                 "Use the EWDS name, for example "
                 "'average_river_discharge_in_the_last_24_hours', not 'dis24'."
             )
+        object.__setattr__(self, "start", _coerce_date(self.start, "start"))
+        object.__setattr__(self, "end", _coerce_date(self.end, "end"))
+        if self.start is not None and self.end is not None and self.start > self.end:
+            raise ValueError("start is after end.")
 
 
 class Availability:
@@ -213,31 +210,20 @@ def fetch_catalogue(api_url: str = DEFAULT_API_URL, session=None) -> HistoricalC
     return HistoricalCatalogue(collection, constraints)
 
 
-def dates_to_fetch(
-    stored: Dict[str, str],
+def selected_days(
     preferred: Dict[date, str],
-    *,
-    catalogue_updated: Optional[str],
-    stored_catalogue_updated: Optional[str],
+    start: Optional[date],
+    end: Optional[date],
 ) -> List[Tuple[date, str]]:
-    """
-    Days that still need a request.
-
-    A stored day is kept when it already came from the preferred product.
-    Consolidated replaces intermediate. When ``catalogue_updated`` has changed,
-    days that are still only published as intermediate are requested again.
-    """
-    have = {}
-    for key, product in stored.items():
-        have[date.fromisoformat(key)] = product
-    refresh_tail = catalogue_updated != stored_catalogue_updated
-    pending = []
+    """Catalogue days inside the inclusive window. Consolidated wins over intermediate."""
+    chosen = []
     for day, product in sorted(preferred.items()):
-        current = have.get(day)
-        revised_tail = refresh_tail and product == "intermediate" and current == "intermediate"
-        if current != product or revised_tail:
-            pending.append((day, product))
-    return pending
+        if start is not None and day < start:
+            continue
+        if end is not None and day > end:
+            continue
+        chosen.append((day, product))
+    return chosen
 
 
 def group_dates(
@@ -335,8 +321,8 @@ def merge_cubes(existing, incoming):
     existing = _orient(existing)
     if not _same_grid(existing, incoming):
         raise ValueError(
-            "The new file is not on the same native grid as the stored file. "
-            "It was not resampled or written."
+            "The new file is not on the same native grid as the days already queried. "
+            "It was not resampled."
         )
     combined = _xarray().concat([existing, incoming], dim="time")
     stamps = list(pd.to_datetime(combined["time"].values))
@@ -349,7 +335,7 @@ def merge_cubes(existing, incoming):
 
 def validate_cube(dataset, *, system_version: str, requested: Sequence[date], area: Tuple[float, float, float, float]):
     """
-    Check a downloaded cube before it is merged.
+    Check a queried cube.
 
     Returns the grid step in degrees and the requested days that were absent.
     """
@@ -400,7 +386,6 @@ def validate_cube(dataset, *, system_version: str, requested: Sequence[date], ar
 
 def standardize_cube(dataset, variable: str):
     """Rename coordinates to ``time``, ``latitude``, and ``longitude`` and keep one data variable."""
-    xr = _xarray()
     rename = {}
     time_name = _coordinate_name(dataset, TIME_NAMES)
     lat_name = _coordinate_name(dataset, LAT_NAMES)
@@ -435,41 +420,85 @@ def standardize_cube(dataset, variable: str):
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True, extra="forbid"))
-class GlofasHistoricalConfig(BaseHandlerConfig):
+class GlofasHistoricalFetcher:
     """
-    Configuration for country-level GloFAS historical files.
+    Query GloFAS historical reanalysis for one country.
 
-    Attributes:
-        base_path: Directory of the stored files, under ``bronze/cems/glofas_historical``.
-        system_version: ``version_4_0`` is operational. ``version_5_0`` is pre-operational.
-        api_url: EWDS API root.
-        api_key: Personal access token. Defaults to ``EWDS_API_KEY``.
-        request_timeout_seconds: How long to wait for one EWDS job.
+    The dataset is served by the EWDS retrieve API. ``fetch`` returns the
+    time series, and any auxiliary maps requested with it, in memory. Nothing
+    is written to a data store. A later call queries EWDS again.
+
+    ::
+
+        GlofasHistoricalFetcher().fetch("RWA", start="2020-01-01", end="2020-01-31")
+        GlofasHistoricalFetcher().fetch(
+            "RWA",
+            variable="average_river_discharge_in_the_last_24_hours",
+            start="2020-01-01",
+            end="2020-01-02",
+        )
+        GlofasHistoricalFetcher().fetch("RWA", variable="upstream_area")
+        GlofasHistoricalFetcher().fetch("RWA", include_auxiliary=True, start="2020-01-01", end="2020-01-02")
+
+    Set ``EWDS_API_KEY`` and accept the CEMS-FLOODS licence before a time-series
+    query. Auxiliary maps do not use that key. Omitting ``start`` and ``end``
+    queries every day the catalogue publishes.
     """
 
-    options_type = GlofasHistoricalResolveOptions
-    units_match_country = True
-
-    base_path: Path = Field(
-        default_factory=lambda: global_config.get_path("cems", "bronze") / "glofas_historical"
-    )
     system_version: str = "version_4_0"
     api_url: str = Field(default_factory=lambda: global_config.EWDS_API_URL or DEFAULT_API_URL)
-    api_key: str = Field(default_factory=lambda: global_config.EWDS_API_KEY)
+    api_key: str = Field(default_factory=lambda: global_config.EWDS_API_KEY, repr=False)
     request_timeout_seconds: int = 3600
+    logger: Optional[logging.Logger] = Field(default=None, repr=False)
 
-    def __post_init__(self):
-        super().__post_init__()
+    def __post_init__(self) -> None:
         if self.system_version not in SYSTEM_VERSIONS:
             raise ValueError(
                 f"system_version must be one of {SYSTEM_VERSIONS}, got {self.system_version!r}."
             )
         self.api_url = self.api_url.rstrip("/")
+        if self.logger is None:
+            self.logger = global_config.get_logger(self.__class__.__name__)
         self._catalogue = None
         self._catalogue_lock = threading.Lock()
 
+    def fetch(
+        self,
+        country: str,
+        *,
+        variable: Optional[str] = None,
+        include_auxiliary: bool = False,
+        start=None,
+        end=None,
+    ):
+        """
+        Query one country and return the reanalysis.
+
+        One series returns a Dataset. Several variables or areas return nested
+        dicts, collapsing any level that has a single entry.
+
+        Raises:
+            RuntimeError: The EWDS request failed, or ``EWDS_API_KEY`` is missing.
+            ValueError: The country, variable, window, or grid is invalid.
+        """
+        query = GlofasHistoricalResolveOptions(
+            variable=variable,
+            include_auxiliary=include_auxiliary,
+            start=start,
+            end=end,
+        )
+        iso3, _country_name = self._country(country)
+        areas = extraction_areas(source_geometry(iso3, crs="EPSG:4326"))
+        groups: Dict[str, Dict[str, List]] = {}
+        if query.variable not in AUXILIARY:
+            self._query_series(iso3, areas, query, groups)
+        self._query_auxiliary(areas, query, groups)
+        if not groups:
+            raise ValueError(f"No GloFAS historical variables were selected for {iso3}.")
+        return _assemble(groups)
+
     def catalogue(self) -> HistoricalCatalogue:
-        """The catalogue for this run. Fetched once."""
+        """The catalogue for this query. Fetched once. This call does not need an API key."""
         if self._catalogue is not None:
             return self._catalogue
         with self._catalogue_lock:
@@ -477,40 +506,57 @@ class GlofasHistoricalConfig(BaseHandlerConfig):
                 self._catalogue = fetch_catalogue(self.api_url)
         return self._catalogue
 
-    def get_search_key(self, source, options: GlofasHistoricalResolveOptions) -> str:
-        """Return the ISO3 code. The files are stored one country at a time."""
-        if classify_source(source) is not SourceKind.COUNTRY:
+    def _country(self, country: str) -> Tuple[str, str]:
+        if classify_source(country) is not SourceKind.COUNTRY:
             raise ValueError(
-                "GloFAS historical is stored by country. "
+                "GloFAS historical is queried by country. "
                 "Pass a country name or ISO code, for example 'RWA'."
             )
         try:
-            return pycountry.countries.lookup(source).alpha_3
+            record = pycountry.countries.lookup(country)
         except LookupError as exc:
-            raise ValueError(f"Unknown country: {source!r}.") from exc
+            raise ValueError(f"Unknown country: {country!r}.") from exc
+        return record.alpha_3, record.name
 
-    def get_relevant_data_units_by_key(
-        self, search_key: str, options: GlofasHistoricalResolveOptions
-    ) -> List[dict]:
-        """One unit per variable and per rectangle that covers the country."""
-        geometry = source_geometry(search_key, crs=self.crs)
-        areas = extraction_areas(geometry)
-        country = pycountry.countries.get(alpha_3=search_key)
-        country_name = country.name if country is not None else search_key
-        variables = self._series_variables(options)
-        units = []
-        for variable in variables:
-            for area in areas:
-                units.append(
-                    self._unit(
-                        search_key,
-                        country_name,
-                        variable,
-                        area,
-                        kind="series",
-                    )
+    def _query_series(self, iso3, areas, query, groups) -> None:
+        requested = False
+        for variable in _series_variables(query):
+            try:
+                availability = self.catalogue().availability(self.system_version, variable)
+            except ValueError as exc:
+                if query.variable == variable:
+                    raise
+                self.logger.warning("%s", exc)
+                continue
+            pending = selected_days(availability.preferred, query.start, query.end)
+            if not pending:
+                message = (
+                    f"No {variable} days are published for {self.system_version} "
+                    f"between {query.start} and {query.end}."
                 )
-        for name in self._auxiliary_variables(options):
+                if query.variable == variable:
+                    raise ValueError(message)
+                self.logger.warning("%s", message)
+                continue
+            self._require_key()
+            requested = True
+            self.logger.info(
+                "%s %s: retrieving %d day(s) in %d request(s). Source latest %s.",
+                iso3,
+                variable,
+                len(pending),
+                len(group_dates(pending)) * len(areas),
+                _iso(availability.latest),
+            )
+            for area in areas:
+                for group in group_dates(pending):
+                    dataset = self._fetch_group(iso3, variable, availability.timespan, area, group)
+                    groups.setdefault(variable, {}).setdefault(_area_id(*area), []).append(dataset)
+        if _series_variables(query) and not requested and not groups:
+            return
+
+    def _query_auxiliary(self, areas, query, groups) -> None:
+        for name in _auxiliary_names(query):
             spec = AUXILIARY[name]
             if self.system_version not in spec["versions"]:
                 self.logger.warning(
@@ -520,307 +566,78 @@ class GlofasHistoricalConfig(BaseHandlerConfig):
                 )
                 continue
             for area in areas:
-                units.append(
-                    self._unit(search_key, country_name, name, area, kind="auxiliary")
-                )
-        if not units:
-            raise ValueError(f"No GloFAS historical variables were selected for {search_key}.")
-        return units
+                dataset = self._fetch_auxiliary(name, area)
+                groups.setdefault(name, {}).setdefault(_area_id(*area), []).append(dataset)
 
-    def get_data_unit_path(self, unit: dict, options=None) -> Path:
-        """Metadata file for one variable and one country rectangle."""
-        return self._unit_dir(unit) / "metadata.json"
-
-    def get_stored_paths(self, unit: dict, options=None) -> List[Path]:
-        """Metadata plus every NetCDF written for the unit."""
-        directory = self._unit_dir(unit)
-        paths = [directory / "metadata.json"]
-        info = _read_json(self.data_store, directory / "metadata.json")
-        if info:
-            for name in info.get("files", []):
-                paths.append(directory / name)
-        return paths
-
-    def is_unit_available(self, unit: dict, paths) -> bool:
-        """True when the stored days already match the catalogue."""
-        if unit["kind"] == "auxiliary":
-            return self.data_store.file_exists(str(self._unit_dir(unit) / "static.nc"))
-        stored, meta = self._stored_series(unit)
-        availability = self.catalogue().availability(unit["system_version"], unit["variable"])
-        pending = dates_to_fetch(
-            stored,
-            availability.preferred,
-            catalogue_updated=self.catalogue().updated,
-            stored_catalogue_updated=meta.get("catalogue_updated"),
-        )
-        if pending or not stored:
-            return False
-        self.logger.info(
-            "%s %s is already up to date. Latest observation %s. Last download %s.",
-            unit["country_iso3"],
-            unit["variable"],
-            meta.get("source_latest_observation"),
-            meta.get("last_successful_download_utc"),
-        )
-        return True
-
-    def _series_variables(self, options: GlofasHistoricalResolveOptions) -> Tuple[str, ...]:
-        if options.variable in AUXILIARY:
-            return ()
-        if options.variable is None:
-            return VARIABLES
-        return (options.variable,)
-
-    def _auxiliary_variables(self, options: GlofasHistoricalResolveOptions) -> Tuple[str, ...]:
-        if options.variable in AUXILIARY:
-            return (options.variable,)
-        if options.include_auxiliary and options.variable not in AUXILIARY:
-            return tuple(AUXILIARY)
-        return ()
-
-    def _unit(self, iso3: str, country_name: str, variable: str, area, kind: str) -> dict:
-        north, west, south, east = area
-        return {
-            "kind": kind,
-            "country_iso3": iso3,
-            "country_name": country_name,
-            "system_version": self.system_version,
-            "variable": variable,
-            "area": area,
-            "area_id": _area_id(north, west, south, east),
-        }
-
-    def _unit_dir(self, unit: dict) -> Path:
-        return (
-            self.base_path
-            / unit["system_version"]
-            / unit["country_iso3"]
-            / unit["variable"]
-            / unit["area_id"]
-        )
-
-    def _year_path(self, unit: dict, year: int) -> Path:
-        return self._unit_dir(unit) / f"{year}.nc"
-
-    def _source_auxiliary_path(self, variable: str) -> Path:
-        return self.base_path / self.system_version / "_source" / f"{variable}.nc"
-
-    def _stored_series(self, unit: dict) -> Tuple[Dict[str, str], dict]:
-        meta = _read_json(self.data_store, self._unit_dir(unit) / "metadata.json") or {}
-        stored = {}
-        for key, product in (meta.get("dates") or {}).items():
-            if self.data_store.file_exists(str(self._year_path(unit, int(key[:4])))):
-                stored[key] = product
-        if stored:
-            return stored, meta
-        recovered = {}
-        for path in _nc_files(self.data_store, self._unit_dir(unit)):
-            if path.name == "static.nc":
-                continue
-            try:
-                dataset = _open_path(self.data_store, path)
-            except (OSError, ValueError):
-                continue
-            try:
-                recovered.update(json.loads(dataset.attrs.get("gigaspatial_dates") or "{}"))
-            finally:
-                dataset.close()
-        return recovered, meta
-
-
-class GlofasHistoricalDownloader(BaseHandlerDownloader):
-    """Downloads GloFAS historical days that are not stored yet."""
-
-    options_type = DownloadOptions
-    config_type: ClassVar[type] = GlofasHistoricalConfig
-
-    def download_data_unit(self, unit: dict, options: DownloadOptions) -> List[Path]:
-        """
-        Sync one variable for one country rectangle.
-
-        Raises:
-            RuntimeError: The EWDS request failed, or ``EWDS_API_KEY`` is missing.
-            ValueError: The file is not a regular daily grid at the native spacing.
-        """
-        if unit["kind"] == "auxiliary":
-            self._download_auxiliary(unit, options)
-        else:
-            self._sync_series(unit, options)
-        return self.config.get_stored_paths(unit)
-
-    def _sync_series(self, unit: dict, options: DownloadOptions) -> None:
-        catalogue = self.config.catalogue()
-        availability = catalogue.availability(unit["system_version"], unit["variable"])
-        stored, meta = self.config._stored_series(unit)
-        pending = dates_to_fetch(
-            stored,
-            availability.preferred,
-            catalogue_updated=catalogue.updated,
-            stored_catalogue_updated=meta.get("catalogue_updated"),
-        )
-        if not pending:
-            self._write_checked(unit, meta, catalogue, availability, stored, downloaded=False)
-            self.logger.info(
-                "%s %s is already up to date. Latest observation %s. Last download %s.",
-                unit["country_iso3"],
-                unit["variable"],
-                meta.get("source_latest_observation") or _iso(availability.latest),
-                meta.get("last_successful_download_utc"),
-            )
-            return
-        self._require_key()
-        groups = group_dates(pending)
-        self.logger.info(
-            "%s %s: retrieving %d day(s) in %d request(s). Source latest %s.",
-            unit["country_iso3"],
-            unit["variable"],
-            len(pending),
-            len(groups),
-            _iso(availability.latest),
-        )
-        for group in groups:
-            returned = self._fetch_group(unit, availability.timespan, group, options, meta)
-            for day in returned:
-                stored[day.isoformat()] = group["product_type"]
-            self._write_progress(unit, meta, catalogue, availability, stored)
-        written = self._write_checked(
-            unit, meta, catalogue, availability, stored, downloaded=True
-        )
-        self.logger.info(
-            "%s %s stored through %s. Downloaded at %s. Source latest %s.",
-            unit["country_iso3"],
-            unit["variable"],
-            written.get("latest_stored_observation"),
-            written.get("last_successful_download_utc"),
-            written.get("source_latest_observation"),
-        )
-
-    def _fetch_group(self, unit, timespan: str, group: dict, options: DownloadOptions, meta: dict) -> List[date]:
+    def _fetch_group(self, iso3, variable, timespan, area, group) -> object:
         request = {
-            "system_version": [unit["system_version"]],
+            "system_version": [self.system_version],
             "hydrological_model": [HYDROLOGICAL_MODEL],
             "product_type": [group["product_type"]],
-            "variable": [unit["variable"]],
+            "variable": [variable],
             "timespan": [timespan],
             "year": [f"{group['year']:04d}"],
             "month": [f"{month:02d}" for month in group["months"]],
             "day": [f"{day:02d}" for day in group["days"]],
-            "area": list(unit["area"]),
+            "area": list(area),
             "data_format": "netcdf",
             "download_format": "zip",
         }
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "download.bin"
-            self._retrieve(request, dest, options)
-            dataset = standardize_cube(_open_download(dest), unit["variable"])
-            try:
-                step, missing = validate_cube(
-                    dataset,
-                    system_version=unit["system_version"],
-                    requested=group["dates"],
-                    area=unit["area"],
-                )
-                if missing:
-                    self.logger.warning(
-                        "%s %s: EWDS omitted %d of %d requested day(s) for %s %s. "
-                        "Those days stay pending.",
-                        unit["country_iso3"],
-                        unit["variable"],
-                        len(missing),
-                        len(group["dates"]),
-                        group["product_type"],
-                        group["year"],
-                    )
-                returned = [day for day in group["dates"] if day not in missing]
-                if not returned:
-                    raise RuntimeError(
-                        f"EWDS returned none of the {len(group['dates'])} requested days "
-                        f"for {unit['variable']}."
-                    )
-                meta["units"] = str(
-                    dataset[unit["variable"]].attrs.get("units")
-                    or DOCUMENTED_UNITS.get(unit["variable"], "")
-                )
-                if step is not None:
-                    meta["spatial_resolution_degrees"] = round(float(step), 6)
-                self._merge_year(unit, group, dataset, returned)
-            finally:
-                dataset.close()
-        return returned
-
-    def _merge_year(self, unit, group, incoming, returned: Sequence[date]) -> None:
-        path = self.config._year_path(unit, group["year"])
-        existing = None
-        merged = None
-        try:
-            if self.data_store.file_exists(str(path)):
-                existing = _open_path(self.data_store, path)
-            merged = merge_cubes(existing, incoming)
-            products = {}
-            if existing is not None:
-                products.update(json.loads(existing.attrs.get("gigaspatial_dates") or "{}"))
-            for day in returned:
-                products[day.isoformat()] = group["product_type"]
-            merged.attrs["gigaspatial_dates"] = json.dumps(products, sort_keys=True)
-            _commit_dataset(self.data_store, path, merged)
-        finally:
-            if existing is not None:
-                existing.close()
-            if merged is not None and merged is not incoming:
-                merged.close()
-
-    def _download_auxiliary(self, unit: dict, options: DownloadOptions) -> None:
-        spec = AUXILIARY[unit["variable"]]
-        source = self.config._source_auxiliary_path(unit["variable"])
-        if not self.data_store.file_exists(str(source)):
-            self.logger.info("Downloading GloFAS %s for %s.", unit["variable"], unit["system_version"])
-            stream_to_store(
-                spec["url"],
-                source,
-                self.data_store,
-                show_progress=options.show_progress,
-            )
-        dataset = _orient(_rename_static(_open_path(self.data_store, source)))
-        subset = None
-        try:
-            subset = _subset_grid(dataset, unit["area"]).load()
-            _reject_irregular(subset, unit["system_version"])
-            target = self.config._unit_dir(unit) / "static.nc"
-            _commit_dataset(self.data_store, target, subset)
-        finally:
-            dataset.close()
-            if subset is not None:
-                subset.close()
-        now = _utc_now()
-        _write_json(
-            self.data_store,
-            self.config.get_data_unit_path(unit),
-            {
-                "country_iso3": unit["country_iso3"],
-                "country_name": unit["country_name"],
-                "dataset": DATASET_ID,
-                "system_version": unit["system_version"],
-                "variable": unit["variable"],
-                "variable_label": spec["label"],
-                "units": spec["units"],
-                "temporal_resolution": "static",
-                "spatial_resolution_degrees": NATIVE_RESOLUTION_DEGREES.get(unit["system_version"]),
-                "last_successful_download_utc": now,
-                "last_successful_check_utc": now,
-                "latest_stored_observation": None,
-                "source_latest_observation": None,
-                "files": ["static.nc"],
-                "source_url": spec["url"],
-                "licence": LICENCE,
-                "area": list(unit["area"]),
-            },
+            self._retrieve(request, dest)
+            dataset = standardize_cube(_open_download(dest), variable)
+        step, missing = validate_cube(
+            dataset,
+            system_version=self.system_version,
+            requested=group["dates"],
+            area=area,
         )
+        if missing:
+            self.logger.warning(
+                "%s %s: EWDS omitted %d of %d requested day(s) for %s %s.",
+                iso3,
+                variable,
+                len(missing),
+                len(group["dates"]),
+                group["product_type"],
+                group["year"],
+            )
+        returned = [day for day in group["dates"] if day not in missing]
+        if not returned:
+            raise RuntimeError(
+                f"EWDS returned none of the {len(group['dates'])} requested days for {variable}."
+            )
+        if missing:
+            keep = [np.datetime64(day) for day in returned]
+            dataset = dataset.sel(time=keep)
+        dataset.attrs["dataset"] = DATASET_ID
+        dataset.attrs["system_version"] = self.system_version
+        dataset.attrs["country_iso3"] = iso3
+        dataset.attrs["spatial_resolution_degrees"] = (
+            round(float(step), 6) if step is not None else NATIVE_RESOLUTION_DEGREES.get(self.system_version)
+        )
+        return dataset
 
-    def _retrieve(self, request: dict, dest: Path, options: DownloadOptions) -> None:
-        """Submit one EWDS job and store its file at ``dest``."""
+    def _fetch_auxiliary(self, name: str, area):
+        spec = AUXILIARY[name]
+        self.logger.info("Downloading GloFAS %s for %s.", name, self.system_version)
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "static.nc"
+            self._download_to_path(spec["url"], dest)
+            dataset = _orient(_rename_static(_open_download(dest)))
+        subset = _subset_grid(dataset, area).load()
+        _reject_irregular(subset, self.system_version)
+        subset.attrs["dataset"] = DATASET_ID
+        subset.attrs["system_version"] = self.system_version
+        subset.attrs["variable"] = name
+        return subset
+
+    def _retrieve(self, request: dict, dest: Path) -> None:
+        """Submit one EWDS job and write its file at ``dest``."""
         session = requests.Session()
-        session.headers["PRIVATE-TOKEN"] = self.config.api_key
-        root = self.config.api_url
+        session.headers["PRIVATE-TOKEN"] = self.api_key
+        root = self.api_url
         response = _request(
             session,
             "POST",
@@ -829,146 +646,87 @@ class GlofasHistoricalDownloader(BaseHandlerDownloader):
             timeout=120,
         )
         if response.status_code >= 400:
-            raise RuntimeError(_provider_message(response, self.config.api_key))
+            raise RuntimeError(_provider_message(response, self.api_key))
         job = response.json()
         job_id = job["jobID"]
         status = job.get("status")
-        deadline = time.monotonic() + self.config.request_timeout_seconds
+        deadline = time.monotonic() + self.request_timeout_seconds
         pause = 2.0
         while status not in JOB_DONE | JOB_FAILED:
             if time.monotonic() > deadline:
                 raise TimeoutError(f"EWDS job {job_id} is still {status}.")
             time.sleep(pause)
             pause = min(pause * 1.5, 30.0)
-            status_response = _request(
-                session, "GET", f"{root}/retrieve/v1/jobs/{job_id}", timeout=60
-            )
+            status_response = _request(session, "GET", f"{root}/retrieve/v1/jobs/{job_id}", timeout=60)
             if status_response.status_code >= 400:
-                raise RuntimeError(_provider_message(status_response, self.config.api_key))
+                raise RuntimeError(_provider_message(status_response, self.api_key))
             job = status_response.json()
             status = job.get("status")
         if status not in JOB_DONE:
             message = job.get("message") or ""
             raise RuntimeError(f"EWDS job {job_id} {status}. {message}".strip())
-        results = _request(
-            session, "GET", f"{root}/retrieve/v1/jobs/{job_id}/results", timeout=60
-        )
+        results = _request(session, "GET", f"{root}/retrieve/v1/jobs/{job_id}/results", timeout=60)
         if results.status_code >= 400:
-            raise RuntimeError(_provider_message(results, self.config.api_key))
+            raise RuntimeError(_provider_message(results, self.api_key))
         href = _asset_href(results.json())
         if not href:
             raise RuntimeError(f"EWDS job {job_id} finished without a download URL.")
-        stream_to_store(
-            href,
-            dest,
-            self.data_store,
-            session=session,
-            show_progress=options.show_progress,
-            timeout=300,
-        )
+        self._download_to_path(href, dest, session=session)
+
+    def _download_to_path(self, url: str, dest: Path, session=None) -> None:
+        session = session or requests.Session()
+        delays = (1, 2, 4)
+        last_error = None
+        for delay in (*delays, None):
+            try:
+                response = _request(session, "GET", url, timeout=300)
+                if response.status_code >= 400:
+                    raise requests.HTTPError(f"GET returned {response.status_code}.")
+                dest.write_bytes(response.content)
+                return
+            except requests.RequestException as exc:
+                last_error = exc
+                if delay is None:
+                    raise
+                time.sleep(delay)
+        if last_error:
+            raise last_error
 
     def _require_key(self) -> None:
-        if not self.config.api_key:
+        if not self.api_key:
             raise RuntimeError(
                 "EWDS_API_KEY is not set. Create a token at "
                 f"{DATASET_PAGE} and accept the {LICENCE} licence, "
                 "then set EWDS_API_KEY."
             )
 
-    def _write_progress(self, unit, meta, catalogue, availability, stored) -> None:
-        """Record days already on disk so an interrupted run can resume."""
-        meta = _base_metadata(unit, meta, catalogue, availability, stored, self.config.api_url)
-        meta["files"] = _year_file_names(stored)
-        _write_json(self.data_store, self.config.get_data_unit_path(unit), meta)
 
-    def _write_checked(self, unit, meta, catalogue, availability, stored, downloaded: bool) -> None:
-        now = _utc_now()
-        meta = _base_metadata(unit, meta, catalogue, availability, stored, self.config.api_url)
-        meta["files"] = _year_file_names(stored)
-        meta["last_successful_check_utc"] = now
-        meta["catalogue_updated"] = catalogue.updated
-        if downloaded:
-            meta["last_successful_download_utc"] = now
-        elif "last_successful_download_utc" not in meta:
-            meta["last_successful_download_utc"] = None
-        _write_json(self.data_store, self.config.get_data_unit_path(unit), meta)
-        return meta
+def _series_variables(query: GlofasHistoricalResolveOptions) -> Tuple[str, ...]:
+    if query.variable in AUXILIARY:
+        return ()
+    if query.variable is None:
+        return VARIABLES
+    return (query.variable,)
 
 
-class GlofasHistoricalReader(BaseHandlerReader):
-    """Loads stored GloFAS historical NetCDF files."""
-
-    options_type = ReadOptions
-    config_type: ClassVar[type] = GlofasHistoricalConfig
-
-    def load_from_paths(self, source_data_path: List[str], options: ReadOptions):
-        """
-        Load stored files.
-
-        One variable and one area returns a Dataset. Several variables return
-        a dict keyed by variable. Several areas return a dict keyed by area id.
-        """
-        groups: Dict[str, Dict[str, List]] = {}
-        for raw in source_data_path:
-            path = Path(raw)
-            if path.suffix != ".nc":
-                continue
-            dataset = _open_path(self.data_store, path)
-            try:
-                if path.name == "static.nc":
-                    loaded = _rename_static(dataset).load()
-                else:
-                    variable = path.parent.parent.name
-                    loaded = standardize_cube(dataset, variable).load()
-            finally:
-                dataset.close()
-            variable = path.parent.parent.name
-            area_id = path.parent.name
-            groups.setdefault(variable, {}).setdefault(area_id, []).append(loaded)
-        if not groups:
-            raise ValueError("No stored GloFAS historical files were found.")
-        assembled = {}
-        for variable, areas in groups.items():
-            loaded_areas = {
-                area_id: _concat_loaded(parts) for area_id, parts in areas.items()
-            }
-            assembled[variable] = (
-                next(iter(loaded_areas.values()))
-                if len(loaded_areas) == 1
-                else loaded_areas
-            )
-        if len(assembled) == 1:
-            return next(iter(assembled.values()))
-        return assembled
+def _auxiliary_names(query: GlofasHistoricalResolveOptions) -> Tuple[str, ...]:
+    if query.variable in AUXILIARY:
+        return (query.variable,)
+    if query.include_auxiliary:
+        return tuple(AUXILIARY)
+    return ()
 
 
-class GlofasHistoricalHandler(BaseHandler):
-    """
-    Handler for GloFAS historical reanalysis at country level.
-
-    The operational dataset is version 4.0. One call checks the catalogue and
-    downloads only days that are missing or still published as intermediate
-    after a catalogue update:
-
-        GlofasHistoricalHandler().load_data("RWA")
-        GlofasHistoricalHandler().load_data(
-            "RWA", variable="average_river_discharge_in_the_last_24_hours"
+def _assemble(groups: Dict[str, Dict[str, List]]):
+    assembled = {}
+    for variable, areas in groups.items():
+        loaded_areas = {area_id: _concat_loaded(parts) for area_id, parts in areas.items()}
+        assembled[variable] = (
+            next(iter(loaded_areas.values())) if len(loaded_areas) == 1 else loaded_areas
         )
-
-    Set ``EWDS_API_KEY`` and accept the CEMS-FLOODS licence on the dataset
-    page before the first download. ``include_auxiliary=True`` also stores
-    upstream area and elevation for version 4.0.
-    """
-
-    def create_config(self, data_store, logger, **kwargs) -> GlofasHistoricalConfig:
-        kwargs.setdefault("n_workers", 1)
-        return GlofasHistoricalConfig(data_store=data_store, logger=logger, **kwargs)
-
-    def create_downloader(self, config, data_store, logger, **kwargs) -> GlofasHistoricalDownloader:
-        return GlofasHistoricalDownloader(config=config, data_store=data_store, logger=logger)
-
-    def create_reader(self, config, data_store, logger, **kwargs) -> GlofasHistoricalReader:
-        return GlofasHistoricalReader(config=config, data_store=data_store, logger=logger)
+    if len(assembled) == 1:
+        return next(iter(assembled.values()))
+    return assembled
 
 
 def _availability(constraints: list, system_version: str, variable: str) -> Availability:
@@ -1090,9 +848,7 @@ def _area_id(north: float, west: float, south: float, east: float) -> str:
         text = f"{value:.3f}".replace("-", "m").replace(".", "p")
         return f"{prefix}{text}"
 
-    return "_".join(
-        (part("n", north), part("w", west), part("s", south), part("e", east))
-    )
+    return "_".join((part("n", north), part("w", west), part("s", south), part("e", east)))
 
 
 def _xarray():
@@ -1123,21 +879,6 @@ def _open_bytes(raw: bytes):
     return loaded
 
 
-def _dataset_bytes(dataset) -> bytes:
-    handle = tempfile.NamedTemporaryFile(suffix=".nc", delete=False)
-    handle.close()
-    temp_path = handle.name
-    try:
-        dataset.to_netcdf(temp_path, engine="netcdf4")
-        return Path(temp_path).read_bytes()
-    finally:
-        os.unlink(temp_path)
-
-
-def _open_path(store, path: Path):
-    return _open_bytes(store.read_file(str(path)))
-
-
 def _open_download(path: Path):
     raw = path.read_bytes()
     if raw[:2] == b"PK":
@@ -1150,21 +891,6 @@ def _open_download(path: Path):
             return datasets[0]
         return _xarray().merge(datasets)
     return _open_bytes(raw)
-
-
-def _commit_dataset(store, path: Path, dataset) -> None:
-    payload = _dataset_bytes(dataset)
-    partial = path.with_name(path.name + ".partial")
-    store.write_file(str(partial), payload)
-    if isinstance(store, LocalDataStore):
-        source = store._resolve_path(partial)
-        target = store._resolve_path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, target)
-        return
-    store.write_file(str(path), payload)
-    if store.file_exists(str(partial)):
-        store.remove(str(partial))
 
 
 def _orient(dataset):
@@ -1248,83 +974,6 @@ def _concat_loaded(parts: List):
     return combined
 
 
-def _nc_files(store, directory: Path) -> List[Path]:
-    names: List[str] = []
-    try:
-        names = list(store.list_files(str(directory)))
-    except (FileNotFoundError, OSError, ValueError):
-        names = []
-    found = []
-    for name in names:
-        path = Path(name)
-        if path.suffix == ".nc":
-            found.append(path if path.is_absolute() else directory / path.name)
-    if found:
-        return sorted(found)
-    if directory.is_dir():
-        return sorted(path for path in directory.glob("*.nc") if path.is_file())
-    return []
-
-
-def _read_json(store, path: Path) -> Optional[dict]:
-    if not store.file_exists(str(path)):
-        return None
-    raw = store.read_file(str(path), encoding="utf-8")
-    return json.loads(raw)
-
-
-def _write_json(store, path: Path, payload: dict) -> None:
-    store.write_file(str(path), json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def _base_metadata(unit, meta, catalogue, availability, stored, api_url: str) -> dict:
-    stored_days = sorted(stored)
-    latest_stored = stored_days[-1] if stored_days else None
-    units = meta.get("units") or DOCUMENTED_UNITS.get(unit["variable"], "")
-    step = meta.get("spatial_resolution_degrees")
-    if step is None:
-        step = NATIVE_RESOLUTION_DEGREES.get(unit["system_version"])
-    payload = {
-        "country_iso3": unit["country_iso3"],
-        "country_name": unit["country_name"],
-        "dataset": DATASET_ID,
-        "doi": catalogue.doi,
-        "system_version": unit["system_version"],
-        "hydrological_model": HYDROLOGICAL_MODEL,
-        "variable": unit["variable"],
-        "variable_label": VARIABLE_LABELS.get(unit["variable"], unit["variable"]),
-        "grib_short_name": GRIB_SHORT_NAMES.get(unit["variable"]),
-        "units": units,
-        "timespan": availability.timespan,
-        "spatial_resolution_degrees": step,
-        "temporal_resolution": "daily",
-        "catalogue_temporal_start": _iso(catalogue.temporal_start),
-        "catalogue_temporal_end": _iso(catalogue.temporal_end),
-        "historical_coverage_start": stored_days[0] if stored_days else None,
-        "historical_coverage_end": latest_stored,
-        "latest_stored_observation": latest_stored,
-        "source_latest_observation": _iso(availability.latest),
-        "last_successful_download_utc": meta.get("last_successful_download_utc"),
-        "last_successful_check_utc": meta.get("last_successful_check_utc"),
-        "catalogue_updated": meta.get("catalogue_updated"),
-        "dates": dict(sorted(stored.items())),
-        "area": list(unit["area"]),
-        "licence": LICENCE,
-        "retrieval": {
-            "dataset": DATASET_ID,
-            "api_url": api_url,
-            "dataset_page": DATASET_PAGE,
-            "area_order": ["north", "west", "south", "east"],
-        },
-    }
-    return payload
-
-
-def _year_file_names(stored: Dict[str, str]) -> List[str]:
-    years = sorted({key[:4] for key in stored})
-    return [f"{year}.nc" for year in years]
-
-
 def _request(session, method: str, url: str, **kwargs):
     delays = (1, 2, 4)
     last_error = None
@@ -1380,11 +1029,19 @@ def _parse_date(value: str) -> date:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
 
 
+def _coerce_date(value, name: str) -> Optional[date]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value[:10])
+    raise TypeError(f"{name} must be a date or YYYY-MM-DD string.")
+
+
 def _iso(value: Optional[date]) -> Optional[str]:
     if value is None:
         return None
     return value.isoformat()
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")

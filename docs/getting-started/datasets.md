@@ -41,7 +41,6 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | OpenCellID | `OpenCellIDHandler` | Crowd-sourced cell tower locations by country |
 | NASA SRTM | `NasaSRTMHandler` | 30 m digital elevation model tiles |
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
-| GloFAS historical | `GlofasHistoricalHandler` | Daily river discharge, runoff, snow water equivalent, and soil wetness for a country |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
 | Global Power Plant Database | `GlobalPowerPlantHandler` | Grid-scale power plants worldwide, one WRI release at a time |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
@@ -73,6 +72,7 @@ Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.m
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |
 | Google Earth Engine | `GEEProfiler` | Raster and vector collections in Google Earth Engine |
+| GloFAS historical | `GlofasHistoricalFetcher` | Daily river discharge, runoff, snow water equivalent, and soil wetness for a country |
 | GloFAS forecast | `GlofasForecastFetcher` | Operational river discharge, runoff, snow water equivalent, and soil wetness for a country, plus v4.0 auxiliary maps |
 
 ## Data store

@@ -28,7 +28,7 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, Ookla, a
 | `PEERINGDB_API_KEY` | PeeringDB facilities. Empty sends an anonymous request. |
 | `GEOREPO_API_KEY`, `GEOREPO_USER_EMAIL` | UNICEF GeoRepo boundaries |
 | `HDX_KEY` | Humanitarian Data Exchange (HDX) and Meta Relative Wealth Index (RWI) |
-| `EWDS_API_KEY` | GloFAS historical and forecast downloads on the CEMS Early Warning Data Store. Accept the dataset licence before downloading. Forecast auxiliary maps do not use this key. |
+| `EWDS_API_KEY` | GloFAS historical and forecast queries on the CEMS Early Warning Data Store. Accept the dataset licence before a time-series query. Auxiliary maps do not use this key. |
 | `GIGA_SCHOOL_LOCATION_API_KEY` | Giga school locations |
 | `GIGA_SCHOOL_PROFILE_API_KEY` | Giga school profiles |
 | `GIGA_SCHOOL_MEASUREMENTS_API_KEY` | Giga school connectivity measurements |
@@ -40,7 +40,7 @@ Set these only for the datasets you use. WorldPop, GHSL, OpenStreetMap, Ookla, a
 | Variable | Default | Used by |
 | --- | --- | --- |
 | `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | OpenStreetMap road networks. Set a mirror when the main server is down. |
-| `EWDS_API_URL` | `https://ewds.climate.copernicus.eu/api` | CEMS Early Warning Data Store API used by `GlofasHistoricalHandler` and `GlofasForecastFetcher`. |
+| `EWDS_API_URL` | `https://ewds.climate.copernicus.eu/api` | CEMS Early Warning Data Store API used by `GlofasHistoricalFetcher` and `GlofasForecastFetcher`. |
 | `HDX_USER_AGENT` | `giga-spatial/1.0` | Humanitarian Data Exchange (HDX) API requests. |
 
 ## Data stores
