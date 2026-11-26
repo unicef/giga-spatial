@@ -140,6 +140,54 @@ def test_result_survives_close(fetcher, stub_download):
         assert dataset.width == 20
 
 
+def test_clipped_result_is_readable_after_close(fetcher, stub_download):
+    data = fetcher.fetch(SMALL_SOURCE)
+    root = fetcher._root
+    fetcher.close()
+
+    assert not root.exists()
+    with data.open_dataset() as dataset:
+        values = dataset.read(1)
+        assert dataset.width < 20
+        assert dataset.height < 20
+        assert np.any(values == 1)
+
+
+def test_bad_zip_is_downloaded_again(fetcher, monkeypatch):
+    payloads = [b"not a zip", _archive_bytes()]
+    calls = []
+
+    def fake_stream_to_store(url, path, store, **kwargs):
+        calls.append((url, kwargs.get("md5")))
+        store.write_file(str(path), payloads.pop(0))
+        return path
+
+    monkeypatch.setattr(module, "stream_to_store", fake_stream_to_store)
+
+    data = fetcher.fetch()
+
+    assert calls == [(ARCHIVE_URL, ARCHIVE_MD5), (ARCHIVE_URL, ARCHIVE_MD5)]
+    assert payloads == []
+    with data.open_dataset() as dataset:
+        assert dataset.width == 20
+
+
+def test_a_second_bad_zip_raises(fetcher, monkeypatch):
+    calls = []
+
+    def fake_stream_to_store(url, path, store, **kwargs):
+        calls.append(url)
+        store.write_file(str(path), b"not a zip")
+        return path
+
+    monkeypatch.setattr(module, "stream_to_store", fake_stream_to_store)
+
+    with pytest.raises(zipfile.BadZipFile):
+        fetcher.fetch()
+
+    assert calls == [ARCHIVE_URL, ARCHIVE_URL]
+
+
 def test_closed_fetcher_raises(fetcher, stub_download):
     fetcher.close()
 
