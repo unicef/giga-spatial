@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **FLOPROS flood protection standards (`gigaspatial/handlers/flopros.py`)**
+    -   `FLOPROSHandler` keeps the subnational shapefile from the supplement of Scussolini et al. (2016) and loads it for a source as a GeoDataFrame. Standards are return periods in years. `MerL_Riv` is the merged riverine layer. Cropping uses the polygon geometry. CC BY 3.0.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
     -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**
@@ -77,6 +79,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **Cropping a GeoDataFrame (`gigaspatial/handlers/base/reader.py`)**
+    -   `crop_to_source` clips a GeoDataFrame on its geometry. A frame that already had geometries was sent through the latitude/longitude conversion, and a null geometry made that conversion fail and returned the frame uncropped.
 -   **`S2Cells.to_geodataframe` cell ID and geometry alignment (`gigaspatial/grid/s2.py`)**
     -   Fixed `S2Cells.to_geodataframe` building `cell_id`/`cell_token` from all `self.cells` while `to_geoms()` skipped cells that failed conversion or remained invalid after `buffer(0)`, which caused a `ValueError` length mismatch. Cell IDs, tokens, and geometries are now built together so skipped cells are dropped consistently from all columns and a warning is logged with the skipped count.
 -   **Consistent UTM CRS estimation routing in `gigaspatial/processing/geo.py`**

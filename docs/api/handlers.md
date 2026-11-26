@@ -151,6 +151,20 @@ Every handler is importable from `gigaspatial`. Its config, downloader, and read
         - ensure_data_available
         - get_available_data_info
 
+## FLOPROS
+
+`FLOPROSHandler` returns a GeoDataFrame of the subnational flood-protection standards in the supplement of Scussolini et al. (2016), [doi:10.5194/nhess-16-1049-2016](https://doi.org/10.5194/nhess-16-1049-2016). Protection standards are return periods in years. `MerL_Riv` is the merged riverine layer: the design layer where that layer has a value, otherwise the policy layer, otherwise the model layer.
+
+::: gigaspatial.handlers.flopros.FLOPROSHandler
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - load_data
+        - download_and_load
+        - ensure_data_available
+        - get_available_data_info
+
 ## OpenStreetMap roads
 
 `OSMRoadsHandler` returns a [`SpatialNetwork`](network.md) built from Geofabrik's extracts, the same network [`OSMRoadsFetcher`](fetchers.md) returns for the same area. It needs `pip install "giga-spatial[roads]"`; the [road networks guide](../user-guide/road-networks.md#whole-countries) explains which extracts a source uses and how they are stored.

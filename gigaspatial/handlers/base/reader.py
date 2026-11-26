@@ -227,17 +227,21 @@ class BaseHandlerReader(ABC):
                 .geometry[0]
             )
 
-        # Tabular (GeoDataFrame) case
-        if isinstance(data, (pd.DataFrame, gpd.GeoDataFrame)):
-            if isinstance(data, pd.DataFrame):
-                from gigaspatial.processing.geo import convert_to_geodataframe
+        # A GeoDataFrame is a DataFrame, so it has to be matched first. A frame
+        # that already has geometries is clipped on those geometries. Sending it
+        # through the latitude/longitude conversion fails when any geometry is
+        # null, and that failure used to return the frame uncropped.
+        if isinstance(data, gpd.GeoDataFrame):
+            return data[getattr(data.geometry, predicate)(geometry)]
 
-                try:
-                    data = convert_to_geodataframe(data, **kwargs)
-                except:
-                    return data
+        if isinstance(data, pd.DataFrame):
+            from gigaspatial.processing.geo import convert_to_geodataframe
 
-            # Clip to geometry
+            try:
+                data = convert_to_geodataframe(data, **kwargs)
+            except Exception:
+                return data
+
             return data[getattr(data.geometry, predicate)(geometry)]
 
         # Raster case
