@@ -69,6 +69,7 @@ Every fetcher is importable from `gigaspatial`. See [Fetchers](../api/fetchers.m
 | Giga schools | `GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher` | School locations, profiles, connectivity measurements, and country metadata from the Giga API |
 | Healthsites.io | `HealthSitesFetcher` | Health facility locations and attributes |
 | PeeringDB | `PeeringDBFetcher` | Facility locations and attributes from the PeeringDB API |
+| STORM tropical cyclone wind speeds | `STORMWindSpeedFetcher` | Global maximum wind speed (m/s) at fixed return periods, present day and 2050 RCP8.5 |
 | Overture Maps | `OvertureAmenityFetcher` | Amenity places from Overture Maps |
 | UNICEF SDGs | `UnicefDataFetcher` | UNICEF indicator and SDG datasets |
 | M-Lab | `MLabFetcher` | NDT7 internet speed test records in BigQuery |
