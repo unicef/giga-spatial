@@ -22,6 +22,7 @@ __getattr__, __dir__, _exports = attach(
         # handlers
         "gigaspatial.handlers.boundaries": ["AdminBoundaries"],
         "gigaspatial.handlers.ghsl": ["GHSLDataHandler"],
+        "gigaspatial.handlers.gshm": ["GSHMHandler"],
         "gigaspatial.handlers.google_open_buildings": ["GoogleOpenBuildingsHandler"],
         "gigaspatial.handlers.microsoft_global_buildings": ["MSBuildingsHandler"],
         "gigaspatial.handlers.google_ms_combined_buildings": [
@@ -108,6 +109,7 @@ if TYPE_CHECKING:
     from gigaspatial.core.io.writers import write_dataset
     from gigaspatial.handlers.boundaries import AdminBoundaries
     from gigaspatial.handlers.ghsl import GHSLDataHandler
+    from gigaspatial.handlers.gshm import GSHMHandler
     from gigaspatial.handlers.google_open_buildings import GoogleOpenBuildingsHandler
     from gigaspatial.handlers.microsoft_global_buildings import MSBuildingsHandler
     from gigaspatial.handlers.google_ms_combined_buildings import (

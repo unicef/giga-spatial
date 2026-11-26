@@ -43,6 +43,7 @@ Every handler is importable from `gigaspatial`. See [Handlers](../api/handlers.m
 | Copernicus CEMS | `CEMSFloodHazardHandler` | Global river flood hazard depth and water masks by return period |
 | WRI Aqueduct | `AqueductFloodHandler` | Coastal and riverine flood hazard rasters |
 | Global Power Plant Database | `GlobalPowerPlantHandler` | Grid-scale power plants worldwide, one WRI release at a time |
+| GEM Global Seismic Hazard Map | `GSHMHandler` | Global peak ground acceleration points (v2026.1). Pass `crop_to_source=True`; an uncropped load reads the full layer |
 | Administrative boundaries | `AdminBoundaries` | Country and subnational administrative boundary polygons |
 
 ## Fetcher
