@@ -3,6 +3,7 @@ import geopandas as gpd
 import h3
 from shapely.geometry import Polygon, Point, shape
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 from shapely.strtree import STRtree
 import json
 from pathlib import Path
@@ -172,7 +173,7 @@ class H3Hexagons(BaseModel):
         )
 
         if isinstance(geometry, Point):
-            return cls.from_points([geometry])
+            return cls.from_points([geometry], resolution=resolution, **kwargs)
 
         # Convert shapely geometry to GeoJSON-like format
         if hasattr(geometry, "__geo_interface__"):
@@ -548,11 +549,14 @@ class CountryH3Hexagons(H3Hexagons):
             f"Initializing H3 hexagons for country: {country} at resolution {resolution}"
         )
 
-        country_geom = AdminBoundaries.create(
+        geoms = AdminBoundaries.create(
             country_code=country,
             data_store=data_store,
             path=country_geom_path,
-        ).to_geoms()[0]
+        ).to_geoms()
+        if not geoms:
+            raise ValueError(f"No boundary geometry found for country: {country}")
+        country_geom = unary_union(geoms)
 
         hexagons = H3Hexagons.from_geometry(country_geom, resolution, contain=contain)
 

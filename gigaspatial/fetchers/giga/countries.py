@@ -40,7 +40,7 @@ class GigaCountriesFetcher:
     >>> df_mng = fetcher.fetch_countries(country_iso3_code="MNG")
     """
 
-    api_key: str = Field(default=global_config.GIGA_COUNTRIES_API_KEY)
+    api_key: str = Field(default=global_config.GIGA_COUNTRIES_API_KEY, repr=False)
     max_retries: int = Field(default=3, description="Max retry attempts on errors")
     logger: Optional[logging.Logger] = Field(default=None, repr=False)
 
