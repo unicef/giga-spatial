@@ -85,13 +85,13 @@ DEFAULT_MODEL = "constant"
 DEFAULT_RETURN_PERIOD = 100
 
 
-def filename(model: str, return_period: int) -> str:
+def _member_name(model: str, return_period: int) -> str:
     """Return the published GeoTIFF name for one model and return period."""
     return f"STORM_FIXED_RETURN_PERIODS_{model}_{return_period}_YR_RP.tif"
 
 
 @dataclass(config=ConfigDict(extra="forbid"), kw_only=True)
-class STORMFetcher:
+class STORMWindSpeedFetcher:
     """
     Fetch one STORM tropical cyclone wind-speed map into memory.
 
@@ -112,7 +112,7 @@ class STORMFetcher:
         timeout: Seconds to wait for the server between bytes.
 
     Examples:
-        >>> with STORMFetcher() as storm:
+        >>> with STORMWindSpeedFetcher() as storm:
         ...     present = storm.fetch()
         ...     future = storm.fetch("KEN", model="HadGEM3-GC31-HM", return_period=500)
     """
@@ -179,7 +179,7 @@ class STORMFetcher:
         self._closed = True
         shutil.rmtree(self._root, ignore_errors=True)
 
-    def __enter__(self) -> "STORMFetcher":
+    def __enter__(self) -> "STORMWindSpeedFetcher":
         return self
 
     def __exit__(self, *args) -> None:
@@ -194,7 +194,7 @@ class STORMFetcher:
 
     def _check_open(self) -> None:
         if self._closed:
-            raise RuntimeError("This STORMFetcher is closed")
+            raise RuntimeError("This STORMWindSpeedFetcher is closed")
 
     def _member(self, model: str, return_period: int) -> str:
         if model not in MODELS:
@@ -204,7 +204,7 @@ class STORMFetcher:
                 "return_period must be one of "
                 f"{RETURN_PERIODS}, got {return_period!r}"
             )
-        return filename(model, return_period)
+        return _member_name(model, return_period)
 
     def _extract(self, member_name: str) -> Path:
         try:

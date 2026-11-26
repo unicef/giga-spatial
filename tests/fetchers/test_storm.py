@@ -25,7 +25,7 @@ from shapely.geometry import box
 from gigaspatial.fetchers.storm import (
     ARCHIVE_MD5,
     ARCHIVE_URL,
-    STORMFetcher,
+    STORMWindSpeedFetcher,
 )
 import gigaspatial.fetchers.storm as module
 
@@ -36,7 +36,7 @@ RASTER_BOUNDS = (0.0, 0.0, 2.0, 2.0)
 
 @pytest.fixture
 def fetcher():
-    built = STORMFetcher(show_progress=False)
+    built = STORMWindSpeedFetcher(show_progress=False)
     yield built
     built.close()
 
@@ -62,9 +62,9 @@ def _tif_bytes() -> bytes:
 def _archive_bytes() -> bytes:
     """A zip with the members the offline tests extract, nested one directory down."""
     members = (
-        module.filename("constant", 100),
-        module.filename("constant", 50),
-        module.filename("HadGEM3-GC31-HM", 1000),
+        module._member_name("constant", 100),
+        module._member_name("constant", 50),
+        module._member_name("HadGEM3-GC31-HM", 1000),
     )
     payload = _tif_bytes()
     buffer = io.BytesIO()
@@ -111,7 +111,7 @@ def test_another_return_period_reuses_the_archive(fetcher, stub_download):
 
 
 def test_context_manager_removes_the_temp_dir(stub_download):
-    with STORMFetcher(show_progress=False) as fetcher:
+    with STORMWindSpeedFetcher(show_progress=False) as fetcher:
         root = fetcher._root
         data = fetcher.fetch()
 
@@ -121,7 +121,7 @@ def test_context_manager_removes_the_temp_dir(stub_download):
 
 
 def test_collected_fetcher_removes_the_temp_dir(stub_download):
-    fetcher = STORMFetcher(show_progress=False)
+    fetcher = STORMWindSpeedFetcher(show_progress=False)
     root = fetcher._root
     data = fetcher.fetch()
     del fetcher
