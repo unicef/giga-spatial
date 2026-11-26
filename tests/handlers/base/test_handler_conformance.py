@@ -31,6 +31,7 @@ HANDLER_MODULES = [
     "gigaspatial.handlers.ookla_speedtest",
     "gigaspatial.handlers.opencellid",
     "gigaspatial.handlers.hdx",
+    "gigaspatial.handlers.unosat",
     "gigaspatial.handlers.rwi",
     "gigaspatial.handlers.nasa.srtm",
     "gigaspatial.handlers.wri.aqueduct_flood",

@@ -56,6 +56,13 @@ __getattr__, __dir__, __all__ = attach(
             "HDXReader",
             "HDXHandler",
         ],
+        "gigaspatial.handlers.unosat": [
+            "UnosatConfig",
+            "UnosatDownloader",
+            "UnosatReader",
+            "UnosatHandler",
+            "UnosatResolveOptions",
+        ],
         "gigaspatial.handlers.cems.flood_hazard": [
             "CEMSFloodHazardConfig",
             "CEMSFloodHazardDownloader",
@@ -145,6 +152,13 @@ if TYPE_CHECKING:
         OpenCellIDHandler,
     )
     from gigaspatial.handlers.hdx import HDXConfig, HDXDownloader, HDXReader, HDXHandler
+    from gigaspatial.handlers.unosat import (
+        UnosatConfig,
+        UnosatDownloader,
+        UnosatReader,
+        UnosatHandler,
+        UnosatResolveOptions,
+    )
     from gigaspatial.handlers.cems.flood_hazard import (
         CEMSFloodHazardConfig,
         CEMSFloodHazardDownloader,

@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **UNOSAT historical disaster products (`gigaspatial/handlers/unosat.py`)**
+    -   `UnosatHandler` builds a country catalogue from the public UNOSAT products service and downloads the original files for every activation type the catalogue publishes.
+    -   Event dates come from GLIDE numbers. `created_at` stays the publication date. Satellite acquisition dates and "as of" observation dates are stored separately, and a missing date stays null.
+    -   A later run requests the catalogue again, downloads only new or changed files, and keeps a replaced file beside the new one.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
     -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**
