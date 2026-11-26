@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+-   **MERIT Hydro in the Earth Engine registry (`gigaspatial/fetchers/gee/datasets/builtin.py`)**
+    -   Added `merit_hydro` for the `MERIT/Hydro/v1_0_1` image: 3 arc-second global hydrography with elevation, flow direction, river width, permanent water, upstream drainage area, and height above nearest drainage. Licensed CC-BY-NC 4.0 or ODbL 1.0.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
     -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**
