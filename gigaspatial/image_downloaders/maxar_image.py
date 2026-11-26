@@ -21,6 +21,7 @@ except ImportError:
 
 
 from gigaspatial.grid.mercator_tiles import MercatorTiles
+from gigaspatial.core.http.redaction import redact_url, sanitize_exception
 from gigaspatial.core.io.data_store import DataStore
 from gigaspatial.core.io.local_data_store import LocalDataStore
 from gigaspatial.processing.geo import (
@@ -102,6 +103,17 @@ class MaxarConfig(BaseModel):
     def suffix(self) -> str:
         return f".{self.image_format.split('/')[1]}"
 
+    def __repr_args__(self):
+        for key, value in super().__repr_args__():
+            if key == "api_key":
+                yield key, "***" if value else ""
+            elif key == "bearer_token":
+                yield key, "***" if value else None
+            elif key == "base_url":
+                yield key, redact_url(str(value))
+            else:
+                yield key, value
+
 
 class MaxarImageDownloader:
 
@@ -167,6 +179,15 @@ class MaxarImageDownloader:
         # Initialize WMS with new authentication
         self.wms = self._initialize_wms()
 
+    def _secrets(self) -> Tuple[str, ...]:
+        """Return configured secret values for log and exception redaction."""
+        return tuple(
+            s for s in (self.config.api_key, self.config.bearer_token) if s
+        )
+
+    def __repr__(self) -> str:
+        return f"MaxarImageDownloader(config={self.config!r})"
+
     def _build_auth_headers(self) -> dict:
         """Build authentication headers based on config"""
         headers = {}
@@ -192,11 +213,15 @@ class MaxarImageDownloader:
             url = f"{url}?maxar_api_key={self.config.api_key}"
 
         # OWSLib may need headers passed differently
-        return WebMapService(
-            url,
-            version=self.config.wms_version,
-            headers=self.headers if self.headers else None,
-        )
+        try:
+            return WebMapService(
+                url,
+                version=self.config.wms_version,
+                headers=self.headers if self.headers else None,
+            )
+        except Exception as e:
+            sanitize_exception(e, self._secrets())
+            raise
 
     def _initialize_wfs(self):
         """Initialize WebFeatureService with authentication"""
@@ -212,11 +237,15 @@ class MaxarImageDownloader:
         if self.config.auth_method == "api_key" and self.config.api_key:
             wfs_url = f"{wfs_url}?maxar_api_key={self.config.api_key}"
 
-        return WebFeatureService(
-            wfs_url,
-            version="2.0.0",  # WFS 2.0.0 is the default and recommended
-            headers=self.headers if self.headers else None,
-        )
+        try:
+            return WebFeatureService(
+                wfs_url,
+                version="2.0.0",  # WFS 2.0.0 is the default and recommended
+                headers=self.headers if self.headers else None,
+            )
+        except Exception as e:
+            sanitize_exception(e, self._secrets())
+            raise
 
 
     def _download_single_image(self, bbox, output_path: Union[Path, str], size) -> bool:
@@ -250,14 +279,15 @@ class MaxarImageDownloader:
                 return True
 
             except Exception as e:
+                redacted_error = redact_url(str(e), self._secrets())
                 self.logger.warning(
-                    f"Attempt {attempt + 1} of downloading {output_path.name} failed: {str(e)}"
+                    f"Attempt {attempt + 1} of downloading {output_path.name} failed: {redacted_error}"
                 )
                 if attempt < self.config.max_retries - 1:
                     sleep(self.config.retry_delay)
                 else:
                     self.logger.warning(
-                        f"Failed to download {output_path.name} after {self.config.max_retries} attempts: {str(e)}"
+                        f"Failed to download {output_path.name} after {self.config.max_retries} attempts: {redacted_error}"
                     )
                     return False
 
@@ -328,7 +358,8 @@ class MaxarImageDownloader:
                     self.logger.warning(f"No metadata found for bbox {bbox}")
 
             except Exception as e:
-                self.logger.warning(f"Failed to save meta {str(e)}")
+                redacted_error = redact_url(str(e), self._secrets())
+                self.logger.warning(f"Failed to save meta {redacted_error}")
 
         return success
 
@@ -676,7 +707,9 @@ class MaxarImageDownloader:
             return gdf
 
         except Exception as e:
-            self.logger.error(f"Failed to get imagery meta {str(e)}")
+            sanitize_exception(e, self._secrets())
+            redacted_error = redact_url(str(e), self._secrets())
+            self.logger.error(f"Failed to get imagery meta {redacted_error}")
             raise
 
     def get_metadata_for_bbox(

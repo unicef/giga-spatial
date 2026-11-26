@@ -53,7 +53,9 @@ class PeeringDBFetcher:
     >>> facilities = fetcher.fetch_facilities(country="RW")
     """
 
-    api_key: str = Field(default_factory=lambda: global_config.PEERINGDB_API_KEY)
+    api_key: str = Field(
+        default_factory=lambda: global_config.PEERINGDB_API_KEY, repr=False
+    )
     user_agent: str = Field(default="giga-spatial/1.0", min_length=1)
     max_retries: int = Field(default=3, ge=0)
     min_interval_seconds: float = Field(default=2, ge=0)

@@ -119,7 +119,7 @@ class HealthSitesFetcher:
     """
 
     country: Optional[str] = Field(default=None, description="Country to filter")
-    api_key: str = Field(default=global_config.HEALTHSITES_API_KEY)
+    api_key: str = Field(default=global_config.HEALTHSITES_API_KEY, repr=False)
     extent: Optional[Tuple[float, float, float, float]] = Field(
         default=None, description="Bounding box as (minLng, minLat, maxLng, maxLat)"
     )

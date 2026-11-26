@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 -   **GEM Global Seismic Hazard Map (`gigaspatial/handlers/gshm.py`)**
     -   `GSHMHandler` downloads the GEM GSHM v2026.1 point GeoPackage (peak ground acceleration, 10% exceedance in 50 years, reference rock) from Zenodo and loads it for a geometry. The archive is global, so every source resolves to the same file. `crop_to_source=True` reads the points in the search geometry's bounds, then keeps those that intersect the geometry. Licence: CC BY-NC-SA 4.0.
+-   **MERIT Hydro in the Earth Engine registry (`gigaspatial/fetchers/gee/datasets/builtin.py`)**
+    -   Added `merit_hydro` for the `MERIT/Hydro/v1_0_1` image: 3 arc-second global hydrography with elevation, flow direction, river width, permanent water, upstream drainage area, and height above nearest drainage. Licensed CC-BY-NC 4.0 or ODbL 1.0.
 -   **Global Power Plant Database (`gigaspatial/handlers/wri/global_power_plant.py`)**
     -   `GlobalPowerPlantHandler` keeps one WRI release of the plant table and loads it for a source. The default release is 1.3.0; `version` also accepts 1.1.0 and 1.2.0, and that release is a directory in the stored path. Cropping uses `latitude` and `longitude`.
 -   **PeeringDB facilities (`gigaspatial/fetchers/peeringdb.py`)**
@@ -79,6 +81,29 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **`S2Cells.to_geodataframe` cell ID and geometry alignment (`gigaspatial/grid/s2.py`)**
+    -   Fixed `S2Cells.to_geodataframe` building `cell_id`/`cell_token` from all `self.cells` while `to_geoms()` skipped cells that failed conversion or remained invalid after `buffer(0)`, which caused a `ValueError` length mismatch. Cell IDs, tokens, and geometries are now built together so skipped cells are dropped consistently from all columns and a warning is logged with the skipped count.
+-   **Consistent UTM CRS estimation routing in `gigaspatial/processing/geo.py`**
+    -   Routed `buffer_geodataframe`, `add_area_in_meters`, `_count_polygons_per_zone`, and `_fractional_aggregation` through `estimate_utm_crs_with_fallback` instead of duplicating inline `EPSG:3857` fallback blocks. Valid high-latitude inputs already used the estimated UTM zone rather than Web Mercator; routing through the shared helper preserves `estimate_utm_crs_with_fallback`'s configurable `fallback_crs` parameter and adds consistent handling for empty GeoDataFrames and `None` returns from `estimate_utm_crs()`.
+    -   **Behavior change:** when `estimate_utm_crs()` returns `None` or receives an empty GeoDataFrame, `buffer_geodataframe`, `add_area_in_meters`, and fractional `aggregate_polygons_to_zones` now fall back cleanly via `estimate_utm_crs_with_fallback` instead of raising `ValueError` or `RuntimeError`.
+-   **Non-mutating inputs and deterministic tie-breaking in `gigaspatial/processing/geo.py`**
+    -   Fixed `annotate_with_admin_regions` mutating the caller's GeoDataFrame CRS in place when `crs` is `None`, resetting the caller's index, and failing or misaligning rows when a point intersects multiple administrative boundaries (such as on a shared border or overlapping boundary) or when pre-existing `admin1_id<suffix>`/`admin2_id<suffix>` columns collide in the spatial join. It now operates on a copy, drops pre-existing admin ID columns on the working copy with a warning, returns one row per input point in the original order with the original index, and resolves multi-boundary ties deterministically by ascending `(admin1_id<suffix>, admin2_id<suffix>)` with missing IDs sorted last.
+    -   Fixed `map_points_within_polygons` mutating `base_points_gdf` in place by writing `is_within` onto a copy and returning the new GeoDataFrame.
+-   **Country grid creation on multi-part boundaries (`gigaspatial/grid/h3.py`, `gigaspatial/grid/s2.py`, `gigaspatial/grid/mercator_tiles.py`)**
+    -   Fixed `CountryH3Hexagons.create`, `CountryS2Cells.create`, and `CountryMercatorTiles.create` indexing `.to_geoms()[0]`, which dropped islands and secondary polygons for multi-part countries. All three now union all returned boundary geometries with `shapely.ops.unary_union` (raising `ValueError` if no boundary geometry is found) so every part is covered.
+-   **`MercatorTiles` tuple coordinate order (`gigaspatial/grid/mercator_tiles.py`)**
+    -   Fixed `MercatorTiles.get_quadkeys_from_points` passing `(p[1], p[0])` to `mercantile.tile(lng, lat, zoom)` for tuple inputs, which silently swapped longitude and latitude relative to `Point(lon, lat)` inputs, its own docstring, and `H3Hexagons` / `S2Cells`.
+    -   **Behaviour change:** `MercatorTiles.get_quadkeys_from_points`, `MercatorTiles.from_points`, and `MercatorTiles.from_spatial` now interpret 2-tuples as `(lon, lat)` consistently with Shapely `Point`s, `H3Hexagons`, and `S2Cells`. Callers that previously passed `(lat, lon)` tuples to work around the bug must switch to `(lon, lat)`.
+-   **Single-`Point` geometry handling in `H3Hexagons.from_geometry` and `S2Cells.from_geometry` (`gigaspatial/grid/h3.py`, `gigaspatial/grid/s2.py`)**
+    -   Fixed `H3Hexagons.from_geometry` calling `cls.from_points([geometry])` without `resolution` or `**kwargs`, which raised `TypeError` for a single Shapely `Point`.
+    -   Fixed `S2Cells.from_geometry` dropping `**kwargs` when delegating a single Shapely `Point` to `cls.from_points`.
+-   **`MercatorTiles.from_spatial` unsupported source error (`gigaspatial/grid/mercator_tiles.py`)**
+    -   Replaced the bare `raise` in `MercatorTiles.from_spatial`'s fallback branch (which raised `RuntimeError: No active exception to reraise`) with a `TypeError` naming the accepted input types (`BaseGeometry`, `GeoDataFrame`, or iterable of `Point`s or `(lon, lat)` tuples).
+-   **`MercatorTiles.from_spatial` point dispatch (`gigaspatial/grid/mercator_tiles.py`)**
+    -   Fixed `MercatorTiles.from_spatial` passing `geometry=` instead of `points=` to `from_points`, which raised `TypeError` for lists of `(lon, lat)` tuples or Shapely `Point`s, and routed point `GeoDataFrame` inputs to `from_points` to match `H3Hexagons` and `S2Cells`.
+-   **Security: redact API tokens from URLs, logs, exceptions, and reprs (`gigaspatial/core/http/redaction.py`, `gigaspatial/image_downloaders/mapbox_image.py`, `gigaspatial/image_downloaders/maxar_image.py`, `gigaspatial/handlers/georepo.py`, `gigaspatial/core/http/client.py`, `gigaspatial/fetchers/healthsites.py`, `gigaspatial/handlers/opencellid.py`)**
+    -   Added shared `redact_url` and `sanitize_exception` helpers in `gigaspatial.core.http.redaction` to mask token-like query parameters (`access_token`, `token`, `api_key`, `key`, `connectid`, and prefixed variants) while leaving non-secret parameters untouched.
+    -   Redacted tokens from warning/error logs, raised exceptions, and `__repr__` outputs in `MapboxImageDownloader`, `MaxarConfig`, `MaxarImageDownloader`, `GeoRepoClient`, `BaseRestApiClient`, `HealthSitesFetcher`, `PeeringDBFetcher`, and the Giga API fetchers, and migrated `OpenCellIDConfig` / `OpenCellIDDownloader` onto the shared helpers. Outgoing HTTP requests continue to use the real credentials.
 -   **Custom `poi_id_column` validation and collision checks (`gigaspatial/generators/poi.py`)**
     -   Fixed `PoiViewGenerator` silently auto-generating `poi_0..N` or misnaming columns when a custom `poi_id_column` is missing from input data; missing non-default `poi_id_column` values or collisions with an existing `"poi_id"` column now raise `ValueError`.
 -   **Projected `GeoDataFrame` coordinate extraction (`gigaspatial/generators/poi.py`)**
