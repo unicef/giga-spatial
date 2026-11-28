@@ -34,6 +34,8 @@ def test_kigali_matches_osmnx(name, same_network):
 
 
 def test_filters_are_osmnx_filters():
+    # Drift alarm: a failure here means osmnx changed its network filters, so
+    # NETWORK_FILTERS and BUILD_VERSION in pbf.py must be updated to match.
     _overpass = pytest.importorskip("osmnx._overpass")
     for network_type, excluded in NETWORK_FILTERS.items():
         text = _overpass._get_network_filter(network_type)
@@ -55,6 +57,10 @@ def test_way_filter_rules():
     assert passes("all", highway="residential", access="private")
     assert not passes("all", highway="pedestrian", area="yes")
     assert passes("bike", highway="cycleway") and not passes("bike", highway="cycleway", bicycle="no")
+    for network_type in NETWORK_FILTERS:
+        assert not passes(network_type, highway="rest_area"), network_type
+        assert not passes(network_type, highway="services"), network_type
+        assert passes(network_type, highway="residential"), network_type
     with pytest.raises(ValueError, match="Unknown network_type"):
         way_filter("boat")
 

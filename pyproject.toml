@@ -123,7 +123,7 @@ hdx = [
     "hdx-python-api>=6.3.8"
 ]
 roads = [
-    "osmnx>=2.0",
+    "osmnx>=2.0.6",
     "osmium>=4.0"
 ]
 pandana = [
