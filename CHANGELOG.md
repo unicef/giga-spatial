@@ -82,6 +82,10 @@ All notable changes to this project will be documented in this file.
 -   **`GeometryBasedZonalViewGenerator` (`gigaspatial/generators/zonal/geometry.py`)**
     -   Turned `GeometryBasedZonalViewGenerator` into a thin subclass of `ZonalViewGenerator` that emits `DeprecationWarning` on instantiation; it will be removed in a later minor release.
 
+### Removed
+
+-   **Breaking:** removed `build_distance_graph` (deprecated in v0.11.1); use `SpatialNetwork.from_points` / `SpatialNetwork.from_point_sets` instead.
+
 ### Fixed
 
 -   **`OSMRoadsHandler` network filters aligned with osmnx 2.0.6 (`gigaspatial/handlers/osm/pbf.py`, `pyproject.toml`)**
