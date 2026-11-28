@@ -76,8 +76,8 @@ class BaseViewGenerator:
     ):
         if config is not None:
             warnings.warn(
-                f"{type(config).__name__} is deprecated and will be removed in a future "
-                "minor release; pass `ensure_available=` directly to the generator "
+                f"{type(config).__name__} is deprecated and will be removed in v0.13; "
+                "pass `ensure_available=` directly to the generator "
                 "constructor and a target file path directly to `save_view(path)`.",
                 DeprecationWarning,
                 stacklevel=3,
@@ -168,8 +168,8 @@ class BaseViewGenerator:
         if used_legacy_name or output_format is not None or raw_path.suffix == "":
             warnings.warn(
                 "Passing a bare view name or `output_format` to `save_view` is "
-                "deprecated; pass a target file path with extension (e.g., "
-                "`save_view('views/out.parquet')`) instead.",
+                "deprecated and will be removed in v0.13; pass a target file path with "
+                "extension (e.g., `save_view('views/out.parquet')`) instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -430,16 +430,16 @@ class BaseViewGenerator:
     ) -> tuple[int, int]:
         if dataset_year is not None:
             warnings.warn(
-                "'dataset_year' is deprecated and will be removed in a future minor "
-                "release; use 'year' instead.",
+                "'dataset_year' is deprecated and will be removed in v0.13; "
+                "use 'year' instead.",
                 DeprecationWarning,
                 stacklevel=3,
             )
             year = dataset_year
         if dataset_resolution is not None:
             warnings.warn(
-                "'dataset_resolution' is deprecated and will be removed in a future minor "
-                "release; use 'resolution' instead.",
+                "'dataset_resolution' is deprecated and will be removed in v0.13; "
+                "use 'resolution' instead.",
                 DeprecationWarning,
                 stacklevel=3,
             )
