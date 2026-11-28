@@ -23,10 +23,10 @@ Use it for humanitarian, development, connectivity, and climate analysis: map po
   - **Building footprints**: Google-Microsoft combined buildings (`GoogleMSBuildingsHandler`), Google Open Buildings (`GoogleOpenBuildingsHandler`), and Microsoft Global Buildings (`MSBuildingsHandler`)
   - **OpenStreetMap road networks**: country-scale road networks from Geofabrik extracts (`OSMRoadsHandler`)
   - **Socioeconomic and humanitarian**: Meta Relative Wealth Index (`RWIHandler`) and Humanitarian Data Exchange (`HDXHandler`)
-  - **Connectivity and infrastructure**: Ookla Speedtest tiles (`OoklaSpeedtestHandler`) and OpenCellID cell towers (`OpenCellIDHandler`)
-  - **Terrain and flood hazard**: NASA SRTM elevation (`NasaSRTMHandler`), Copernicus CEMS river flood hazard (`CEMSFloodHazardHandler`), and WRI Aqueduct flood hazard (`AqueductFloodHandler`)
+  - **Connectivity and infrastructure**: Ookla Speedtest tiles (`OoklaSpeedtestHandler`), OpenCellID cell towers (`OpenCellIDHandler`), and WRI Global Power Plant Database (`GlobalPowerPlantHandler`)
+  - **Terrain, climate, and hazards**: NASA SRTM elevation (`NasaSRTMHandler`), Copernicus CEMS river flood hazard (`CEMSFloodHazardHandler`), WRI Aqueduct flood hazard (`AqueductFloodHandler`), and GEM Global Seismic Hazard Map (`GSHMHandler`)
   - **Administrative boundaries**: `AdminBoundaries`
-- **[Fetchers](https://unicef.github.io/giga-spatial/latest/api/fetchers/)** query datasets served by an API or database: OpenStreetMap places (`OSMLocationFetcher`) and road networks (`OSMRoadsFetcher`), Giga schools (`GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher`), Healthsites.io (`HealthSitesFetcher`), Overture Maps amenities (`OvertureAmenityFetcher`), UNICEF SDG indicators (`UnicefDataFetcher`), M-Lab speed tests in BigQuery (`MLabFetcher`), and Google Earth Engine (`GEEProfiler`).
+- **[Fetchers](https://unicef.github.io/giga-spatial/latest/api/fetchers/)** query datasets served by an API or database: OpenStreetMap places (`OSMLocationFetcher`) and road networks (`OSMRoadsFetcher`), Giga schools (`GigaSchoolLocationFetcher`, `GigaSchoolProfileFetcher`, `GigaSchoolMeasurementsFetcher`, `GigaCountriesFetcher`), Healthsites.io (`HealthSitesFetcher`), PeeringDB (`PeeringDBFetcher`), STORM tropical cyclone wind speeds (`STORMWindSpeedFetcher`), Overture Maps amenities (`OvertureAmenityFetcher`), UNICEF SDG indicators (`UnicefDataFetcher`), M-Lab speed tests in BigQuery (`MLabFetcher`), and Google Earth Engine (`GEEProfiler`, including MERIT Hydro).
 - **[Generators](https://unicef.github.io/giga-spatial/latest/api/generators/)** map datasets onto points of interest (`PoiViewGenerator`) or zones (`ZonalViewGenerator`, `H3ViewGenerator`, `S2ViewGenerator`, `MercatorViewGenerator`, `AdminBoundariesViewGenerator`) and return a view.
 - **[Processing](https://unicef.github.io/giga-spatial/latest/user-guide/processing/)** provides raster (`TifProcessor`) and vector tools for the stored files.
 - **[Road networks](https://unicef.github.io/giga-spatial/latest/user-guide/road-networks/)**: `OSMRoadsFetcher` fetches OpenStreetMap roads for a source, `OSMRoadsHandler` builds them for whole countries from Geofabrik's extracts, and `SpatialNetwork` and `ConnectionPlanner` join schools or other points to them, find shortest paths, and plan the roads that connect a set of points.
@@ -83,6 +83,37 @@ schools = OSMLocationFetcher(country="RWA", location_types=["school"]).fetch_loc
 view = PoiViewGenerator(schools).map_wp_pop(country="RWA", map_radius_meters=1000)
 print(view[["population"]].head())
 ```
+
+### Download building footprints for a country
+
+Download combined Google Open Buildings and Microsoft Global Buildings footprints for a country and load them as a `GeoDataFrame`:
+
+```python
+from gigaspatial import GoogleMSBuildingsHandler
+
+buildings = GoogleMSBuildingsHandler()
+buildings.ensure_data_available("ATG")  # downloads country GeoParquet on first run; no API key needed
+gdf = buildings.load_data("ATG")
+print(len(gdf), gdf.columns.tolist())
+```
+
+Pass any ISO3 country code, a bounding box, or a polygon. Country files are cached in your data store so later runs read locally.
+
+### Load WorldPop population and aggregate to administrative regions
+
+Load a country's WorldPop population raster as a `TifProcessor` and sum population per administrative region:
+
+```python
+from gigaspatial import AdminBoundaries, WPPopulationHandler
+
+pop = WPPopulationHandler(year=2025, resolution=1000)
+raster = pop.load_data("RWA", merge_rasters=True)  # downloads GeoTIFF on first run; no API key needed
+provinces = AdminBoundaries.create("RWA", admin_level=1).to_geodataframe()
+provinces["population"] = raster.sample_by_polygons(provinces.geometry, stat="sum")
+print(provinces[["name", "population"]])
+```
+
+You can also sample at coordinates with `raster.sample_by_coordinates(...)`, or use `GHSLDataHandler(product="GHS_POP", year=2020, resolution=1000)` for Global Human Settlement Layer population.
 
 See [Combining datasets for a country](https://unicef.github.io/giga-spatial/latest/user-guide/country-datasets/) and [Population around points](https://unicef.github.io/giga-spatial/latest/user-guide/population-accessibility/) for more workflows.
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giga-spatial"
-description = "Acquires published geospatial datasets (WorldPop, GHSL, Google and Microsoft building footprints, OpenStreetMap, Relative Wealth Index, Ookla, Copernicus CEMS, WRI Aqueduct, SRTM, HDX) into a data store you control, loads them for a country or geometry, and maps them onto H3, S2, or Mercator grids, administrative boundaries, custom polygons, points of interest, and road networks for humanitarian, development, connectivity, and climate analysis."
+description = "Acquire and map published geospatial datasets across population (WorldPop, GHSL), building footprints, OpenStreetMap and roads, socioeconomic (Relative Wealth Index, HDX), climate and hazards (CEMS, Aqueduct, STORM, GEM seismic, SRTM elevation, MERIT Hydro), infrastructure (power plants, Overture), and connectivity (Ookla, OpenCellID, PeeringDB) onto H3, S2, admin boundaries, and points for humanitarian, infrastructure, and socioeconomic analysis."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -14,12 +14,12 @@ authors = [
 ]
 keywords = [
     "gigaspatial", "spatial", "geospatial", "gis", "remote sensing",
-    "data processing", "download", "openstreetmap", "osm", "ghsl",
+    "data processing", "download", "openstreetmap", "osm", "ghsl", "overture",
     "grid", "h3", "h3 hexagons", "s2", "mercator", "administrative boundaries",
-    "worldpop", "population", "buildings", "building footprints",
+    "worldpop", "population", "buildings", "building footprints", "building-footprints",
     "google open buildings", "microsoft buildings",
     "point of interest", "POI", "catchment", "zonal statistics",
-    "raster", "vector", "road network", "rwi", "ookla", "cems", "glofas", "flood hazard", "climate",
+    "raster", "vector", "road network", "rwi", "ookla", "cems", "glofas", "flood hazard", "climate", "climate-hazards",
     "humanitarian", "development", "connectivity", "school connectivity",
     "unicef", "giga", "mapping", "analysis", "python"
 ]

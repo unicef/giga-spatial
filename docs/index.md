@@ -9,13 +9,38 @@ GigaSpatial acquires published geospatial datasets, loads them for a source, and
 
 </div>
 
-```python
-from gigaspatial import H3ViewGenerator
+=== "Map onto H3 hexagons"
 
-zones = H3ViewGenerator(source="RWA", resolution=6)
-view = zones.map_wp_pop(country="RWA")
-print(view.head())
-```
+    ```python
+    from gigaspatial import H3ViewGenerator
+
+    zones = H3ViewGenerator(source="RWA", resolution=6)
+    view = zones.map_wp_pop(country="RWA")
+    print(view.head())
+    ```
+
+=== "Download building footprints"
+
+    ```python
+    from gigaspatial import GoogleMSBuildingsHandler
+
+    buildings = GoogleMSBuildingsHandler()
+    buildings.ensure_data_available("ATG")  # downloads country GeoParquet on first run; no API key needed
+    gdf = buildings.load_data("ATG")
+    print(len(gdf), gdf.columns.tolist())
+    ```
+
+=== "Aggregate WorldPop population"
+
+    ```python
+    from gigaspatial import AdminBoundaries, WPPopulationHandler
+
+    pop = WPPopulationHandler(year=2025, resolution=1000)
+    raster = pop.load_data("RWA", merge_rasters=True)  # downloads GeoTIFF on first run; no API key needed
+    provinces = AdminBoundaries.create("RWA", admin_level=1).to_geodataframe()
+    provinces["population"] = raster.sample_by_polygons(provinces.geometry, stat="sum")
+    print(provinces[["name", "population"]])
+    ```
 
 <div class="grid cards" markdown>
 

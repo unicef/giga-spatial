@@ -1,5 +1,5 @@
 site_name: "GigaSpatial"
-site_description: "Acquires published geospatial datasets into a data store you control, loads them for a source, and processes them."
+site_description: "Acquire and map published geospatial datasets across population (WorldPop, GHSL), building footprints, OpenStreetMap and roads, socioeconomic (Relative Wealth Index, HDX), climate and hazards (CEMS, Aqueduct, STORM, GEM seismic, SRTM elevation, MERIT Hydro), infrastructure (power plants, Overture), and connectivity (Ookla, OpenCellID, PeeringDB) onto H3, S2, admin boundaries, and points for humanitarian, infrastructure, and socioeconomic analysis."
 site_author: "Utku Can Ozturk"
 
 theme:
