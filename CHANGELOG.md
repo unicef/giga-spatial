@@ -83,6 +83,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+-   **`OSMRoadsHandler` network filters aligned with osmnx 2.0.6 (`gigaspatial/handlers/osm/pbf.py`, `pyproject.toml`)**
+    -   `OSMRoadsHandler` now excludes `rest_area` and `services` ways like `OSMRoadsFetcher` and osmnx >= 2.0.6; networks stored by older builds are rebuilt; the `roads` extra now needs `osmnx>=2.0.6`.
 -   **`S2Cells.to_geodataframe` cell ID and geometry alignment (`gigaspatial/grid/s2.py`)**
     -   Fixed `S2Cells.to_geodataframe` building `cell_id`/`cell_token` from all `self.cells` while `to_geoms()` skipped cells that failed conversion or remained invalid after `buffer(0)`, which caused a `ValueError` length mismatch. Cell IDs, tokens, and geometries are now built together so skipped cells are dropped consistently from all columns and a warning is logged with the skipped count.
 -   **Consistent UTM CRS estimation routing in `gigaspatial/processing/geo.py`**

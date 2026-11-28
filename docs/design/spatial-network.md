@@ -29,7 +29,7 @@ This page is not in the docs site navigation. The user-facing description is the
 
 Dependencies:
 
-- `giga-spatial[roads]` adds `osmnx>=2.0`. On Python 3.10, pip resolves osmnx 2.0.x; on 3.11 and newer, 2.1.x. Use only API common to both, and test both.
+- `giga-spatial[roads]` adds `osmnx>=2.0.6`. On Python 3.10, pip resolves osmnx 2.0.x; on 3.11 and newer, 2.1.x or 2.2.x. Use only API common across them, and test both.
 - `giga-spatial[pandana]` adds `pandana>=0.8`. It pulls in scikit-learn and PyTables, which is why it is a separate extra.
 - `[all]` includes both.
 - Core dependencies already cover the rest: numpy, pandas, geopandas, shapely, scipy, pyarrow, and networkx.

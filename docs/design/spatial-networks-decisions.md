@@ -332,7 +332,7 @@ The result on Rwanda's extract, current code:
 
 That is 22 times faster than the osmnx route, and both network types are under my 30 s target. `walk` is the largest of osmnx's presets except `all`, which I did not time.
 
-**Consequences and limits.** The library now owns osmnx's rules, so a change in osmnx would not reach it automatically. Decision 18 describes the tests that guard them. When the builder's output changes, `BUILD_VERSION` in `pbf.py` must be raised so stored networks are built again.
+**Consequences and limits.** The library now owns osmnx's rules, so a change in osmnx would not reach it automatically. Decision 18 describes the tests that guard them. When the builder's output changes, `BUILD_VERSION` in `pbf.py` must be raised so stored networks are built again. For example, updating `NETWORK_FILTERS` to match osmnx 2.0.6 (excluding `highway=rest_area` and `highway=services` across all six presets) raised `BUILD_VERSION` to 2 and the `roads` extra floor to `osmnx>=2.0.6`.
 
 ### Decision 16: the node location index
 

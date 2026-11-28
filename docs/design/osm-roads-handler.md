@@ -94,10 +94,10 @@ Two reads (ways, then their nodes) were measured against one (`benchmarks/osm_ro
 
 `drive_service` peaks at 1.6 GB of memory (`benchmarks/osm_roads/build_rwanda.py`).
 
-osmnx rules to reproduce exactly (osmnx 2.0.2):
+osmnx rules to reproduce exactly (osmnx 2.0.6):
 
 - Ways with nodes missing from the file are skipped with a warning; Geofabrik's extracts have none. osmnx would fail on them.
-- Every preset requires `highway`, excludes `area=yes`, and, except `all`, excludes `access=private`. The presets' excluded `highway` values and extra conditions are in `osmnx/_overpass.py` (`drive` 75–82, `drive_service` 85–92, `walk` 99–106, `bike` 110–115, `all_public` 119–123, `all` 127–130). Their conditions are Overpass `!~` patterns: unanchored regular expressions, and a way without the key passes (so `walk`'s `motor` also drops `motorway`).
+- Every preset requires `highway`, excludes `area=yes`, and, except `all`, excludes `access=private`. The presets' excluded `highway` values (including `rest_area` and `services` for all six presets since osmnx 2.0.6) and extra conditions are in `osmnx/_overpass.py`. Their conditions are Overpass `!~` patterns: unanchored regular expressions, and a way without the key passes (so `walk`'s `motor` also drops `motorway`).
 - `tags=` replaces Overpass's `custom_filter`: a dict of key to allowed values, such as `{"highway": ["primary", "secondary"]}`. A way must match every key; `None` allows any value. `tags=` networks are one-way where tagged, as osmnx's `custom_filter` networks are.
 - One-way: `oneway` in `{"yes", "true", "1", "-1", "reverse", "T", "F"}`, or `junction=roundabout`; `walk` is two-way everywhere. Reversed: `oneway` in `{"-1", "reverse", "T"}`, and the node order is reversed. Two-way ways get both directions, the reverse edges with `reversed=True`.
 - Kept tags: osmnx's `useful_tags_way` (`access`, `area`, `bridge`, `est_width`, `highway`, `junction`, `landuse`, `lanes`, `maxspeed`, `name`, `oneway`, `ref`, `service`, `tunnel`, `width`) and `useful_tags_node` (`highway`, `junction`, `railway`, `ref`). Consecutive duplicate nodes are dropped.
