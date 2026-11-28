@@ -84,7 +84,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
--   **Breaking:** removed `build_distance_graph` (deprecated in v0.11.1); use `SpatialNetwork.from_points` / `SpatialNetwork.from_point_sets` instead.
+-   **Breaking:** removed `build_distance_graph` (deprecated in v0.11.1); use `SpatialNetwork.from_points` or `SpatialNetwork.from_point_sets` instead.
 
 ### Fixed
 
