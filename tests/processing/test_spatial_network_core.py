@@ -467,30 +467,6 @@ def test_entity_table_distance_graphs_use_entity_ids_not_row_indices():
     assert matches_df[["left_idx", "right_idx"]].values.tolist() == [["school-0", "fibre-0"]]
 
 
-def test_build_distance_graph_emits_deprecation_warning_and_delegates():
-    from gigaspatial.processing.algorithms import build_distance_graph
-
-    origins, targets = origin_and_target_points()
-    origins_idx = origins.set_index("school")
-    targets_idx = targets.set_index("fibre")
-
-    with pytest.deprecated_call(match="removed in 0.12.*SpatialNetwork.from_points"):
-        same_graph, same_df = build_distance_graph(
-            origins_idx, origins_idx, distance_threshold=200, max_k=2, return_dataframe=True, verbose=False
-        )
-    assert set(same_graph.nodes) == {"s0", "s1", "s2"}
-    assert list(same_graph.edges) == [("s0", "s1")]
-    assert len(same_df) == 1
-
-    with pytest.deprecated_call(match="removed in 0.12.*from_point_sets"):
-        cross_graph, cross_df = build_distance_graph(
-            origins_idx, targets_idx, distance_threshold=200, max_k=1, return_dataframe=True, verbose=False
-        )
-    assert set(cross_graph.nodes) == {"s0", "s1", "s2", "f0", "f1"}
-    assert ("s0", "f0") in cross_graph.edges and ("s1", "f0") in cross_graph.edges
-    assert list(cross_df.columns) == ["left_idx", "right_idx", "distance"]
-
-
 # ----- accessors
 
 

@@ -12,7 +12,7 @@ class GeometryBasedZonalViewGenerator(ZonalViewGenerator[T]):
 
     def __init__(self, *args, **kwargs):
         warnings.warn(
-            "GeometryBasedZonalViewGenerator is deprecated and will be removed in a future minor release; use ZonalViewGenerator instead.",
+            "GeometryBasedZonalViewGenerator is deprecated and will be removed in v0.13; use ZonalViewGenerator instead.",
             DeprecationWarning,
             stacklevel=2,
         )
