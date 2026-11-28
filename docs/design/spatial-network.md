@@ -29,12 +29,12 @@ This page is not in the docs site navigation. The user-facing description is the
 
 Dependencies:
 
-- `giga-spatial[roads]` adds `osmnx>=2.0`. On Python 3.10, pip resolves osmnx 2.0.x; on 3.11 and newer, 2.1.x. Use only API common to both, and test both.
+- `giga-spatial[roads]` adds `osmnx>=2.0.6`.
 - `giga-spatial[pandana]` adds `pandana>=0.8`. It pulls in scikit-learn and PyTables, which is why it is a separate extra.
 - `[all]` includes both.
 - Core dependencies already cover the rest: numpy, pandas, geopandas, shapely, scipy, pyarrow, and networkx.
 - osmnx and pandana are imported only inside the functions that need them, following the Overture and DuckDB pattern: a module flag, and an `ImportError` naming the extra (`pip install 'giga-spatial[roads]'`). A bare `import gigaspatial` must not import either.
-- Python support stays at 3.10 and newer.
+- Python support requires 3.11 and newer (3.10 was dropped for v0.12).
 
 Configuration: add `OVERPASS_URL` to `gigaspatial/config.py`, with the default `https://overpass-api.de/api/interpreter`.
 
@@ -350,8 +350,8 @@ Each sub-task is its own chat and pull request, with tests, in this order. The f
 - A Geofabrik handler for country-scale road networks from `.osm.pbf` extracts, returning the same `SpatialNetwork`. Its design is now in [`osm-roads-handler.md`](osm-roads-handler.md), with ADRs 0006 and 0007; the notes below are the starting point it was designed from. This comes next, decided on 28 October 2026:
   - Users need both small areas and whole countries or provinces. Overpass suits the small ones; a country-scale Overpass fetch can take hours, exceed fair-use limits, and needs osmnx's networkx graph in memory (about 2.3 GB for unsimplified Rwanda).
   - It is a separate handler, not an option on `OSMRoadsFetcher`: an extract is a file kept in a data store and reused, which the glossary calls a handler.
-  - It reads extracts with pyosmium (`osmium`), added to `giga-spatial[roads]`; pyosmium has wheels for Python 3.10 to 3.14 on macOS, Linux, and Windows (pyrosm needs 3.11 or newer). It builds the node and edge tables directly, without osmnx or networkx, and uses `simplify`. The benchmark's route through OSM XML and osmnx took 300 s for Rwanda, most of it in osmnx; pyosmium filtered the extract in 22.5 s, and `simplify` takes 9 s.
+  - It reads extracts with pyosmium (`osmium`), added to `giga-spatial[roads]`; pyosmium has wheels for Python 3.11 to 3.14 on macOS, Linux, and Windows (at the time of design, pyrosm needed 3.11 or newer while the library still supported 3.10). It builds the node and edge tables directly, without osmnx or networkx, and uses `simplify`. The benchmark's route through OSM XML and osmnx took 300 s for Rwanda, most of it in osmnx; pyosmium filtered the extract in 22.5 s, and `simplify` takes 9 s.
   - Open questions for its design round: the class name; whether it returns exactly what `OSMRoadsFetcher` returns for the same area, which means reproducing osmnx's network-type filters and one-way rules; clipping to admin areas smaller than an extract; Geofabrik's split and combined countries (its `index-v1.json` lists ISO codes); and keeping stored extracts up to date.
   - The road networks guide says country-scale networks from Geofabrik are planned.
 - Isochrone polygons, centrality measures, and travel speeds.
-- Dropping Python 3.10 (end of life in October 2026) is a library-wide decision, outside this work.
+- Dropping Python 3.10 (end of life in October 2026) was decided for v0.12.

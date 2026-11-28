@@ -1,7 +1,7 @@
 """
 Road networks read from OpenStreetMap ``.osm.pbf`` files with pyosmium.
 
-``build_road_network`` returns the network osmnx 2.0.2 builds for the same
+``build_road_network`` returns the network osmnx 2.0.6 builds for the same
 ways, without osmnx or networkx: the same ways for each ``network_type``, the
 same nodes, edges, keys, one-way rules, kept tags, lengths, and
 ``street_count``. The rules reproduced here are in
@@ -32,7 +32,7 @@ from gigaspatial.processing.network import SpatialNetwork
 from gigaspatial.processing.network.attributes import normalize_attributes
 from gigaspatial.processing.network.geodesy import haversine
 
-# osmnx 2.0.2 settings.useful_tags_way and useful_tags_node.
+# osmnx 2.0.6 settings.useful_tags_way and useful_tags_node.
 USEFUL_TAGS_WAY = (
     "access",
     "area",
@@ -51,14 +51,14 @@ USEFUL_TAGS_WAY = (
     "width",
 )
 USEFUL_TAGS_NODE = ("highway", "junction", "railway", "ref")
-# osmnx 2.0.2 graph._add_paths.
+# osmnx 2.0.6 graph._add_paths.
 ONEWAY_VALUES = frozenset({"yes", "true", "1", "-1", "reverse", "T", "F"})
 REVERSED_VALUES = frozenset({"-1", "reverse", "T"})
 BIDIRECTIONAL_NETWORK_TYPES = frozenset({"walk"})
 
 _PRIVATE = ("access", "private")
 _NOT_AREA = ("area", "yes")
-# osmnx 2.0.2 _overpass._get_network_filter: every preset needs a highway tag,
+# osmnx 2.0.6 _overpass._get_network_filter: every preset needs a highway tag,
 # then excludes ways whose key matches the pattern, as Overpass "!~" does: an
 # unanchored regular expression, which a way without the key passes.
 NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
@@ -68,7 +68,7 @@ NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
         (
             "highway",
             "abandoned|bridleway|bus_guideway|construction|corridor|cycleway|elevator|escalator|footway|no|path|"
-            "pedestrian|planned|platform|proposed|raceway|razed|service|steps|track",
+            "pedestrian|planned|platform|proposed|raceway|razed|rest_area|service|services|steps|track",
         ),
         ("motor_vehicle", "no"),
         ("motorcar", "no"),
@@ -80,7 +80,7 @@ NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
         (
             "highway",
             "abandoned|bridleway|bus_guideway|construction|corridor|cycleway|elevator|escalator|footway|no|path|"
-            "pedestrian|planned|platform|proposed|raceway|razed|steps|track",
+            "pedestrian|planned|platform|proposed|raceway|razed|rest_area|services|steps|track",
         ),
         ("motor_vehicle", "no"),
         ("motorcar", "no"),
@@ -89,7 +89,11 @@ NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "walk": (
         _NOT_AREA,
         _PRIVATE,
-        ("highway", "abandoned|bus_guideway|construction|cycleway|motor|no|planned|platform|proposed|raceway|razed"),
+        (
+            "highway",
+            "abandoned|bus_guideway|construction|cycleway|motor|no|planned|platform|proposed|raceway|razed|"
+            "rest_area|services",
+        ),
         ("foot", "no"),
         ("service", "private"),
         ("sidewalk", "separate"),
@@ -103,7 +107,7 @@ NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
         (
             "highway",
             "abandoned|bus_guideway|construction|corridor|elevator|escalator|footway|motor|no|planned|platform|"
-            "proposed|raceway|razed|steps",
+            "proposed|raceway|razed|rest_area|services|steps",
         ),
         ("bicycle", "no"),
         ("service", "private"),
@@ -111,19 +115,19 @@ NETWORK_FILTERS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "all_public": (
         _NOT_AREA,
         _PRIVATE,
-        ("highway", "abandoned|construction|no|planned|platform|proposed|raceway|razed"),
+        ("highway", "abandoned|construction|no|planned|platform|proposed|raceway|razed|rest_area|services"),
         ("service", "private"),
     ),
     "all": (
         _NOT_AREA,
-        ("highway", "abandoned|construction|no|planned|platform|proposed|raceway|razed"),
+        ("highway", "abandoned|construction|no|planned|platform|proposed|raceway|razed|rest_area|services"),
     ),
 }
 
 # A file's header block sits in its first bytes, so its timestamp is read without the rest.
 HEADER_BYTES = 64 * 1024
 # Raised when the builder's output changes, so networks stored by an older build are built again.
-BUILD_VERSION = 1
+BUILD_VERSION = 2
 # A way crossing between extracts is in each of them; these columns tell that its edges are the same.
 _SAME_EDGE = ["u", "v", "osmid", "reversed"]
 # The in-memory index takes about 16 bytes per node in the file; above this
@@ -256,7 +260,7 @@ def build_road_network(
             "retain_all": True,
             "node_index": index.split(",", 1)[0],
             "pyosmium": _osmium_version(),
-            "osmnx_rules": "2.0.2",
+            "osmnx_rules": "2.0.6",
         },
     }
     network = _assemble(ways, bidirectional, built)
