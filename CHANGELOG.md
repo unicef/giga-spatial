@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+-   **Breaking:** dropped Python 3.10 (end of life 2026-10-01). giga-spatial now requires Python 3.11 or newer; pip keeps 3.10 users on v0.11.x.
 -   **Breaking change: `TifProcessor.reproject_to` removed in v0.12 (`gigaspatial/processing/tif_processor.py`)**
     -   Removed `reproject_to`, without a deprecation period, following the pre-1.0 precedent of ADR 0003. It returned a path, wrote to the local filesystem even when the processor's data store was not local, and compared CRSs as strings.
     -   **Migration:** use `to_crs(...).save_to_file(path)`, or keep the processor `to_crs(...)` returns.

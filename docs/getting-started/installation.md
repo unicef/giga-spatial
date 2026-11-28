@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide will walk you through the steps to install the `gigaspatial` package on your system. The package is compatible with Python 3.10 and above.
+This guide will walk you through the steps to install the `gigaspatial` package on your system. The package requires Python 3.11 or above.
 
 ## Prerequisites
 

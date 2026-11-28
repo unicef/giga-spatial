@@ -37,7 +37,7 @@ The full list of datasets is on the [Datasets](https://unicef.github.io/giga-spa
 
 ## Installation
 
-GigaSpatial requires Python 3.10 or above.
+GigaSpatial requires Python 3.11 or above.
 
 ```console
 pip install giga-spatial

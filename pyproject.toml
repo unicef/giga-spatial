@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "giga-spatial"
 description = "Acquires published geospatial datasets (WorldPop, GHSL, Google and Microsoft building footprints, OpenStreetMap, Relative Wealth Index, Ookla, Copernicus CEMS, WRI Aqueduct, SRTM, HDX) into a data store you control, loads them for a country or geometry, and maps them onto H3, S2, or Mercator grids, administrative boundaries, custom polygons, points of interest, and road networks for humanitarian, development, connectivity, and climate analysis."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [
@@ -32,7 +32,6 @@ classifiers = [
     "Intended Audience :: Telecommunications Industry",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

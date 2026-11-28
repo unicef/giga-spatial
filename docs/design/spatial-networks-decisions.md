@@ -22,7 +22,7 @@ All benchmarks ran on one laptop:
 | Python 3.10.11 | numpy 2.2.6, pandas 2.3.0, scipy 1.15.2, shapely 2.1.2, geopandas 1.1.4, pyarrow 17.0.0, networkx 3.3, osmnx 2.0.2, pandana 0.7, igraph 1.0.0, pyosmium 4.3.2 |
 | Python 3.14.6 | numpy 2.5.2, pandas 3.0.3, scipy 1.18.0, shapely 2.1.2, geopandas 1.1.4, pyarrow 23.0.1, networkx 3.6.1, pyosmium 4.3.2 |
 
-The spatial network benchmarks run on Python 3.10, where osmnx, pandana, and igraph are installed for the comparisons. The OSM road benchmarks run on Python 3.14, with pandas 3. The library supports both, and the test suite runs on both.
+The spatial network benchmarks ran on Python 3.10, where osmnx, pandana, and igraph were installed for the comparisons. The OSM road benchmarks ran on Python 3.14, with pandas 3. The library now requires Python 3.11 or newer (Python 3.10 was dropped for v0.12).
 
 The test networks are all Rwanda's drivable roads (osmnx's `drive_service` network type), from Geofabrik's Rwanda extract:
 
@@ -252,7 +252,7 @@ Writing the concept note's figures showed a bug in the first version. The two di
 
 Failed requests are retried with growing pauses, and the last error names the Overpass server and suggests a mirror. A query that finds no roads raises `ValueError` and is not retried. Areas above 50,000 km² log a warning that points to the handler. The osmnx settings for the server and timeout are set for the call and restored afterwards.
 
-**Consequences and limits.** The fetcher needs the internet and Overpass's goodwill. osmnx splits areas over 2,500 km² into several queries, and a country can take hours, which is why decision 12 exists. On Python 3.10 pip resolves osmnx 2.0, and on 3.11 and later 2.1, so the fetcher uses only what both provide.
+**Consequences and limits.** The fetcher needs the internet and Overpass's goodwill. osmnx splits areas over 2,500 km² into several queries, and a country can take hours, which is why decision 12 exists.
 
 ## Part 3: OSMRoadsHandler
 
@@ -305,7 +305,7 @@ The curated lists, of multi-country extracts and of corrected codes, are tested 
 
 **Options.** osmnx's `graph_from_xml`, after converting the extract to OSM XML; pyrosm; quackosm; or pyosmium to read the file, with our own code reproducing osmnx's rules.
 
-**Evidence.** The osmnx route took 300 s for simplified Rwanda: 22.5 s to filter the extract and write 314 MB of XML, and the rest in osmnx. pyrosm needs Python 3.11 or newer, and the library supports 3.10. quackosm converts extracts to GeoParquet features through DuckDB, a heavier dependency, and the network would still have to be built from those features. pyosmium is a thin layer over the C++ library libosmium, with wheels for Python 3.10 to 3.14 on macOS, Linux, and Windows. I only checked pyrosm's and quackosm's versions and wheels; I did not time them.
+**Evidence.** The osmnx route took 300 s for simplified Rwanda: 22.5 s to filter the extract and write 314 MB of XML, and the rest in osmnx. At the time of design, pyrosm needed Python 3.11 or newer while the library still supported 3.10. quackosm converts extracts to GeoParquet features through DuckDB, a heavier dependency, and the network would still have to be built from those features. pyosmium is a thin layer over the C++ library libosmium, with wheels for Python 3.10 to 3.14 on macOS, Linux, and Windows. I only checked pyrosm's and quackosm's versions and wheels; I did not time them.
 
 How to read the file, on Rwanda's extract (`read_strategies.py`, one process each):
 
@@ -388,7 +388,7 @@ Loading times on Rwanda, from stored networks (`load_rwanda.py`, current code):
 - Kigali split in two at a meridian and stored as two extracts, combined in either order, against the whole.
 - A live test (`pytest -m live`) that loads central Kigali through the handler and through the fetcher, and requires them to share at least 98% of their nodes, allowing for edits made to OpenStreetMap since the extract's date.
 
-The tests that need osmnx run on Python 3.10, where it is installed, and are skipped elsewhere. One cross-check needs no test: the handler's whole-country load of Rwanda, which keeps the largest connected part, has 125,058 nodes and 332,535 edges, exactly the simplified network osmnx built from the same extract.
+The tests that need osmnx run in environments where osmnx is installed, and are skipped elsewhere. One cross-check needs no test: the handler's whole-country load of Rwanda, which keeps the largest connected part, has 125,058 nodes and 332,535 edges, exactly the simplified network osmnx built from the same extract.
 
 The lesson of decision 17 is in the third point: a test that replays my understanding of osmnx can only confirm that understanding. Replaying osmnx's own code, and comparing with the fetcher live, is what catches a wrong understanding.
 
@@ -515,4 +515,4 @@ Open questions:
 - On dense random graphs, improved plans were up to 9% above the optimum (decision 22); key-vertex insertion is the next move to add if real data shows such gaps.
 - `SpatialNetwork.concat` keeps one edge per `(u, v, key)`. That is right for networks that share no ways, but OSM networks from overlapping areas should be combined like extracts are, and `concat` does not yet do that for networks from the fetcher.
 
-Deferred from the designs: isochrone polygons, centrality measures, and travel speeds; prize-collecting and capacitated connection plans, separate root networks, and a cost per cable; one entry point that chooses the fetcher or the handler by the size of the area; and dropping Python 3.10, which reached its end of life this month and is a decision for the whole library.
+Deferred from the designs: isochrone polygons, centrality measures, and travel speeds; prize-collecting and capacitated connection plans, separate root networks, and a cost per cable; and one entry point that chooses the fetcher or the handler by the size of the area. (Dropping Python 3.10, which reached end of life in October 2026, was decided for v0.12.)
